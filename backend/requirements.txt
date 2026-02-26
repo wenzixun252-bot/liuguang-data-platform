@@ -1,34 +1,34 @@
 # Web framework
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
+fastapi>=0.115,<1
+uvicorn[standard]>=0.34,<1
 
 # Async database
-sqlalchemy[asyncio]==2.0.36
-asyncpg==0.30.0
-pgvector==0.3.6
+sqlalchemy[asyncio]>=2.0.36,<3
+asyncpg>=0.30,<1
+pgvector>=0.3,<1
 
 # Database migrations
-alembic==1.14.1
+alembic>=1.14,<2
 
 # Configuration
-pydantic-settings==2.7.1
+pydantic-settings>=2.7,<3
 
 # Authentication
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
+python-jose[cryptography]>=3.3,<4
+passlib[bcrypt]>=1.7,<2
 
 # HTTP client (Feishu API, LLM API)
-httpx==0.28.1
+httpx>=0.28,<1
 
 # Feishu SDK
-larksuite-oapi==1.4.2
+lark-oapi>=1.5,<2
 
 # Task scheduling
-apscheduler==3.10.4
+apscheduler>=3.10,<4
 
 # LLM (OpenAI-compatible SDK for DeepSeek/Qwen)
-openai==1.58.1
+openai>=1.58,<2
 
 # Testing
-pytest==8.3.4
-pytest-asyncio==0.24.0
+pytest>=8.3,<9
+pytest-asyncio>=0.24,<1

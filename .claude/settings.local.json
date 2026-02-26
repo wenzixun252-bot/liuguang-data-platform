@@ -2,7 +2,23 @@
   "permissions": {
     "allow": [
       "Bash(git ls-tree:*)",
-      "Bash(git config:*)"
+      "Bash(git config:*)",
+      "Bash(where:*)",
+      "Bash(C:Users42437AppDataLocalPythonbinpython3.exe --version)",
+      "Bash(\"C:\\\\Users\\\\42437\\\\AppData\\\\Local\\\\Python\\\\bin\\\\python3.exe\" --version)",
+      "Bash(\"C:\\\\Users\\\\42437\\\\AppData\\\\Local\\\\Python\\\\bin\\\\python3.exe\" -m pip --version)",
+      "Bash(\"C:\\\\Users\\\\42437\\\\AppData\\\\Local\\\\Python\\\\bin\\\\python3.exe\" -m venv \"D:\\\\CC\\\\liuguang-data-platform\\\\backend\\\\.venv\")",
+      "Bash(\"D:\\\\CC\\\\liuguang-data-platform\\\\backend\\\\.venv\\\\Scripts\\\\python.exe\" -m pip install -r \"D:\\\\CC\\\\liuguang-data-platform\\\\backend\\\\requirements.txt\")",
+      "Bash(\"D:\\\\CC\\\\liuguang-data-platform\\\\backend\\\\.venv\\\\Scripts\\\\python.exe\" -m pip index versions larksuite-oapi)",
+      "Bash(\"D:\\\\CC\\\\liuguang-data-platform\\\\backend\\\\.venv\\\\Scripts\\\\python.exe\" -m pip index versions lark-oapi)",
+      "Bash(\".venv\\\\Scripts\\\\python.exe\":*)",
+      "Bash(\".venv\\\\Scripts\\\\python.exe\" -c \"\nfrom alembic.config import Config\nfrom alembic import command\nimport io, sys\n\nalembic_cfg = Config\\(''alembic.ini''\\)\n# 仅验证配置能加载，不实际连接数据库\nprint\\(''Alembic config loaded OK''\\)\nprint\\(''Script location:'', alembic_cfg.get_main_option\\(''script_location''\\)\\)\n\")",
+      "Bash(docker-compose up:*)",
+      "Bash(docker exec:*)",
+      "Bash(\".venv\\\\Scripts\\\\python.exe\" -m alembic revision --autogenerate -m \"init tables\")",
+      "Bash(\".venv\\\\Scripts\\\\python.exe\" -m alembic upgrade head)",
+      "Bash(curl:*)",
+      "Bash(\".venv\\\\Scripts\\\\python.exe\" -m alembic current)"
     ]
   }
 }
