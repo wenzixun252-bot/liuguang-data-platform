@@ -18,7 +18,14 @@
       "Bash(\".venv\\\\Scripts\\\\python.exe\" -m alembic revision --autogenerate -m \"init tables\")",
       "Bash(\".venv\\\\Scripts\\\\python.exe\" -m alembic upgrade head)",
       "Bash(curl:*)",
-      "Bash(\".venv\\\\Scripts\\\\python.exe\" -m alembic current)"
+      "Bash(\".venv\\\\Scripts\\\\python.exe\" -m alembic current)",
+      "Bash(pip install:*)",
+      "Bash(python:*)",
+      "Bash(python3:*)",
+      "Bash(/c/Users/ljadmin/AppData/Local/Microsoft/WindowsApps/python.exe:*)",
+      "Bash(cmd.exe:*)",
+      "Bash(winget:*)",
+      "Bash(export:*)"
     ]
   }
 }
