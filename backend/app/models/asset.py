@@ -76,3 +76,21 @@ class SchemaMappingCache(Base):
             unique=True,
         ),
     )
+
+
+class ETLDataSource(Base):
+    """本地数据源注册表 — 管理员在前端页面添加的飞书多维表格数据源。"""
+
+    __tablename__ = "etl_data_sources"
+    __table_args__ = (
+        Index("uq_etl_ds", "app_token", "table_id", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    app_token: Mapped[str] = mapped_column(String(128), nullable=False)
+    table_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    table_name: Mapped[str] = mapped_column(String(256), nullable=False, server_default="")
+    asset_type: Mapped[str] = mapped_column(String(32), nullable=False, server_default="conversation")
+    is_enabled: Mapped[bool] = mapped_column(nullable=False, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now(), onupdate=func.now())

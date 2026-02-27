@@ -19,11 +19,15 @@ class FeishuClient:
         self._app_access_token: str | None = None
         self._tenant_access_token: str | None = None
 
+    def _client(self) -> httpx.AsyncClient:
+        """创建不走系统代理的 httpx 客户端。"""
+        return httpx.AsyncClient(proxy=None, timeout=30.0)
+
     # ── 凭证获取 ───────────────────────────────────────────
 
     async def get_app_access_token(self) -> str:
         """获取应用凭证 (app_access_token)。"""
-        async with httpx.AsyncClient() as client:
+        async with self._client() as client:
             resp = await client.post(
                 f"{FEISHU_BASE_URL}/auth/v3/app_access_token/internal",
                 json={
@@ -42,7 +46,7 @@ class FeishuClient:
 
     async def get_tenant_access_token(self) -> str:
         """获取企业凭证 (tenant_access_token)。"""
-        async with httpx.AsyncClient() as client:
+        async with self._client() as client:
             resp = await client.post(
                 f"{FEISHU_BASE_URL}/auth/v3/tenant_access_token/internal",
                 json={
@@ -69,7 +73,7 @@ class FeishuClient:
         """
         app_access_token = await self.get_app_access_token()
 
-        async with httpx.AsyncClient() as client:
+        async with self._client() as client:
             # 1. 用 code 换取 user_access_token
             token_resp = await client.post(
                 f"{FEISHU_BASE_URL}/authen/v1/oidc/access_token",
@@ -132,7 +136,7 @@ class FeishuClient:
         if page_token:
             params["page_token"] = page_token
 
-        async with httpx.AsyncClient() as client:
+        async with self._client() as client:
             resp = await client.get(
                 f"{FEISHU_BASE_URL}/bitable/v1/apps/{app_token}/tables/{table_id}/records",
                 headers={"Authorization": f"Bearer {tenant_token}"},
@@ -150,7 +154,7 @@ class FeishuClient:
         """获取表的字段 Schema 定义。"""
         tenant_token = await self.get_tenant_access_token()
 
-        async with httpx.AsyncClient() as client:
+        async with self._client() as client:
             resp = await client.get(
                 f"{FEISHU_BASE_URL}/bitable/v1/apps/{app_token}/tables/{table_id}/fields",
                 headers={"Authorization": f"Bearer {tenant_token}"},
@@ -168,7 +172,7 @@ class FeishuClient:
         """获取应用下的所有表列表。"""
         tenant_token = await self.get_tenant_access_token()
 
-        async with httpx.AsyncClient() as client:
+        async with self._client() as client:
             resp = await client.get(
                 f"{FEISHU_BASE_URL}/bitable/v1/apps/{app_token}/tables",
                 headers={"Authorization": f"Bearer {tenant_token}"},

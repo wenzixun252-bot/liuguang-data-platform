@@ -34,7 +34,14 @@
       "Bash(docker:*)",
       "Bash(test:*)",
       "Bash(docker-compose exec:*)",
-      "Bash(taskkill:*)"
+      "Bash(taskkill:*)",
+      "Bash(alembic revision:*)",
+      "Bash(pip show:*)",
+      "Bash(ls:*)",
+      "Bash(/c/Users/ljadmin/AppData/Local/Programs/Python/Python312/Scripts/alembic.exe revision:*)",
+      "Bash(/c/Users/ljadmin/AppData/Local/Programs/Python/Python312/Scripts/alembic.exe upgrade:*)",
+      "Bash(/c/Users/ljadmin/AppData/Local/Programs/Python/Python312/python.exe:*)",
+      "Bash(tasklist:*)"
     ]
   }
 }

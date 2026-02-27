@@ -1,0 +1,201 @@
+{
+  "fields": [
+    {
+      "field_id": "fldccloyAu",
+      "field_name": "文件标识",
+      "is_extend": false,
+      "is_primary": true,
+      "is_synced": true,
+      "property": null,
+      "type": 1,
+      "ui_type": "Text"
+    },
+    {
+      "field_id": "fldjcsLTNu",
+      "field_name": "关键词",
+      "is_extend": false,
+      "is_primary": false,
+      "is_synced": false,
+      "property": {
+        "options": [
+          {
+            "color": 0,
+            "id": "opt1575859178",
+            "name": "数据资产治理路径"
+          }
+        ]
+      },
+      "type": 4,
+      "ui_type": "MultiSelect"
+    },
+    {
+      "field_id": "fldxqbFONW",
+      "field_name": "核心内容",
+      "is_extend": false,
+      "is_primary": false,
+      "is_synced": false,
+      "property": null,
+      "type": 1,
+      "ui_type": "Text"
+    },
+    {
+      "field_id": "fldfFSuZ8d",
+      "field_name": "文件名",
+      "is_extend": false,
+      "is_primary": false,
+      "is_synced": true,
+      "property": null,
+      "type": 1,
+      "ui_type": "Text"
+    },
+    {
+      "field_id": "fldiBBpohb",
+      "field_name": "文件所有者",
+      "is_extend": false,
+      "is_primary": false,
+      "is_synced": true,
+      "property": {
+        "multiple": true
+      },
+      "type": 11,
+      "ui_type": "User"
+    },
+    {
+      "field_id": "fld5Whj0uO",
+      "field_name": "文件类型",
+      "is_extend": false,
+      "is_primary": false,
+      "is_synced": true,
+      "property": {
+        "options": [
+          {
+            "color": 0,
+            "id": "opt1307603339",
+            "name": "快捷方式"
+          },
+          {
+            "color": 1,
+            "id": "opt1355250557",
+            "name": "新版文档"
+          }
+        ]
+      },
+      "type": 3,
+      "ui_type": "SingleSelect"
+    },
+    {
+      "field_id": "fldfVWJK0w",
+      "field_name": "父文件夹标识",
+      "is_extend": false,
+      "is_primary": false,
+      "is_synced": true,
+      "property": null,
+      "type": 1,
+      "ui_type": "Text"
+    },
+    {
+      "field_id": "fldgVUiWy0",
+      "field_name": "文件在浏览器中的 URL 链接",
+      "is_extend": false,
+      "is_primary": false,
+      "is_synced": true,
+      "property": null,
+      "type": 15,
+      "ui_type": "Url"
+    },
+    {
+      "field_id": "fldnJkpiSb",
+      "field_name": "快捷方式指向的原文件类型",
+      "is_extend": false,
+      "is_primary": false,
+      "is_synced": true,
+      "property": null,
+      "type": 1,
+      "ui_type": "Text"
+    },
+    {
+      "field_id": "fldygbXiC6",
+      "field_name": "快捷方式指向的原文件 token",
+      "is_extend": false,
+      "is_primary": false,
+      "is_synced": true,
+      "property": null,
+      "type": 1,
+      "ui_type": "Text"
+    },
+    {
+      "field_id": "fld5GiM2Dx",
+      "field_name": "文件创建时间",
+      "is_extend": false,
+      "is_primary": false,
+      "is_synced": true,
+      "property": {
+        "auto_fill": false,
+        "date_formatter": "yyyy-MM-dd HH:mm"
+      },
+      "type": 5,
+      "ui_type": "DateTime"
+    },
+    {
+      "field_id": "fldxjXAofs",
+      "field_name": "文件最近修改时间",
+      "is_extend": false,
+      "is_primary": false,
+      "is_synced": true,
+      "property": {
+        "auto_fill": false,
+        "date_formatter": "yyyy-MM-dd HH:mm"
+      },
+      "type": 5,
+      "ui_type": "DateTime"
+    },
+    {
+      "field_id": "fldnfoNU9C",
+      "field_name": "SourceID",
+      "is_extend": false,
+      "is_primary": false,
+      "is_synced": true,
+      "property": null,
+      "type": 1,
+      "ui_type": "Text"
+    }
+  ],
+  "records": {
+    "has_more": false,
+    "items": [
+      {
+        "fields": {
+          "SourceID": "NzYxMTQzNTQzODQ4NTU4OTE5NDpub2RjbmpVSE5iWTNNbnVnNDg1QXpiT1VRVWc6OWQ3ZmNiNDIwMTU2NzlkODBiYzdlNTNkMzM1MmNhOTA6MQ==",
+          "关键词": [
+            "数据资产治理路径"
+          ],
+          "快捷方式指向的原文件 token": "KTHyd9YqroB8eDxEeYScsaBynIc",
+          "快捷方式指向的原文件类型": "docx",
+          "文件创建时间": 1772067596000,
+          "文件名": "数据资产治理路径深度分析报告",
+          "文件在浏览器中的 URL 链接": {
+            "link": "https://vzyjg03bu3.feishu.cn/docx/KTHyd9YqroB8eDxEeYScsaBynIc",
+            "text": "https://vzyjg03bu3.feishu.cn/docx/KTHyd9YqroB8eDxEeYScsaBynIc"
+          },
+          "文件所有者": [
+            {
+              "avatar_url": "https://s1-imfile.feishucdn.com/static-resource/v1/v2_5a3c6b64-7000-4429-92f0-56b56ef763ag~?image_size=72x72&cut_type=default-face&quality=&format=jpeg&sticker_format=.webp",
+              "email": "wenzixun@az028.cn",
+              "en_name": "文梓旬",
+              "id": "ou_6fc8627b98c383bfa8a61d8c9cd440c5",
+              "name": "文梓旬"
+            }
+          ],
+          "文件最近修改时间": 1772080668000,
+          "文件标识": "nodcnjUHNbY3Mnug485AzbOUQUg",
+          "文件类型": "快捷方式",
+          "核心内容": "该报告围绕数据资产治理展开，阐述总体策略，分析数据资产理论架构、来源处理策略、外部获取渠道、金融化路径，最后给出战略行动建议。\n1. **执行摘要**\n    - 总体策略：业务赋能优先，内深外联，逐步推进数据资产金融化。先将原始数据升为数据资源，成熟后推进金融化甚至代币化。\n    - 内部治理：分核心业务域和职能域，结构化数据为审计和入表做准备，非结构化数据做 AI 语料库。\n    - 外部渠道：遵循结果导向和合规边界，优先拿指标等，以可信数据空间优先。\n    - 金融化：现阶段以赋能业务为核心，后续推进入表、增信、证券化等，RWA 作中长期储备。\n2. **数据资产理论架构与现状分析**\n    - 三层演进模型：原始数据是“矿石”，管理重点是合规采集和安全存储；数据资源是“半成品”，参与可信数据空间；数据资产是“产成品”，可入表和金融化运作。\n    - 定义视角：业务管理关注广义数据资产，财务关注狭义数据资产，协同路径是业务先行、财务跟进、不强求入表。\n    - 入表现状：A股上市企业入表集中在100 - 500亿规模，个人企业是主力军；非上市企业中地方国企主导，信息传输等行业领先，科技企业比例较高。入表非普适动作，多数企业应优先建设 L2 经营闭环和可审计体系。\n3. **数据资产内部来源与处理策略**\n    - 来源划分：职能管理域重合规提效，核心业务域是资产化主战场。\n    - 处理策略：结构化数据先用后表，释放业务价值后再考虑入表；非结构化数据作 AI 战略燃料，构建知识库和训练语料库。\n4. **数据资产外部来源**\n    - 交易权利：多数数据交易是让渡特定场景下的数据加工使用权等。\n    - 三大渠道\n        - 场外交易：高频定制但缺合规信用，难审计确认为无形资产，如阿里云 API 商品和宁波银行“电力看征信”指标数据包。\n        - 场内交易：合规性强，为资产入表提供证明，但准入审核严、周期长，如深圳和上海数据交易所案例。\n        - 可信数据空间：实现数据可用不可见，交易计算权和洞察结果使用权，如四川长虹、南方电网和南京城市案例。\n5. **数据资产金融化路径**\n    - 数据资产增信银行贷款：确定性强、普惠复制性高的金融变现路径。\n    - 数据知识产权证券化：适合有稳定授权许可收入的科技企业。\n    - RWA：境内严禁，境外严管，商业逻辑不成熟，是未来方向但非当前商机。\n6. **战略行动建议**\n    - 总体战略：业务赋能优先，内部数据治理区分业务和职能数据，数据形态区分结构化和非结构化数据；外部协作注重合规和低成本；RWA 作中长期储备。\n    - 具体计划：启动核心业务数据赋能敏捷专项，利用可信数据空间，稳步推进 RWA 并做好基础工作和条件验证。 ",
+          "父文件夹标识": "GDxifyQBTl3CWMdXiAzccUZkn0e"
+        },
+        "id": "recvcpmlDdP7E2",
+        "record_id": "recvcpmlDdP7E2"
+      }
+    ],
+    "total": 1
+  }
+}

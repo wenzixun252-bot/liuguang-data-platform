@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.models.asset import ETLSyncState
 from app.services.feishu import FeishuAPIError, feishu_client
 from app.utils.feishu_webhook import send_alert
@@ -27,47 +26,30 @@ class RegistryEntry:
 
 
 class RegistryReader:
-    """从飞书多维表格注册中心读取目标表信息。"""
+    """从本地数据库读取已启用的数据源配置。"""
 
     async def read(self) -> list[RegistryEntry]:
-        """读取注册中心，仅返回 is_enabled=True 的记录。"""
-        app_token = settings.etl_registry_app_token
-        table_id = settings.etl_registry_table_id
+        """从 etl_data_sources 表读取已启用的数据源。"""
+        from app.database import async_session
+        from app.models.asset import ETLDataSource
 
-        if not app_token or not table_id:
-            logger.warning("ETL 注册中心未配置 (app_token 或 table_id 为空)")
-            return []
+        async with async_session() as db:
+            result = await db.execute(
+                select(ETLDataSource).where(ETLDataSource.is_enabled == True)  # noqa: E712
+            )
+            rows = result.scalars().all()
 
-        try:
-            records = await feishu_client.list_all_bitable_records(app_token, table_id)
-        except FeishuAPIError as e:
-            logger.error("读取注册中心失败: %s", e)
-            await send_alert("注册中心读取失败", f"错误: {e}")
-            return []
-
-        entries: list[RegistryEntry] = []
-        for record in records:
-            fields = record.get("fields", {})
-            is_enabled = fields.get("is_enabled")
-            # 飞书多维表格复选框字段值可能是 True/False 或文本
-            if isinstance(is_enabled, bool) and not is_enabled:
-                continue
-            if isinstance(is_enabled, str) and is_enabled.lower() in ("false", "0", "no"):
-                continue
-
-            entry = RegistryEntry(
-                app_token=str(fields.get("app_token", "")),
-                table_id=str(fields.get("table_id", "")),
-                table_name=str(fields.get("table_name", "")),
-                asset_type=str(fields.get("asset_type", "conversation")),
+        entries = [
+            RegistryEntry(
+                app_token=row.app_token,
+                table_id=row.table_id,
+                table_name=row.table_name,
+                asset_type=row.asset_type,
                 is_enabled=True,
             )
-            if entry.app_token and entry.table_id:
-                entries.append(entry)
-            else:
-                logger.warning("注册中心记录缺少 app_token 或 table_id，已跳过: %s", fields)
-
-        logger.info("注册中心已读取 %d 条有效数据源", len(entries))
+            for row in rows
+        ]
+        logger.info("本地数据源已读取 %d 条", len(entries))
         return entries
 
 

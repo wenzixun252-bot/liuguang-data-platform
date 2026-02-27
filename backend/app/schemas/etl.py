@@ -32,3 +32,30 @@ class ETLTriggerResponse(BaseModel):
     """手动触发 ETL 的响应体。"""
     message: str
     sources_count: int
+
+
+class DataSourceCreate(BaseModel):
+    """创建数据源请求体。"""
+    app_token: str
+    table_id: str
+    table_name: str = ""
+    asset_type: str = "conversation"
+
+
+class DataSourceOut(BaseModel):
+    """数据源响应体。"""
+    id: int
+    app_token: str
+    table_id: str
+    table_name: str
+    asset_type: str
+    is_enabled: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class DataSourceToggle(BaseModel):
+    """启用/禁用数据源。"""
+    is_enabled: bool
