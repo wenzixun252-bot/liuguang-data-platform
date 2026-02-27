@@ -25,7 +25,12 @@
       "Bash(/c/Users/ljadmin/AppData/Local/Microsoft/WindowsApps/python.exe:*)",
       "Bash(cmd.exe:*)",
       "Bash(winget:*)",
-      "Bash(export:*)"
+      "Bash(export:*)",
+      "Bash(node:*)",
+      "Bash(npm create:*)",
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm run:*)"
     ]
   }
 }

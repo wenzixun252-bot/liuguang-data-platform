@@ -4,6 +4,10 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
+from app.api.assets import router as assets_router
+from app.logging_config import setup_logging
+
+setup_logging()
 from app.api.auth import router as auth_router
 from app.api.chat import router as chat_router
 from app.api.etl import router as etl_router
@@ -45,6 +49,7 @@ app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(etl_router)
 app.include_router(chat_router)
+app.include_router(assets_router)
 
 
 @app.get("/health", summary="健康检查")

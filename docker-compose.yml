@@ -11,6 +11,39 @@ services:
       POSTGRES_PASSWORD: postgres
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: liuguang-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: >
+      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: liuguang-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
 
 volumes:
   pgdata:

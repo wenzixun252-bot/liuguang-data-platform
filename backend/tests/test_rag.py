@@ -1,6 +1,6 @@
 """RAG 模块单元测试。"""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -95,7 +95,7 @@ class TestPermissionFiltering:
 
         searcher = VectorSearcher()
         mock_db = AsyncMock()
-        mock_result = AsyncMock()
+        mock_result = MagicMock()
         mock_result.fetchall.return_value = []
         mock_db.execute.return_value = mock_result
 
@@ -119,7 +119,7 @@ class TestPermissionFiltering:
 
         searcher = VectorSearcher()
         mock_db = AsyncMock()
-        mock_result = AsyncMock()
+        mock_result = MagicMock()
         mock_result.fetchall.return_value = []
         mock_db.execute.return_value = mock_result
 
