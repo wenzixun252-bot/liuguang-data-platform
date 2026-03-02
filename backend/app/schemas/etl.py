@@ -24,7 +24,7 @@ class RegistryEntryOut(BaseModel):
     app_token: str
     table_id: str
     table_name: str = ""
-    asset_type: str = "conversation"
+    asset_type: str = "document"
     is_enabled: bool = True
 
 
@@ -39,7 +39,7 @@ class DataSourceCreate(BaseModel):
     app_token: str
     table_id: str
     table_name: str = ""
-    asset_type: str = "conversation"
+    asset_type: str = "document"
 
 
 class DataSourceOut(BaseModel):
@@ -49,6 +49,7 @@ class DataSourceOut(BaseModel):
     table_id: str
     table_name: str
     asset_type: str
+    owner_id: str | None = None
     is_enabled: bool
     created_at: datetime
     updated_at: datetime
@@ -59,3 +60,22 @@ class DataSourceOut(BaseModel):
 class DataSourceToggle(BaseModel):
     """启用/禁用数据源。"""
     is_enabled: bool
+
+
+class DataSourceWithSyncOut(BaseModel):
+    """数据源 + 同步状态合并响应体。"""
+    id: int
+    app_token: str
+    table_id: str
+    table_name: str
+    asset_type: str
+    owner_id: str | None = None
+    owner_name: str | None = None
+    is_enabled: bool
+    created_at: datetime
+    updated_at: datetime
+    # 同步状态
+    last_sync_status: str | None = None
+    last_sync_time: datetime | None = None
+    records_synced: int | None = 0
+    error_message: str | None = None

@@ -59,9 +59,11 @@ def setup_logging() -> None:
     etl_handler.setLevel(logging.INFO)
     etl_handler.setFormatter(JSONFormatter())
 
-    # 仅 ETL 相关模块写入文件
+    # ETL 相关模块写入文件
     etl_logger = logging.getLogger("app.services.etl")
     etl_logger.addHandler(etl_handler)
+    worker_logger = logging.getLogger("app.worker")
+    worker_logger.addHandler(etl_handler)
 
     # 静默第三方库噪音
     logging.getLogger("httpx").setLevel(logging.WARNING)

@@ -15,6 +15,7 @@ from app.schemas.etl import (
     DataSourceCreate,
     DataSourceOut,
     DataSourceToggle,
+    DataSourceWithSyncOut,
     ETLTriggerResponse,
     SyncStateOut,
 )
@@ -95,6 +96,54 @@ async def delete_source(
     return {"message": "已删除"}
 
 
+@router.get("/sources-with-status", response_model=list[DataSourceWithSyncOut], summary="数据源+同步状态合并视图")
+async def list_sources_with_status(
+    _admin: Annotated[User, Depends(require_role(["admin"]))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[DataSourceWithSyncOut]:
+    """返回所有数据源及其对应的同步状态，一行一个数据源。"""
+    sources_result = await db.execute(select(ETLDataSource).order_by(ETLDataSource.id))
+    sources = sources_result.scalars().all()
+
+    # 预加载所有同步状态，以 (app_token, table_id) 为 key
+    states_result = await db.execute(select(ETLSyncState))
+    states_map: dict[tuple[str, str], ETLSyncState] = {}
+    for st in states_result.scalars().all():
+        states_map[(st.source_app_token, st.source_table_id)] = st
+
+    # 预加载用户名
+    from app.models.user import User as UserModel
+    owner_ids = {s.owner_id for s in sources if s.owner_id}
+    users_map: dict[str, str] = {}
+    if owner_ids:
+        users_result = await db.execute(
+            select(UserModel).where(UserModel.feishu_open_id.in_(owner_ids))
+        )
+        for u in users_result.scalars().all():
+            users_map[u.feishu_open_id] = u.name
+
+    merged: list[DataSourceWithSyncOut] = []
+    for s in sources:
+        state = states_map.get((s.app_token, s.table_id))
+        merged.append(DataSourceWithSyncOut(
+            id=s.id,
+            app_token=s.app_token,
+            table_id=s.table_id,
+            table_name=s.table_name,
+            asset_type=s.asset_type,
+            owner_id=s.owner_id,
+            owner_name=users_map.get(s.owner_id, None) if s.owner_id else None,
+            is_enabled=s.is_enabled,
+            created_at=s.created_at,
+            updated_at=s.updated_at,
+            last_sync_status=state.last_sync_status if state else None,
+            last_sync_time=state.last_sync_time if state else None,
+            records_synced=state.records_synced if state else 0,
+            error_message=state.error_message if state else None,
+        ))
+    return merged
+
+
 # ── 同步状态 & 触发 ──
 
 
@@ -103,7 +152,17 @@ async def get_sync_status(
     _admin: Annotated[User, Depends(require_role(["admin"]))],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> list[SyncStateOut]:
-    result = await db.execute(select(ETLSyncState).order_by(ETLSyncState.id))
+    # 只返回有对应数据源的同步状态，过滤掉孤立记录
+    result = await db.execute(
+        select(ETLSyncState).where(
+            ETLSyncState.source_app_token.in_(
+                select(ETLDataSource.app_token)
+            ),
+            ETLSyncState.source_table_id.in_(
+                select(ETLDataSource.table_id)
+            ),
+        ).order_by(ETLSyncState.id)
+    )
     return [SyncStateOut.model_validate(s) for s in result.scalars().all()]
 
 

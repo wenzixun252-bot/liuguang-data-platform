@@ -1,40 +1,12 @@
+"""ETL 相关模型 — 同步状态、Schema 缓存、数据源注册。"""
+
 from datetime import datetime
 
-from pgvector.sqlalchemy import Vector
 from sqlalchemy import CheckConstraint, Index, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.config import settings
 from app.database import Base
-
-
-class DataAsset(Base):
-    __tablename__ = "data_assets"
-    __table_args__ = (
-        CheckConstraint(
-            "asset_type IN ('conversation', 'meeting_note', 'document', 'other')",
-            name="ck_data_assets_type",
-        ),
-        Index("idx_assets_owner", "owner_id"),
-        Index("idx_assets_type", "asset_type"),
-        Index("idx_assets_tags", "asset_tags", postgresql_using="gin"),
-    )
-
-    feishu_record_id: Mapped[str] = mapped_column(String(128), primary_key=True)
-    owner_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    source_app_token: Mapped[str] = mapped_column(String(128), nullable=False)
-    source_table_id: Mapped[str | None] = mapped_column(String(128))
-    asset_type: Mapped[str] = mapped_column(String(32), nullable=False, server_default="conversation")
-    title: Mapped[str | None] = mapped_column(String(512))
-    content_text: Mapped[str] = mapped_column(Text, nullable=False)
-    content_vector = mapped_column(Vector(settings.embedding_dimension), nullable=True)
-    asset_tags: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
-    feishu_created_at: Mapped[datetime | None] = mapped_column()
-    feishu_updated_at: Mapped[datetime | None] = mapped_column()
-    synced_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
-    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now(), onupdate=func.now())
 
 
 class ETLSyncState(Base):
@@ -79,10 +51,14 @@ class SchemaMappingCache(Base):
 
 
 class ETLDataSource(Base):
-    """本地数据源注册表 — 管理员在前端页面添加的飞书多维表格数据源。"""
+    """数据源注册表 — 管理员或用户添加的飞书多维表格数据源。"""
 
     __tablename__ = "etl_data_sources"
     __table_args__ = (
+        CheckConstraint(
+            "asset_type IN ('document', 'meeting', 'chat_message')",
+            name="ck_etl_ds_asset_type",
+        ),
         Index("uq_etl_ds", "app_token", "table_id", unique=True),
     )
 
@@ -90,7 +66,8 @@ class ETLDataSource(Base):
     app_token: Mapped[str] = mapped_column(String(128), nullable=False)
     table_id: Mapped[str] = mapped_column(String(128), nullable=False)
     table_name: Mapped[str] = mapped_column(String(256), nullable=False, server_default="")
-    asset_type: Mapped[str] = mapped_column(String(32), nullable=False, server_default="conversation")
+    asset_type: Mapped[str] = mapped_column(String(32), nullable=False, server_default="document")
+    owner_id: Mapped[str | None] = mapped_column(String(64))
     is_enabled: Mapped[bool] = mapped_column(nullable=False, server_default="true")
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now(), onupdate=func.now())

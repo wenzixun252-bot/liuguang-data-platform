@@ -22,8 +22,8 @@ COPY alembic/ alembic/
 COPY alembic.ini .
 COPY app/ app/
 
-# 非 root 用户运行
-RUN useradd -m appuser
+# 创建上传和日志目录并设置非 root 用户
+RUN useradd -m appuser && mkdir -p /app/uploads /app/logs && chown -R appuser:appuser /app/uploads /app/logs
 USER appuser
 
 EXPOSE 8000

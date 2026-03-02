@@ -1,4 +1,4 @@
-"""RAG 检索引擎 — 权限感知的混合检索 (Vector + BM25 + RRF)。"""
+"""RAG 检索引擎 — 权限感知的跨三表混合检索 (Vector + BM25 + RRF)。"""
 
 import logging
 from dataclasses import dataclass, field
@@ -15,63 +15,74 @@ logger = logging.getLogger(__name__)
 class SearchResult:
     """单条检索结果。"""
 
-    feishu_record_id: str
+    id: int
+    source_table: str  # 'document' | 'meeting' | 'chat_message'
     title: str | None
     content_text: str
-    asset_type: str
     owner_id: str
     score: float = 0.0
+
+
+def _build_owner_filter(visible_ids: list[str] | None) -> tuple[str, dict]:
+    """构建 owner_id 过滤子句。"""
+    if visible_ids is None:
+        return "TRUE", {}
+    placeholders = ", ".join(f":vid_{i}" for i in range(len(visible_ids)))
+    params = {f"vid_{i}": vid for i, vid in enumerate(visible_ids)}
+    return f"owner_id IN ({placeholders})", params
 
 
 # ── 向量检索 ─────────────────────────────────────────────
 
 
 class VectorSearcher:
-    """权限感知的向量检索。"""
+    """权限感知的跨三表向量检索。"""
 
     async def search(
         self,
         query_text: str,
-        user_open_id: str,
-        user_role: str,
+        visible_ids: list[str] | None,
         db: AsyncSession,
         top_k: int = 10,
     ) -> list[SearchResult]:
-        """向量相似度检索，强制附加权限过滤。"""
         query_embedding = await llm_client.generate_embedding(query_text)
         vector_str = f"[{','.join(str(v) for v in query_embedding)}]"
 
-        is_privileged = user_role in ("admin", "executive")
+        owner_filter, owner_params = _build_owner_filter(visible_ids)
 
-        sql = text("""
-            SELECT feishu_record_id, title, content_text, asset_type, owner_id,
-                   content_vector <=> :query_vector AS distance
-            FROM data_assets
-            WHERE content_vector IS NOT NULL
-              AND (:is_privileged OR owner_id = :user_open_id)
+        sql = text(f"""
+            SELECT id, source_table, title, content_text, owner_id, distance FROM (
+                SELECT id, 'document' as source_table, title, content_text, owner_id,
+                       content_vector <=> :query_vector AS distance
+                FROM documents
+                WHERE content_vector IS NOT NULL AND {owner_filter}
+                UNION ALL
+                SELECT id, 'meeting' as source_table, title, content_text, owner_id,
+                       content_vector <=> :query_vector AS distance
+                FROM meetings
+                WHERE content_vector IS NOT NULL AND {owner_filter}
+                UNION ALL
+                SELECT id, 'chat_message' as source_table, NULL as title, content_text, owner_id,
+                       content_vector <=> :query_vector AS distance
+                FROM chat_messages
+                WHERE content_vector IS NOT NULL AND {owner_filter}
+            ) combined
             ORDER BY distance ASC
             LIMIT :top_k
         """)
 
-        result = await db.execute(
-            sql,
-            {
-                "query_vector": vector_str,
-                "is_privileged": is_privileged,
-                "user_open_id": user_open_id,
-                "top_k": top_k,
-            },
-        )
+        params = {"query_vector": vector_str, "top_k": top_k, **owner_params}
+        result = await db.execute(sql, params)
         rows = result.fetchall()
 
         return [
             SearchResult(
-                feishu_record_id=row.feishu_record_id,
+                id=row.id,
+                source_table=row.source_table,
                 title=row.title,
                 content_text=row.content_text,
-                asset_type=row.asset_type,
                 owner_id=row.owner_id,
-                score=1.0 / (1.0 + row.distance),  # 转为相似度分数
+                score=1.0 / (1.0 + row.distance),
             )
             for row in rows
         ]
@@ -81,50 +92,63 @@ class VectorSearcher:
 
 
 class BM25Searcher:
-    """权限感知的全文关键词检索 (PostgreSQL ts_vector + ts_rank_cd)。"""
+    """权限感知的跨三表全文关键词检索。"""
 
     async def search(
         self,
         query_text: str,
-        user_open_id: str,
-        user_role: str,
+        visible_ids: list[str] | None,
         db: AsyncSession,
         top_k: int = 10,
     ) -> list[SearchResult]:
-        """BM25 关键词检索。"""
-        is_privileged = user_role in ("admin", "executive")
+        owner_filter, owner_params = _build_owner_filter(visible_ids)
 
-        sql = text("""
-            SELECT feishu_record_id, title, content_text, asset_type, owner_id,
-                   ts_rank_cd(
-                       to_tsvector('simple', coalesce(title, '') || ' ' || content_text),
-                       plainto_tsquery('simple', :query)
-                   ) AS rank
-            FROM data_assets
-            WHERE to_tsvector('simple', coalesce(title, '') || ' ' || content_text)
-                  @@ plainto_tsquery('simple', :query)
-              AND (:is_privileged OR owner_id = :user_open_id)
+        sql = text(f"""
+            SELECT id, source_table, title, content_text, owner_id, rank FROM (
+                SELECT id, 'document' as source_table, title, content_text, owner_id,
+                       ts_rank_cd(
+                           to_tsvector('simple', coalesce(title, '') || ' ' || content_text),
+                           plainto_tsquery('simple', :query)
+                       ) AS rank
+                FROM documents
+                WHERE to_tsvector('simple', coalesce(title, '') || ' ' || content_text)
+                      @@ plainto_tsquery('simple', :query)
+                  AND {owner_filter}
+                UNION ALL
+                SELECT id, 'meeting' as source_table, title, content_text, owner_id,
+                       ts_rank_cd(
+                           to_tsvector('simple', coalesce(title, '') || ' ' || content_text),
+                           plainto_tsquery('simple', :query)
+                       ) AS rank
+                FROM meetings
+                WHERE to_tsvector('simple', coalesce(title, '') || ' ' || content_text)
+                      @@ plainto_tsquery('simple', :query)
+                  AND {owner_filter}
+                UNION ALL
+                SELECT id, 'chat_message' as source_table, NULL as title, content_text, owner_id,
+                       ts_rank_cd(
+                           to_tsvector('simple', content_text),
+                           plainto_tsquery('simple', :query)
+                       ) AS rank
+                FROM chat_messages
+                WHERE to_tsvector('simple', content_text)
+                      @@ plainto_tsquery('simple', :query)
+                  AND {owner_filter}
+            ) combined
             ORDER BY rank DESC
             LIMIT :top_k
         """)
 
-        result = await db.execute(
-            sql,
-            {
-                "query": query_text,
-                "is_privileged": is_privileged,
-                "user_open_id": user_open_id,
-                "top_k": top_k,
-            },
-        )
+        params = {"query": query_text, "top_k": top_k, **owner_params}
+        result = await db.execute(sql, params)
         rows = result.fetchall()
 
         return [
             SearchResult(
-                feishu_record_id=row.feishu_record_id,
+                id=row.id,
+                source_table=row.source_table,
                 title=row.title,
                 content_text=row.content_text,
-                asset_type=row.asset_type,
                 owner_id=row.owner_id,
                 score=float(row.rank),
             )
@@ -141,45 +165,43 @@ class HybridSearcher:
     def __init__(self, k: int = 60) -> None:
         self.vector_searcher = VectorSearcher()
         self.bm25_searcher = BM25Searcher()
-        self.k = k  # RRF 常数
+        self.k = k
 
     async def search(
         self,
         query_text: str,
-        user_open_id: str,
-        user_role: str,
+        visible_ids: list[str] | None,
         db: AsyncSession,
         top_k: int = 5,
     ) -> list[SearchResult]:
-        """执行混合检索并返回 RRF 排序结果。"""
-        # 两路并行检索（各取更多候选）
         vector_results = await self.vector_searcher.search(
-            query_text, user_open_id, user_role, db, top_k=top_k * 2
+            query_text, visible_ids, db, top_k=top_k * 2
         )
         bm25_results = await self.bm25_searcher.search(
-            query_text, user_open_id, user_role, db, top_k=top_k * 2
+            query_text, visible_ids, db, top_k=top_k * 2
         )
 
-        # RRF 融合
-        rrf_scores: dict[str, float] = {}
-        result_map: dict[str, SearchResult] = {}
+        # RRF 融合，key 为 (source_table, id) 元组
+        rrf_scores: dict[tuple, float] = {}
+        result_map: dict[tuple, SearchResult] = {}
 
         for rank, r in enumerate(vector_results):
-            rrf_scores[r.feishu_record_id] = rrf_scores.get(r.feishu_record_id, 0) + 1.0 / (self.k + rank + 1)
-            result_map[r.feishu_record_id] = r
+            key = (r.source_table, r.id)
+            rrf_scores[key] = rrf_scores.get(key, 0) + 1.0 / (self.k + rank + 1)
+            result_map[key] = r
 
         for rank, r in enumerate(bm25_results):
-            rrf_scores[r.feishu_record_id] = rrf_scores.get(r.feishu_record_id, 0) + 1.0 / (self.k + rank + 1)
-            if r.feishu_record_id not in result_map:
-                result_map[r.feishu_record_id] = r
+            key = (r.source_table, r.id)
+            rrf_scores[key] = rrf_scores.get(key, 0) + 1.0 / (self.k + rank + 1)
+            if key not in result_map:
+                result_map[key] = r
 
-        # 按 RRF 分数排序，取 top_k
-        sorted_ids = sorted(rrf_scores, key=rrf_scores.get, reverse=True)[:top_k]
+        sorted_keys = sorted(rrf_scores, key=rrf_scores.get, reverse=True)[:top_k]
 
         results = []
-        for rid in sorted_ids:
-            r = result_map[rid]
-            r.score = rrf_scores[rid]
+        for key in sorted_keys:
+            r = result_map[key]
+            r.score = rrf_scores[key]
             results.append(r)
 
         logger.info(

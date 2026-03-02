@@ -5,9 +5,18 @@ import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
-import Assets from './pages/Assets'
+import DataImport from './pages/DataImport'
+import Documents from './pages/Documents'
+import Meetings from './pages/Meetings'
+import Messages from './pages/Messages'
 import Chat from './pages/Chat'
 import ETLAdmin from './pages/ETLAdmin'
+import DepartmentAdmin from './pages/DepartmentAdmin'
+import Todos from './pages/Todos'
+import Reports from './pages/Reports'
+import ReportDetail from './pages/ReportDetail'
+import KnowledgeGraph from './pages/KnowledgeGraph'
+import LeadershipInsight from './pages/LeadershipInsight'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -30,13 +39,29 @@ export default function App() {
             }
           >
             <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/assets" element={<Assets />} />
+            <Route path="/import" element={<DataImport />} />
+            <Route path="/documents" element={<Documents />} />
+            <Route path="/meetings" element={<Meetings />} />
+            <Route path="/messages" element={<Messages />} />
             <Route path="/chat" element={<Chat />} />
+            <Route path="/todos" element={<Todos />} />
+            <Route path="/reports" element={<Reports />} />
+            <Route path="/reports/:id" element={<ReportDetail />} />
+            <Route path="/knowledge-graph" element={<KnowledgeGraph />} />
+            <Route path="/leadership-insight" element={<LeadershipInsight />} />
             <Route
               path="/admin/etl"
               element={
                 <ProtectedRoute requiredRole="admin">
                   <ETLAdmin />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/departments"
+              element={
+                <ProtectedRoute requiredRole="admin">
+                  <DepartmentAdmin />
                 </ProtectedRoute>
               }
             />

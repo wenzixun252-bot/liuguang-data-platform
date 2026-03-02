@@ -1,60 +1,81 @@
 import { useEffect, useState } from 'react'
-import { Database, FileText, MessageSquare, TrendingUp } from 'lucide-react'
+import { Database, FileText, Calendar, MessageSquare, TrendingUp, X } from 'lucide-react'
 import { PieChart, Pie, Cell, ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts'
+import { useNavigate } from 'react-router-dom'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
 
 interface AssetStats {
   total: number
-  by_type: Record<string, number>
+  by_table: Record<string, number>
   recent_trend: { date: string; count: number }[]
 }
 
-interface AssetItem {
-  feishu_record_id: string
-  title: string | null
-  asset_type: string
-  synced_at: string
+interface DetailItem {
+  id: number
+  title?: string | null
+  content_text?: string
+  sender?: string | null
+  created_at: string
 }
 
-const TYPE_COLORS: Record<string, string> = {
-  conversation: '#6366f1',
-  meeting_note: '#8b5cf6',
-  document: '#a78bfa',
-  other: '#c4b5fd',
+const TABLE_COLORS: Record<string, string> = {
+  documents: '#6366f1',
+  meetings: '#8b5cf6',
+  chat_messages: '#a78bfa',
 }
 
-const TYPE_LABELS: Record<string, string> = {
-  conversation: '会话',
-  meeting_note: '会议纪要',
-  document: '文档',
-  other: '其他',
+const TABLE_LABELS: Record<string, string> = {
+  documents: '文档',
+  meetings: '会议',
+  chat_messages: '聊天记录',
 }
 
-const TYPE_ICONS: Record<string, React.ReactNode> = {
-  conversation: <MessageSquare size={16} />,
-  meeting_note: <FileText size={16} />,
-  document: <Database size={16} />,
-  other: <FileText size={16} />,
+const TABLE_ICONS: Record<string, React.ReactNode> = {
+  documents: <FileText size={16} />,
+  meetings: <Calendar size={16} />,
+  chat_messages: <MessageSquare size={16} />,
+}
+
+const TABLE_ROUTES: Record<string, string> = {
+  documents: '/documents',
+  meetings: '/meetings',
+  chat_messages: '/messages',
+}
+
+const TABLE_APIS: Record<string, string> = {
+  documents: '/documents/list',
+  meetings: '/meetings/list',
+  chat_messages: '/chat-messages/list',
 }
 
 export default function Dashboard() {
   const [stats, setStats] = useState<AssetStats | null>(null)
-  const [recentAssets, setRecentAssets] = useState<AssetItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [detailModal, setDetailModal] = useState<{ table: string; items: DetailItem[] } | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const navigate = useNavigate()
 
   useEffect(() => {
-    Promise.all([
-      api.get('/assets/stats').catch(() => ({ data: null })),
-      api.get('/assets/list', { params: { page: 1, page_size: 10 } }).catch(() => ({ data: null })),
-    ])
-      .then(([statsRes, listRes]) => {
-        if (statsRes.data) setStats(statsRes.data)
-        if (listRes.data) setRecentAssets(listRes.data.items || [])
-      })
+    api.get('/assets/stats')
+      .then((res) => setStats(res.data))
       .catch(() => toast.error('加载数据失败'))
       .finally(() => setLoading(false))
   }, [])
+
+  const showDetail = async (table: string) => {
+    const apiPath = TABLE_APIS[table]
+    if (!apiPath) return
+    setDetailLoading(true)
+    try {
+      const res = await api.get(apiPath, { params: { page: 1, page_size: 10 } })
+      setDetailModal({ table, items: res.data.items })
+    } catch {
+      toast.error('加载明细失败')
+    } finally {
+      setDetailLoading(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -73,10 +94,10 @@ export default function Dashboard() {
   }
 
   const pieData = stats
-    ? Object.entries(stats.by_type).map(([key, value]) => ({
-        name: TYPE_LABELS[key] || key,
+    ? Object.entries(stats.by_table).map(([key, value]) => ({
+        name: TABLE_LABELS[key] || key,
         value,
-        color: TYPE_COLORS[key] || '#d1d5db',
+        color: TABLE_COLORS[key] || '#d1d5db',
       }))
     : []
 
@@ -87,18 +108,19 @@ export default function Dashboard() {
       {/* Stats cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
-          title="资产总数"
+          title="数据总量"
           value={stats?.total ?? 0}
           icon={<Database className="text-indigo-500" size={20} />}
           color="bg-indigo-50"
         />
-        {Object.entries(stats?.by_type || {}).slice(0, 3).map(([type, count]) => (
+        {Object.entries(stats?.by_table || {}).map(([table, count]) => (
           <StatCard
-            key={type}
-            title={TYPE_LABELS[type] || type}
+            key={table}
+            title={TABLE_LABELS[table] || table}
             value={count}
-            icon={<span className="text-purple-500">{TYPE_ICONS[type]}</span>}
+            icon={<span className="text-purple-500">{TABLE_ICONS[table]}</span>}
             color="bg-purple-50"
+            onClick={() => showDetail(table)}
           />
         ))}
       </div>
@@ -107,11 +129,14 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Pie chart */}
         <div className="bg-white rounded-xl shadow-sm p-6">
-          <h2 className="text-lg font-semibold text-gray-700 mb-4">资产类型分布</h2>
+          <h2 className="text-lg font-semibold text-gray-700 mb-4">数据分布</h2>
           {pieData.length > 0 ? (
             <ResponsiveContainer width="100%" height={250}>
               <PieChart>
-                <Pie data={pieData} cx="50%" cy="50%" innerRadius={60} outerRadius={90} dataKey="value" label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}>
+                <Pie data={pieData} cx="50%" cy="50%" innerRadius={60} outerRadius={90} dataKey="value" label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`} cursor="pointer" onClick={(_: unknown, index: number) => {
+                  const keys = Object.keys(stats?.by_table || {})
+                  if (keys[index]) showDetail(keys[index])
+                }}>
                   {pieData.map((entry, i) => (
                     <Cell key={i} fill={entry.color} />
                   ))}
@@ -120,7 +145,7 @@ export default function Dashboard() {
               </PieChart>
             </ResponsiveContainer>
           ) : (
-            <EmptyState text="暂无资产数据" />
+            <EmptyState text="暂无数据" />
           )}
         </div>
 
@@ -128,7 +153,7 @@ export default function Dashboard() {
         <div className="bg-white rounded-xl shadow-sm p-6">
           <h2 className="text-lg font-semibold text-gray-700 mb-4">
             <TrendingUp size={18} className="inline mr-2" />
-            近30天资产趋势
+            近30天趋势
           </h2>
           {stats?.recent_trend && stats.recent_trend.length > 0 ? (
             <ResponsiveContainer width="100%" height={250}>
@@ -146,47 +171,66 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Recent assets table */}
-      <div className="bg-white rounded-xl shadow-sm p-6">
-        <h2 className="text-lg font-semibold text-gray-700 mb-4">最近同步的资产</h2>
-        {recentAssets.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100">
-                  <th className="text-left py-3 px-2 text-gray-500 font-medium">标题</th>
-                  <th className="text-left py-3 px-2 text-gray-500 font-medium">类型</th>
-                  <th className="text-left py-3 px-2 text-gray-500 font-medium">同步时间</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentAssets.map((a) => (
-                  <tr key={a.feishu_record_id} className="border-b border-gray-50 hover:bg-gray-50">
-                    <td className="py-3 px-2 text-gray-800">{a.title || '无标题'}</td>
-                    <td className="py-3 px-2">
-                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-indigo-50 text-indigo-700">
-                        {TYPE_LABELS[a.asset_type] || a.asset_type}
-                      </span>
-                    </td>
-                    <td className="py-3 px-2 text-gray-500">
-                      {new Date(a.synced_at).toLocaleString('zh-CN')}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {/* Detail modal */}
+      {(detailModal || detailLoading) && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => setDetailModal(null)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[80vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+              <h2 className="text-lg font-semibold text-gray-800">
+                {detailModal ? `${TABLE_LABELS[detailModal.table] || detailModal.table}（最近10条）` : '加载中...'}
+              </h2>
+              <div className="flex items-center gap-2">
+                {detailModal && (
+                  <button
+                    onClick={() => { setDetailModal(null); navigate(TABLE_ROUTES[detailModal.table] || '/') }}
+                    className="px-3 py-1 bg-indigo-50 text-indigo-700 rounded-lg text-sm hover:bg-indigo-100"
+                  >
+                    查看全部
+                  </button>
+                )}
+                <button onClick={() => setDetailModal(null)} className="p-1 hover:bg-gray-100 rounded"><X size={20} /></button>
+              </div>
+            </div>
+            <div className="overflow-y-auto max-h-[60vh]">
+              {detailLoading ? (
+                <div className="p-8 text-center text-gray-400">加载中...</div>
+              ) : detailModal && detailModal.items.length > 0 ? (
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 sticky top-0">
+                    <tr>
+                      <th className="text-left py-3 px-4 text-gray-500 font-medium w-12">#</th>
+                      <th className="text-left py-3 px-4 text-gray-500 font-medium">{detailModal.table === 'chat_messages' ? '发送人' : '标题'}</th>
+                      <th className="text-left py-3 px-4 text-gray-500 font-medium">内容摘要</th>
+                      <th className="text-left py-3 px-4 text-gray-500 font-medium w-40">时间</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detailModal.items.map((item, i) => (
+                      <tr key={item.id} className="border-t border-gray-50 hover:bg-gray-50 cursor-pointer" onClick={() => { setDetailModal(null); navigate(TABLE_ROUTES[detailModal.table] || '/') }}>
+                        <td className="py-3 px-4 text-gray-400">{i + 1}</td>
+                        <td className="py-3 px-4 text-gray-800 font-medium truncate max-w-[200px]">
+                          {detailModal.table === 'chat_messages' ? (item.sender || '未知') : (item.title || '无标题')}
+                        </td>
+                        <td className="py-3 px-4 text-gray-500 truncate max-w-[300px]">{(item.content_text || '').slice(0, 80)}</td>
+                        <td className="py-3 px-4 text-gray-400 text-xs">{new Date(item.created_at).toLocaleString('zh-CN')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <div className="p-8 text-center text-gray-400">暂无数据</div>
+              )}
+            </div>
           </div>
-        ) : (
-          <EmptyState text="暂无同步资产" />
-        )}
-      </div>
+        </div>
+      )}
     </div>
   )
 }
 
-function StatCard({ title, value, icon, color }: { title: string; value: number; icon: React.ReactNode; color: string }) {
+function StatCard({ title, value, icon, color, onClick }: { title: string; value: number; icon: React.ReactNode; color: string; onClick?: () => void }) {
   return (
-    <div className="bg-white rounded-xl shadow-sm p-6">
+    <div className={`bg-white rounded-xl shadow-sm p-6 ${onClick ? 'cursor-pointer hover:shadow-md transition-shadow' : ''}`} onClick={onClick}>
       <div className="flex items-center gap-3">
         <div className={`p-2 rounded-lg ${color}`}>{icon}</div>
         <div>

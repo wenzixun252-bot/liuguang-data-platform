@@ -3,6 +3,12 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+# 接收构建参数，Vite 在 build 时静态替换 import.meta.env
+ARG VITE_FEISHU_APP_ID
+ARG VITE_FEISHU_REDIRECT_URI
+ENV VITE_FEISHU_APP_ID=$VITE_FEISHU_APP_ID
+ENV VITE_FEISHU_REDIRECT_URI=$VITE_FEISHU_REDIRECT_URI
+
 COPY package.json package-lock.json ./
 RUN npm ci
 

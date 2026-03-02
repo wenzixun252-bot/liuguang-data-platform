@@ -2,23 +2,39 @@ import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { getUser, clearAuth, isAdmin } from '../lib/auth'
 import {
   LayoutDashboard,
-  Database,
+  FileText,
+  Calendar,
+  MessageSquare,
   MessageCircle,
+  Upload,
   Settings,
+  Shield,
   LogOut,
   Menu,
   X,
+  CheckSquare,
+  ClipboardList,
+  Network,
+  UserSearch,
 } from 'lucide-react'
 import { useState } from 'react'
 
 const NAV_ITEMS = [
   { path: '/dashboard', label: '数据看板', icon: LayoutDashboard },
-  { path: '/assets', label: '数据资产', icon: Database },
+  { path: '/import', label: '数据导入', icon: Upload },
+  { path: '/documents', label: '文档', icon: FileText },
+  { path: '/meetings', label: '会议', icon: Calendar },
+  { path: '/messages', label: '聊天记录', icon: MessageSquare },
   { path: '/chat', label: '流光助手', icon: MessageCircle },
+  { path: '/todos', label: '智能待办', icon: CheckSquare },
+  { path: '/reports', label: '报告中心', icon: ClipboardList },
+  { path: '/knowledge-graph', label: '知识图谱', icon: Network },
+  { path: '/leadership-insight', label: '员工画像', icon: UserSearch },
 ]
 
 const ADMIN_NAV = [
   { path: '/admin/etl', label: 'ETL 管理', icon: Settings },
+  { path: '/admin/departments', label: '权限管理', icon: Shield },
 ]
 
 export default function Layout() {

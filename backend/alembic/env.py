@@ -8,7 +8,18 @@ from app.config import settings
 from app.database import Base
 
 # 导入所有模型，确保 Alembic 能发现它们
-from app.models import User, DataAsset, ETLSyncState, SchemaMappingCache  # noqa: F401
+from app.models import (  # noqa: F401
+    User,
+    ETLSyncState,
+    SchemaMappingCache,
+    ETLDataSource,
+    Document,
+    Meeting,
+    ChatMessage,
+    Department,
+    UserDepartment,
+    UserVisibilityOverride,
+)
 
 config = context.config
 if config.config_file_name is not None:

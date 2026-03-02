@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     feishu_app_id: str = ""
     feishu_app_secret: str = ""
     feishu_webhook_url: str = ""
+    feishu_base_domain: str = ""  # 如 "vzyjg03bu3.feishu.cn"，用于构建多维表格链接
 
     # ── ETL 注册中心 ──
     etl_registry_app_token: str = ""
@@ -37,10 +38,18 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-v3"
     embedding_dimension: int = 1536
 
+    # ── 视觉模型 (图片识别) ──
+    vision_llm_model: str = "Qwen/Qwen2.5-VL-72B-Instruct"
+
     # ── 流光助手 Agent LLM ──
     agent_llm_api_key: str = ""
     agent_llm_base_url: str = "https://api.deepseek.com/v1"
     agent_llm_model: str = "deepseek-chat"
+
+    # ── 文件上传 ──
+    upload_dir: str = "uploads"
+    max_upload_size_mb: int = 50
+    allowed_file_types: str = "pdf,docx,txt,csv,xlsx,png,jpg,jpeg"
 
 
 settings = Settings()

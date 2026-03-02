@@ -1,111 +1,62 @@
-"""数据资产管理接口 — 看板统计、列表、详情。"""
+"""统一看板统计接口 — 从三张表聚合统计数据。"""
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select, cast, Date
+from fastapi import APIRouter, Depends
+from sqlalchemy import cast, Date, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db
-from app.models.asset import DataAsset
+from app.api.deps import get_current_user, get_db, get_visible_owner_ids
+from app.models.chat_message import ChatMessage
+from app.models.document import Document
+from app.models.meeting import Meeting
 from app.models.user import User
-from app.schemas.asset import AssetListResponse, AssetOut, AssetStatsResponse
+from app.schemas.asset import AssetStatsResponse
 
-router = APIRouter(prefix="/api/assets", tags=["数据资产"])
-
-
-def _apply_rls(stmt, user: User):
-    """对查询附加行级安全过滤。"""
-    if user.role not in ("admin", "executive"):
-        stmt = stmt.where(DataAsset.owner_id == user.feishu_open_id)
-    return stmt
+router = APIRouter(prefix="/api/assets", tags=["统计"])
 
 
-@router.get("/stats", response_model=AssetStatsResponse, summary="资产统计")
+@router.get("/stats", response_model=AssetStatsResponse, summary="统一看板统计")
 async def get_asset_stats(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> AssetStatsResponse:
-    """返回当前用户的资产统计数据。"""
-    # 总数
-    total_stmt = select(func.count()).select_from(DataAsset)
-    total_stmt = _apply_rls(total_stmt, current_user)
-    total = (await db.execute(total_stmt)).scalar() or 0
+    """返回三张表的聚合统计数据。"""
+    visible_ids = await get_visible_owner_ids(current_user, db)
 
-    # 按类型分组
-    type_stmt = select(DataAsset.asset_type, func.count()).group_by(DataAsset.asset_type)
-    type_stmt = _apply_rls(type_stmt, current_user)
-    type_rows = (await db.execute(type_stmt)).all()
-    by_type = {row[0]: row[1] for row in type_rows}
+    async def _count(model) -> int:
+        stmt = select(func.count()).select_from(model)
+        if visible_ids is not None:
+            stmt = stmt.where(model.owner_id.in_(visible_ids))
+        return (await db.execute(stmt)).scalar() or 0
 
-    # 近30天趋势
-    thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+    doc_count = await _count(Document)
+    meeting_count = await _count(Meeting)
+    chat_count = await _count(ChatMessage)
+
+    total = doc_count + meeting_count + chat_count
+    by_table = {
+        "documents": doc_count,
+        "meetings": meeting_count,
+        "chat_messages": chat_count,
+    }
+
+    # 近30天趋势（基于 documents 表的 created_at）
+    thirty_days_ago = datetime.utcnow() - timedelta(days=30)
     trend_stmt = (
         select(
-            cast(DataAsset.synced_at, Date).label("date"),
+            cast(Document.created_at, Date).label("date"),
             func.count().label("count"),
         )
-        .where(DataAsset.synced_at >= thirty_days_ago)
-        .group_by(cast(DataAsset.synced_at, Date))
-        .order_by(cast(DataAsset.synced_at, Date))
+        .where(Document.created_at >= thirty_days_ago)
+        .group_by(cast(Document.created_at, Date))
+        .order_by(cast(Document.created_at, Date))
     )
-    trend_stmt = _apply_rls(trend_stmt, current_user)
+    if visible_ids is not None:
+        trend_stmt = trend_stmt.where(Document.owner_id.in_(visible_ids))
+
     trend_rows = (await db.execute(trend_stmt)).all()
     recent_trend = [{"date": str(row[0]), "count": row[1]} for row in trend_rows]
 
-    return AssetStatsResponse(total=total, by_type=by_type, recent_trend=recent_trend)
-
-
-@router.get("/list", response_model=AssetListResponse, summary="资产列表")
-async def list_assets(
-    current_user: Annotated[User, Depends(get_current_user)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    search: str | None = Query(None),
-    asset_type: str | None = Query(None),
-) -> AssetListResponse:
-    """分页查询资产列表，支持搜索和类型筛选。"""
-    base = select(DataAsset)
-    base = _apply_rls(base, current_user)
-
-    count_stmt = select(func.count()).select_from(DataAsset)
-    count_stmt = _apply_rls(count_stmt, current_user)
-
-    if search:
-        like_pattern = f"%{search}%"
-        search_filter = DataAsset.title.ilike(like_pattern) | DataAsset.content_text.ilike(like_pattern)
-        base = base.where(search_filter)
-        count_stmt = count_stmt.where(search_filter)
-
-    if asset_type:
-        base = base.where(DataAsset.asset_type == asset_type)
-        count_stmt = count_stmt.where(DataAsset.asset_type == asset_type)
-
-    total = (await db.execute(count_stmt)).scalar() or 0
-
-    items_stmt = base.order_by(DataAsset.synced_at.desc()).offset((page - 1) * page_size).limit(page_size)
-    rows = (await db.execute(items_stmt)).scalars().all()
-
-    return AssetListResponse(
-        items=[AssetOut.model_validate(r) for r in rows],
-        total=total,
-        page=page,
-        page_size=page_size,
-    )
-
-
-@router.get("/{record_id}", response_model=AssetOut, summary="资产详情")
-async def get_asset_detail(
-    record_id: str,
-    current_user: Annotated[User, Depends(get_current_user)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> AssetOut:
-    """获取单条资产详情。"""
-    stmt = select(DataAsset).where(DataAsset.feishu_record_id == record_id)
-    stmt = _apply_rls(stmt, current_user)
-    row = (await db.execute(stmt)).scalar_one_or_none()
-    if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="资产不存在或无权访问")
-    return AssetOut.model_validate(row)
+    return AssetStatsResponse(total=total, by_table=by_table, recent_trend=recent_trend)

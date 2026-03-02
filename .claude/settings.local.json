@@ -41,7 +41,28 @@
       "Bash(/c/Users/ljadmin/AppData/Local/Programs/Python/Python312/Scripts/alembic.exe revision:*)",
       "Bash(/c/Users/ljadmin/AppData/Local/Programs/Python/Python312/Scripts/alembic.exe upgrade:*)",
       "Bash(/c/Users/ljadmin/AppData/Local/Programs/Python/Python312/python.exe:*)",
-      "Bash(tasklist:*)"
+      "Bash(tasklist:*)",
+      "Bash(where python:*)",
+      "Bash(conda info:*)",
+      "Bash(\"C:\\\\Users\\\\ljadmin\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\python.exe\":*)",
+      "Bash(\"$PY\":*)",
+      "Bash(\"$PYEXE\":*)",
+      "Bash(\"$PYPATH\":*)",
+      "Bash(TaskStop bcqlxn1i8:*)",
+      "Bash(netstat:*)",
+      "WebSearch",
+      "WebFetch(domain:open.feishu.cn)",
+      "Bash(alembic upgrade:*)",
+      "Bash(powershell.exe:*)",
+      "Bash(echo:*)",
+      "Bash(NO_PROXY=localhost,127.0.0.1 curl:*)",
+      "Bash(PGPASSWORD=postgres psql:*)",
+      "Bash(docker-compose build:*)",
+      "Bash(docker-compose logs:*)",
+      "Bash(npx vite:*)",
+      "Bash(__NEW_LINE_2b891aac1930c66d__ echo:*)",
+      "Bash(__NEW_LINE_674fbfb9a00a51f7__ echo:*)",
+      "WebFetch(domain:github.com)"
     ]
   }
 }

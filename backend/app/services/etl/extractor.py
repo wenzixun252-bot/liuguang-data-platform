@@ -2,7 +2,7 @@
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,8 +21,9 @@ class RegistryEntry:
     app_token: str
     table_id: str
     table_name: str = ""
-    asset_type: str = "conversation"
+    asset_type: str = "document"
     is_enabled: bool = True
+    owner_id: str | None = None
 
 
 class RegistryReader:
@@ -46,6 +47,7 @@ class RegistryReader:
                 table_name=row.table_name,
                 asset_type=row.asset_type,
                 is_enabled=True,
+                owner_id=row.owner_id,
             )
             for row in rows
         ]
@@ -70,6 +72,7 @@ class IncrementalExtractor:
         self,
         entry: RegistryEntry,
         db: AsyncSession,
+        user_access_token: str | None = None,
     ) -> ExtractionResult:
         """对指定数据源执行增量拉取。
 
@@ -103,22 +106,30 @@ class IncrementalExtractor:
         sync_state.last_sync_status = "running"
         await db.commit()
 
-        # 构建增量过滤条件 (飞书多维表格用毫秒时间戳)
-        filter_expr = None
-        epoch = datetime(1970, 1, 2, tzinfo=timezone.utc)
-        if last_sync_time and last_sync_time > epoch:
-            ts_ms = int(last_sync_time.timestamp() * 1000)
-            filter_expr = f'CurrentValue.[最后更新时间] > {ts_ms}'
-
         try:
             # 获取源表 Schema
             schema_fields = await feishu_client.get_bitable_fields(
-                entry.app_token, entry.table_id
+                entry.app_token, entry.table_id,
+                user_access_token=user_access_token,
             )
 
-            # 拉取增量记录
+            # 尝试构建增量过滤条件
+            # 查找 schema 中是否有"最后更新时间"相关的字段
+            filter_expr = None
+            epoch = datetime(1970, 1, 2)
+            if last_sync_time and last_sync_time > epoch:
+                ts_ms = int(last_sync_time.timestamp() * 1000)
+                time_field = self._find_update_time_field(schema_fields)
+                if time_field:
+                    filter_expr = f'CurrentValue.[{time_field}] > {ts_ms}'
+                    logger.info("使用增量过滤: %s > %d", time_field, ts_ms)
+                else:
+                    logger.info("未找到时间字段，全量拉取: %s/%s", entry.app_token, entry.table_id)
+
+            # 拉取记录
             records = await feishu_client.list_all_bitable_records(
-                entry.app_token, entry.table_id, filter_expr=filter_expr
+                entry.app_token, entry.table_id, filter_expr=filter_expr,
+                user_access_token=user_access_token,
             )
 
             logger.info(
@@ -135,7 +146,7 @@ class IncrementalExtractor:
                 table_id=entry.table_id,
             )
 
-        except FeishuAPIError as e:
+        except (FeishuAPIError, Exception) as e:
             logger.error("增量抽取失败: %s", e)
             sync_state.last_sync_status = "failed"
             sync_state.error_message = str(e)
@@ -145,6 +156,24 @@ class IncrementalExtractor:
                 f"数据源: `{entry.app_token}/{entry.table_id}`\n错误: {e}",
             )
             return ExtractionResult(app_token=entry.app_token, table_id=entry.table_id)
+
+
+    @staticmethod
+    def _find_update_time_field(schema_fields: list[dict]) -> str | None:
+        """在 schema 中查找更新时间相关字段。"""
+        time_keywords = ["最后更新时间", "更新时间", "修改时间", "最近修改", "updated", "last_modified"]
+        field_names = [f.get("field_name", "") for f in schema_fields]
+        # 精确匹配
+        for kw in time_keywords:
+            for fn in field_names:
+                if fn == kw:
+                    return fn
+        # 包含匹配
+        for kw in time_keywords:
+            for fn in field_names:
+                if kw in fn.lower():
+                    return fn
+        return None
 
 
 # 模块级单例

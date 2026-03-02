@@ -28,6 +28,11 @@ services:
       - "8000:8000"
     env_file:
       - ./backend/.env
+    environment:
+      # 容器内连接数据库用服务名，覆盖 .env 中的 localhost
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/liuguang
+    volumes:
+      - uploads:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -38,6 +43,10 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        # 构建时注入前端环境变量（Vite 在构建时静态替换）
+        VITE_FEISHU_APP_ID: ${VITE_FEISHU_APP_ID:-}
+        VITE_FEISHU_REDIRECT_URI: ${VITE_FEISHU_REDIRECT_URI:-}
     container_name: liuguang-frontend
     restart: unless-stopped
     ports:
@@ -47,3 +56,4 @@ services:
 
 volumes:
   pgdata:
+  uploads:

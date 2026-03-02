@@ -35,4 +35,4 @@ class TokenResponse(BaseModel):
 
 class RoleUpdateRequest(BaseModel):
     """修改用户角色请求体。"""
-    role: Literal["employee", "executive", "admin"]
+    role: Literal["employee", "admin"]

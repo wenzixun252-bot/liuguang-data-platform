@@ -53,6 +53,8 @@ async def feishu_callback(
             name=user_info["name"],
             avatar_url=user_info.get("avatar_url"),
             email=user_info.get("email"),
+            feishu_access_token=user_info.get("access_token"),
+            feishu_refresh_token=user_info.get("refresh_token"),
         )
         db.add(user)
     else:
@@ -60,6 +62,8 @@ async def feishu_callback(
         user.name = user_info["name"]
         user.avatar_url = user_info.get("avatar_url") or user.avatar_url
         user.email = user_info.get("email") or user.email
+        user.feishu_access_token = user_info.get("access_token")
+        user.feishu_refresh_token = user_info.get("refresh_token")
 
     await db.commit()
     await db.refresh(user)

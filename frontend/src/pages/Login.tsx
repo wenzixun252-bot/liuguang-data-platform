@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { getFeishuAuthUrl } from '../lib/feishu'
 import { setAuth, getToken } from '../lib/auth'
@@ -9,6 +9,7 @@ export default function Login() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const [loading, setLoading] = useState(false)
+  const codeHandled = useRef(false)
 
   // 已登录直接跳转
   useEffect(() => {
@@ -17,10 +18,11 @@ export default function Login() {
     }
   }, [navigate])
 
-  // 处理飞书回调 code
+  // 处理飞书回调 code（防止 StrictMode 双重执行导致 code 被消费两次）
   useEffect(() => {
     const code = searchParams.get('code')
-    if (!code) return
+    if (!code || codeHandled.current) return
+    codeHandled.current = true
 
     setLoading(true)
     api
@@ -32,6 +34,7 @@ export default function Login() {
         navigate('/dashboard', { replace: true })
       })
       .catch((err) => {
+        codeHandled.current = false
         toast.error(err.response?.data?.detail || '登录失败，请重试')
       })
       .finally(() => setLoading(false))
