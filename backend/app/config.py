@@ -22,6 +22,9 @@ class Settings(BaseSettings):
     etl_registry_table_id: str = ""
     etl_cron_minutes: int = 30
 
+    # ── 系统超管（不可被降级）──
+    super_admin_open_id: str = "ou_6fc8627b98c383bfa8a61d8c9cd440c5"
+
     # ── JWT ──
     jwt_secret_key: str = "change-me-in-production"
     jwt_algorithm: str = "HS256"

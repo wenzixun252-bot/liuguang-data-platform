@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -10,10 +11,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
-from app.models.asset import ETLDataSource, ETLSyncState
+from app.models.asset import ETLDataSource, ETLSyncState, CloudFolderSource
+from app.models.document import Document
 from app.models.user import User
 from app.schemas.etl import DataSourceOut, DataSourceWithSyncOut
 from app.services.feishu import FeishuAPIError, feishu_client
+from app.services.cloud_doc_import import cloud_doc_import_service
 from app.worker.tasks import etl_sync_job
 
 logger = logging.getLogger(__name__)
@@ -306,3 +309,296 @@ async def add_feishu_sources_batch(
         created.append(DataSourceOut.model_validate(ds))
 
     return created
+
+
+# ── 云文档/文件导入 ─────────────────────────────────────────
+
+class CloudDocInfo(BaseModel):
+    """云文档/文件发现信息。"""
+    token: str
+    name: str
+    doc_type: str  # "docx", "doc", "file"
+    modified_time: str | None = None
+    already_imported: bool = False
+
+
+class CloudDocImportRequest(BaseModel):
+    """云文档批量导入请求。"""
+    items: list[dict]  # [{token, name, type}, ...]
+
+
+class CloudDocImportResponse(BaseModel):
+    """云文档导入结果。"""
+    imported: int
+    skipped: int
+    failed: int
+
+
+class CloudFolderCreate(BaseModel):
+    """云文件夹源创建请求。"""
+    folder_token: str
+    folder_name: str = ""
+
+
+class CloudFolderOut(BaseModel):
+    """云文件夹源输出。"""
+    id: int
+    folder_token: str
+    folder_name: str
+    owner_id: str
+    is_enabled: bool
+    last_sync_time: datetime | None = None
+    last_sync_status: str
+    files_synced: int
+    error_message: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+@router.get("/feishu-docs", response_model=list[CloudDocInfo], summary="发现可用的飞书云文档/文件")
+async def discover_feishu_docs(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[CloudDocInfo]:
+    """列出当前用户有权限访问的飞书云文档和文件。"""
+    user_token = await _get_user_token(current_user, db)
+    if not user_token:
+        raise HTTPException(401, "飞书授权已失效，请重新登录")
+
+    try:
+        files = await feishu_client.list_drive_documents(user_access_token=user_token)
+    except FeishuAPIError:
+        user_token = await _refresh_and_retry(current_user, db)
+        if not user_token:
+            raise HTTPException(401, "飞书授权已过期，请重新登录")
+        try:
+            files = await feishu_client.list_drive_documents(user_access_token=user_token)
+        except Exception as e:
+            logger.error("刷新后仍失败: %s", e)
+            raise HTTPException(500, f"获取飞书云文档列表失败: {e}")
+    except Exception as e:
+        logger.error("发现飞书云文档失败: %s", e)
+        raise HTTPException(500, f"获取飞书云文档列表失败: {e}")
+
+    # 查询已导入的文档 token 集合
+    result = await db.execute(
+        select(Document.feishu_record_id).where(
+            Document.owner_id == current_user.feishu_open_id,
+            Document.source_type == "cloud",
+            Document.feishu_record_id.isnot(None),
+        )
+    )
+    imported_tokens = {row[0] for row in result.all()}
+
+    docs: list[CloudDocInfo] = []
+    for f in files:
+        token = f.get("token", "")
+        docs.append(CloudDocInfo(
+            token=token,
+            name=f.get("name", "未命名"),
+            doc_type=f.get("type", ""),
+            modified_time=f.get("modified_time"),
+            already_imported=token in imported_tokens,
+        ))
+    return docs
+
+
+@router.post("/feishu-docs", response_model=CloudDocImportResponse, summary="批量导入云文档/文件")
+async def import_feishu_docs(
+    body: CloudDocImportRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> CloudDocImportResponse:
+    """导入选中的飞书云文档和文件。"""
+    if not body.items:
+        raise HTTPException(400, "请选择要导入的文档")
+
+    user_token = await _get_user_token(current_user, db)
+    if not user_token:
+        raise HTTPException(401, "飞书授权已失效，请重新登录")
+
+    result = await cloud_doc_import_service.batch_import(
+        file_infos=body.items,
+        owner_id=current_user.feishu_open_id,
+        db=db,
+        user_access_token=user_token,
+        uploader_name=current_user.name,
+    )
+    return CloudDocImportResponse(
+        imported=result.imported,
+        skipped=result.skipped,
+        failed=result.failed,
+    )
+
+
+@router.post(
+    "/feishu-docs/{document_token}/reimport",
+    summary="重新导入指定云文档/文件",
+)
+async def reimport_feishu_doc(
+    document_token: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """强制重新导入指定的云文档。"""
+    user_token = await _get_user_token(current_user, db)
+    if not user_token:
+        raise HTTPException(401, "飞书授权已失效，请重新登录")
+
+    # 查找已有记录以确定文件类型
+    existing = await db.execute(
+        select(Document).where(
+            Document.feishu_record_id == document_token,
+            Document.owner_id == current_user.feishu_open_id,
+        )
+    )
+    doc = existing.scalar_one_or_none()
+    file_type = doc.file_type if doc else "docx"
+
+    if file_type in ("docx", "doc"):
+        result_doc, status = await cloud_doc_import_service.import_cloud_doc(
+            document_token, current_user.feishu_open_id, db,
+            user_token, current_user.name, force=True,
+        )
+    else:
+        # 文件类型需要 name，从现有记录获取
+        file_name = doc.title if doc else "unknown"
+        result_doc, status = await cloud_doc_import_service.import_cloud_file(
+            document_token, file_name, current_user.feishu_open_id, db,
+            user_token, current_user.name, force=True,
+        )
+
+    if status == "failed" or not result_doc:
+        raise HTTPException(500, "重新导入失败")
+
+    return {"message": "重新导入成功", "doc_id": result_doc.id}
+
+
+# ── 云文件夹同步 ─────────────────────────────────────────
+
+@router.get("/cloud-folders", response_model=list[CloudFolderOut], summary="查看我的云文件夹源")
+async def list_cloud_folders(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[CloudFolderOut]:
+    """列出当前用户配置的云文件夹数据源。"""
+    result = await db.execute(
+        select(CloudFolderSource)
+        .where(CloudFolderSource.owner_id == current_user.feishu_open_id)
+        .order_by(CloudFolderSource.id)
+    )
+    return [CloudFolderOut.model_validate(s) for s in result.scalars().all()]
+
+
+@router.post("/cloud-folders", response_model=CloudFolderOut, summary="添加云文件夹源")
+async def add_cloud_folder(
+    body: CloudFolderCreate,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> CloudFolderOut:
+    """添加飞书云文件夹作为数据源，支持自动同步。"""
+    # 去重检查
+    existing = await db.execute(
+        select(CloudFolderSource).where(
+            CloudFolderSource.folder_token == body.folder_token,
+            CloudFolderSource.owner_id == current_user.feishu_open_id,
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(400, "该文件夹已配置")
+
+    folder = CloudFolderSource(
+        folder_token=body.folder_token,
+        folder_name=body.folder_name,
+        owner_id=current_user.feishu_open_id,
+    )
+    db.add(folder)
+    await db.commit()
+    await db.refresh(folder)
+    return CloudFolderOut.model_validate(folder)
+
+
+@router.delete("/cloud-folders/{folder_id}", summary="删除云文件夹源")
+async def delete_cloud_folder(
+    folder_id: int,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    folder = await db.get(CloudFolderSource, folder_id)
+    if not folder:
+        raise HTTPException(404, "文件夹源不存在")
+    if folder.owner_id != current_user.feishu_open_id and current_user.role != "admin":
+        raise HTTPException(403, "无权删除此文件夹源")
+
+    await db.delete(folder)
+    await db.commit()
+    return {"message": "已删除"}
+
+
+@router.post("/cloud-folders/sync", summary="触发云文件夹同步")
+async def trigger_cloud_folder_sync(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """手动触发当前用户所有启用的云文件夹同步。"""
+    user_token = await _get_user_token(current_user, db)
+    if not user_token:
+        raise HTTPException(401, "飞书授权已失效，请重新登录")
+
+    result = await db.execute(
+        select(CloudFolderSource).where(
+            CloudFolderSource.owner_id == current_user.feishu_open_id,
+            CloudFolderSource.is_enabled == True,  # noqa: E712
+        )
+    )
+    folders = result.scalars().all()
+    if not folders:
+        raise HTTPException(400, "没有已启用的云文件夹源")
+
+    # 在后台异步执行同步
+    async def _sync_all():
+        from app.database import async_session
+        async with async_session() as session:
+            for folder in folders:
+                try:
+                    # 更新状态为 running
+                    folder_in_session = await session.get(CloudFolderSource, folder.id)
+                    if not folder_in_session:
+                        continue
+                    folder_in_session.last_sync_status = "running"
+                    await session.commit()
+
+                    sync_result = await cloud_doc_import_service.sync_folder(
+                        folder.folder_token,
+                        folder.owner_id,
+                        session,
+                        user_token,
+                        current_user.name,
+                    )
+
+                    folder_in_session.last_sync_status = "success"
+                    folder_in_session.last_sync_time = datetime.utcnow()
+                    folder_in_session.files_synced = sync_result.imported + sync_result.skipped
+                    folder_in_session.error_message = None
+                    await session.commit()
+
+                    logger.info(
+                        "文件夹 %s 同步完成: imported=%d, skipped=%d, failed=%d",
+                        folder.folder_name, sync_result.imported,
+                        sync_result.skipped, sync_result.failed,
+                    )
+                except Exception as e:
+                    logger.error("文件夹 %s 同步失败: %s", folder.folder_name, e)
+                    try:
+                        folder_in_session = await session.get(CloudFolderSource, folder.id)
+                        if folder_in_session:
+                            folder_in_session.last_sync_status = "failed"
+                            folder_in_session.error_message = str(e)[:500]
+                            await session.commit()
+                    except Exception:
+                        pass
+
+    asyncio.create_task(_sync_all())
+    return {"message": "文件夹同步已触发", "folders_count": len(folders)}

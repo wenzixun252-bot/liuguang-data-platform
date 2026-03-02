@@ -19,6 +19,7 @@ from app.models import (  # noqa: F401
     Department,
     UserDepartment,
     UserVisibilityOverride,
+    UserDeptSharing,
 )
 
 config = context.config

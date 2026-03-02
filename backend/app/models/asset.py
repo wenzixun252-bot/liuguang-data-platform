@@ -1,8 +1,8 @@
-"""ETL 相关模型 — 同步状态、Schema 缓存、数据源注册。"""
+"""ETL 相关模型 — 同步状态、Schema 缓存、数据源注册、云文件夹源。"""
 
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, Index, String, Text, func
+from sqlalchemy import CheckConstraint, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -69,5 +69,30 @@ class ETLDataSource(Base):
     asset_type: Mapped[str] = mapped_column(String(32), nullable=False, server_default="document")
     owner_id: Mapped[str | None] = mapped_column(String(64))
     is_enabled: Mapped[bool] = mapped_column(nullable=False, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class CloudFolderSource(Base):
+    """云文件夹数据源 — 用户配置的飞书云文件夹，用于自动同步文档/文件。"""
+
+    __tablename__ = "cloud_folder_sources"
+    __table_args__ = (
+        CheckConstraint(
+            "last_sync_status IN ('idle', 'running', 'success', 'failed')",
+            name="ck_cloud_folder_sync_status",
+        ),
+        Index("uq_cloud_folder", "folder_token", "owner_id", unique=True),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    folder_token: Mapped[str] = mapped_column(String(128), nullable=False)
+    folder_name: Mapped[str] = mapped_column(String(256), nullable=False, server_default="")
+    owner_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    is_enabled: Mapped[bool] = mapped_column(nullable=False, server_default="true")
+    last_sync_time: Mapped[datetime | None] = mapped_column()
+    last_sync_status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="idle")
+    files_synced: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    error_message: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now(), onupdate=func.now())

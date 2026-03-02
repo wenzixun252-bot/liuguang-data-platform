@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Upload, Cloud, RefreshCw, Trash2, Plus, FileUp, Search, Check, ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
+import { Upload, Cloud, RefreshCw, Trash2, Plus, FileUp, Search, Check, ChevronDown, ChevronRight, Loader2, FileText, FolderOpen } from 'lucide-react'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
 
@@ -53,7 +53,7 @@ const ASSET_TYPE_LABELS: Record<string, string> = {
 }
 
 export default function DataImport() {
-  const [tab, setTab] = useState<'feishu' | 'upload'>('feishu')
+  const [tab, setTab] = useState<'feishu' | 'cloud_docs' | 'upload'>('feishu')
 
   return (
     <div className="space-y-4">
@@ -71,6 +71,15 @@ export default function DataImport() {
           飞书同步
         </button>
         <button
+          onClick={() => setTab('cloud_docs')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+            tab === 'cloud_docs' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          <FileText size={16} />
+          云文档
+        </button>
+        <button
           onClick={() => setTab('upload')}
           className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
             tab === 'upload' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-600 hover:text-gray-900'
@@ -81,7 +90,9 @@ export default function DataImport() {
         </button>
       </div>
 
-      {tab === 'feishu' ? <FeishuSyncTab /> : <FileUploadTab />}
+      {tab === 'feishu' && <FeishuSyncTab />}
+      {tab === 'cloud_docs' && <CloudDocImportTab />}
+      {tab === 'upload' && <FileUploadTab />}
     </div>
   )
 }
@@ -496,6 +507,408 @@ function SyncStatusBadge({ status, errorMessage }: { status?: string | null; err
     )
   }
   return <span className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-500">{status}</span>
+}
+
+// ── 云文档导入 Tab ─────────────────────────────────────────
+
+interface CloudDoc {
+  token: string
+  name: string
+  doc_type: string
+  modified_time: string | null
+  already_imported: boolean
+}
+
+interface CloudFolder {
+  id: number
+  folder_token: string
+  folder_name: string
+  is_enabled: boolean
+  last_sync_time: string | null
+  last_sync_status: string
+  files_synced: number
+  error_message: string | null
+  created_at: string
+}
+
+const DOC_TYPE_LABELS: Record<string, string> = {
+  docx: '云文档',
+  doc: '旧版文档',
+  file: '文件',
+}
+
+function CloudDocImportTab() {
+  // 手动发现
+  const [docs, setDocs] = useState<CloudDoc[]>([])
+  const [loading, setLoading] = useState(false)
+  const [selectedTokens, setSelectedTokens] = useState<Set<string>>(new Set())
+  const [importing, setImporting] = useState(false)
+
+  // 文件夹同步
+  const [folders, setFolders] = useState<CloudFolder[]>([])
+  const [foldersLoading, setFoldersLoading] = useState(true)
+  const [folderToken, setFolderToken] = useState('')
+  const [folderName, setFolderName] = useState('')
+  const [addingFolder, setAddingFolder] = useState(false)
+  const [syncingFolders, setSyncingFolders] = useState(false)
+
+  // 文件夹轮询
+  const [folderPolling, setFolderPolling] = useState(false)
+
+  const loadFolders = useCallback(() => {
+    api.get('/import/cloud-folders')
+      .then((res) => setFolders(res.data))
+      .catch(() => toast.error('加载文件夹列表失败'))
+      .finally(() => setFoldersLoading(false))
+  }, [])
+
+  useEffect(() => { loadFolders() }, [loadFolders])
+
+  // 文件夹同步轮询
+  useEffect(() => {
+    if (!folderPolling) return
+    const timer = setInterval(() => {
+      api.get('/import/cloud-folders').then((res) => {
+        setFolders(res.data)
+        const hasRunning = res.data.some((f: CloudFolder) => f.last_sync_status === 'running')
+        if (!hasRunning) {
+          setFolderPolling(false)
+          setSyncingFolders(false)
+          const hasFailed = res.data.some((f: CloudFolder) => f.last_sync_status === 'failed')
+          if (hasFailed) {
+            toast.error('部分文件夹同步失败，请查看详情')
+          } else {
+            toast.success('文件夹同步完成')
+          }
+        }
+      })
+    }, 3000)
+    return () => clearInterval(timer)
+  }, [folderPolling])
+
+  const handleDiscover = async () => {
+    setLoading(true)
+    setSelectedTokens(new Set())
+    try {
+      const res = await api.get('/import/feishu-docs')
+      setDocs(res.data)
+    } catch (e: any) {
+      toast.error(e.response?.data?.detail || '获取云文档列表失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const toggleDoc = (token: string) => {
+    setSelectedTokens((prev) => {
+      const next = new Set(prev)
+      if (next.has(token)) next.delete(token)
+      else next.add(token)
+      return next
+    })
+  }
+
+  const toggleSelectAll = () => {
+    const selectable = docs.filter((d) => !d.already_imported)
+    if (selectedTokens.size >= selectable.length) {
+      setSelectedTokens(new Set())
+    } else {
+      setSelectedTokens(new Set(selectable.map((d) => d.token)))
+    }
+  }
+
+  const handleImport = async () => {
+    if (selectedTokens.size === 0) {
+      toast.error('请选择要导入的文档')
+      return
+    }
+    setImporting(true)
+    try {
+      const items = docs
+        .filter((d) => selectedTokens.has(d.token))
+        .map((d) => ({ token: d.token, name: d.name, type: d.doc_type }))
+      const res = await api.post('/import/feishu-docs', { items })
+      toast.success(`导入完成：${res.data.imported} 个成功，${res.data.skipped} 个跳过，${res.data.failed} 个失败`)
+      setSelectedTokens(new Set())
+      // 刷新列表标记已导入
+      handleDiscover()
+    } catch (e: any) {
+      toast.error(e.response?.data?.detail || '导入失败')
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  const handleReimport = async (token: string) => {
+    try {
+      await api.post(`/import/feishu-docs/${token}/reimport`)
+      toast.success('重新导入成功')
+      handleDiscover()
+    } catch (e: any) {
+      toast.error(e.response?.data?.detail || '重新导入失败')
+    }
+  }
+
+  const handleAddFolder = async () => {
+    if (!folderToken.trim()) {
+      toast.error('请输入文件夹 Token')
+      return
+    }
+    setAddingFolder(true)
+    try {
+      await api.post('/import/cloud-folders', {
+        folder_token: folderToken.trim(),
+        folder_name: folderName.trim() || folderToken.trim(),
+      })
+      toast.success('文件夹已添加')
+      setFolderToken('')
+      setFolderName('')
+      loadFolders()
+    } catch (e: any) {
+      toast.error(e.response?.data?.detail || '添加失败')
+    } finally {
+      setAddingFolder(false)
+    }
+  }
+
+  const handleDeleteFolder = async (id: number) => {
+    if (!confirm('确定删除此文件夹源？')) return
+    try {
+      await api.delete(`/import/cloud-folders/${id}`)
+      toast.success('已删除')
+      loadFolders()
+    } catch {
+      toast.error('删除失败')
+    }
+  }
+
+  const handleSyncFolders = async () => {
+    setSyncingFolders(true)
+    try {
+      await api.post('/import/cloud-folders/sync')
+      toast.success('文件夹同步已触发')
+      setFolderPolling(true)
+    } catch (e: any) {
+      toast.error(e.response?.data?.detail || '触发同步失败')
+      setSyncingFolders(false)
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* 区域 A: 文件夹同步配置 */}
+      <div className="bg-white rounded-xl shadow-sm p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-gray-700 flex items-center gap-2">
+            <FolderOpen size={18} />
+            文件夹自动同步
+          </h3>
+          <button
+            onClick={handleSyncFolders}
+            disabled={syncingFolders || folders.length === 0}
+            className="flex items-center gap-2 px-3 py-1.5 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 disabled:opacity-50"
+          >
+            <RefreshCw size={14} className={syncingFolders ? 'animate-spin' : ''} />
+            触发同步
+          </button>
+        </div>
+
+        {/* 添加文件夹 */}
+        <div className="flex gap-2 items-end">
+          <div className="flex-1">
+            <label className="block text-xs text-gray-500 mb-1">文件夹 Token</label>
+            <input
+              type="text"
+              value={folderToken}
+              onChange={(e) => setFolderToken(e.target.value)}
+              placeholder="从飞书文件夹 URL 中获取 token"
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+          <div className="w-48">
+            <label className="block text-xs text-gray-500 mb-1">文件夹名称（可选）</label>
+            <input
+              type="text"
+              value={folderName}
+              onChange={(e) => setFolderName(e.target.value)}
+              placeholder="自定义名称"
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+          <button
+            onClick={handleAddFolder}
+            disabled={addingFolder}
+            className="flex items-center gap-1 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 disabled:opacity-50 whitespace-nowrap"
+          >
+            <Plus size={14} />
+            {addingFolder ? '添加中...' : '添加文件夹'}
+          </button>
+        </div>
+
+        {/* 已配置文件夹列表 */}
+        {foldersLoading ? (
+          <div className="py-4 text-center text-gray-400 text-sm">加载中...</div>
+        ) : folders.length > 0 ? (
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="text-left py-2 px-3 text-gray-500 font-medium">文件夹名称</th>
+                <th className="text-left py-2 px-3 text-gray-500 font-medium">同步状态</th>
+                <th className="text-left py-2 px-3 text-gray-500 font-medium">已同步</th>
+                <th className="text-left py-2 px-3 text-gray-500 font-medium hidden md:table-cell">最后同步</th>
+                <th className="text-right py-2 px-3 text-gray-500 font-medium">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {folders.map((f) => (
+                <tr key={f.id} className="border-t border-gray-50">
+                  <td className="py-2 px-3 text-gray-800">
+                    {f.folder_name || f.folder_token}
+                    <span className="text-xs text-gray-400 ml-2 font-mono">({f.folder_token.slice(0, 10)}...)</span>
+                  </td>
+                  <td className="py-2 px-3">
+                    <SyncStatusBadge status={f.last_sync_status} errorMessage={f.error_message} />
+                  </td>
+                  <td className="py-2 px-3 text-gray-600">{f.files_synced} 个文件</td>
+                  <td className="py-2 px-3 text-gray-500 hidden md:table-cell">
+                    {f.last_sync_time ? new Date(f.last_sync_time).toLocaleString('zh-CN') : '-'}
+                  </td>
+                  <td className="py-2 px-3 text-right">
+                    <button
+                      onClick={() => handleDeleteFolder(f.id)}
+                      className="p-1 text-gray-400 hover:text-red-500 rounded"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <div className="py-4 text-center text-gray-400 text-sm">
+            暂未配置文件夹，添加飞书文件夹后可自动同步其中的文档和文件
+          </div>
+        )}
+      </div>
+
+      {/* 区域 B: 手动发现导入 */}
+      <div className="bg-white rounded-xl shadow-sm p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-semibold text-gray-700 flex items-center gap-2">
+            <FileText size={18} />
+            手动发现导入
+          </h3>
+          <div className="flex gap-2">
+            <button
+              onClick={handleDiscover}
+              disabled={loading}
+              className="flex items-center gap-2 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 disabled:opacity-50"
+            >
+              <Search size={14} />
+              {loading ? '查询中...' : '刷新列表'}
+            </button>
+            {selectedTokens.size > 0 && (
+              <button
+                onClick={handleImport}
+                disabled={importing}
+                className="flex items-center gap-2 px-3 py-1.5 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 disabled:opacity-50"
+              >
+                {importing ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <Plus size={14} />
+                )}
+                {importing ? '导入中...' : `导入选中 (${selectedTokens.size})`}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="py-12 text-center text-gray-400">
+            <Loader2 size={24} className="animate-spin mx-auto mb-3" />
+            正在查询飞书云文档...
+          </div>
+        ) : docs.length > 0 ? (
+          <>
+            <div className="flex items-center gap-3 text-sm text-gray-500">
+              <button onClick={toggleSelectAll} className="text-indigo-600 hover:text-indigo-700">
+                {selectedTokens.size > 0 ? '取消全选' : '全选'}
+              </button>
+              <span>共 {docs.length} 个文档/文件，已选 {selectedTokens.size} 个</span>
+            </div>
+
+            <div className="border border-gray-200 rounded-lg divide-y divide-gray-100 max-h-96 overflow-y-auto">
+              {docs.map((doc) => {
+                const isSelected = selectedTokens.has(doc.token)
+                return (
+                  <div
+                    key={doc.token}
+                    className={`flex items-center gap-3 px-4 py-3 ${
+                      doc.already_imported ? 'opacity-60' : 'hover:bg-indigo-50 cursor-pointer'
+                    }`}
+                    onClick={() => !doc.already_imported && toggleDoc(doc.token)}
+                  >
+                    {/* 复选框 */}
+                    <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${
+                      doc.already_imported ? 'bg-gray-200 border-gray-300' :
+                      isSelected ? 'bg-indigo-600 border-indigo-600' : 'border-gray-300'
+                    }`}>
+                      {(doc.already_imported || isSelected) && <Check size={12} className="text-white" />}
+                    </div>
+
+                    {/* 类型图标 */}
+                    {doc.doc_type === 'file' ? (
+                      <FileUp size={16} className="text-gray-400 flex-shrink-0" />
+                    ) : (
+                      <FileText size={16} className="text-indigo-400 flex-shrink-0" />
+                    )}
+
+                    {/* 文档名称 */}
+                    <span className="text-sm text-gray-700 flex-1 truncate">{doc.name}</span>
+
+                    {/* 类型标签 */}
+                    <span className={`px-2 py-0.5 rounded-full text-xs flex-shrink-0 ${
+                      doc.doc_type === 'docx' ? 'bg-indigo-50 text-indigo-600' :
+                      doc.doc_type === 'file' ? 'bg-amber-50 text-amber-600' :
+                      'bg-gray-100 text-gray-600'
+                    }`}>
+                      {DOC_TYPE_LABELS[doc.doc_type] || doc.doc_type}
+                    </span>
+
+                    {/* 修改时间 */}
+                    {doc.modified_time && (
+                      <span className="text-xs text-gray-400 flex-shrink-0 hidden md:inline">
+                        {new Date(Number(doc.modified_time) * 1000).toLocaleString('zh-CN')}
+                      </span>
+                    )}
+
+                    {/* 已导入标签或重新导入按钮 */}
+                    {doc.already_imported && (
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-600">已导入</span>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleReimport(doc.token) }}
+                          className="text-xs text-indigo-500 hover:text-indigo-700"
+                        >
+                          重新导入
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </>
+        ) : (
+          <div className="py-12 text-center text-gray-400">
+            点击「刷新列表」发现您有权限访问的飞书云文档和文件
+          </div>
+        )}
+      </div>
+    </div>
+  )
 }
 
 function FileUploadTab() {

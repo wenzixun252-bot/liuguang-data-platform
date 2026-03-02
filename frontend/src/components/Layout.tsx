@@ -30,11 +30,11 @@ const NAV_ITEMS = [
   { path: '/reports', label: '报告中心', icon: ClipboardList },
   { path: '/knowledge-graph', label: '知识图谱', icon: Network },
   { path: '/leadership-insight', label: '员工画像', icon: UserSearch },
+  { path: '/permissions', label: '权限管理', icon: Shield },
 ]
 
 const ADMIN_NAV = [
   { path: '/admin/etl', label: 'ETL 管理', icon: Settings },
-  { path: '/admin/departments', label: '权限管理', icon: Shield },
 ]
 
 export default function Layout() {

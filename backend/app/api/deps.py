@@ -1,18 +1,22 @@
 """公共依赖注入。"""
 
+import logging
 from collections.abc import AsyncGenerator
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import async_session
-from app.models.department import UserDepartment, UserVisibilityOverride
+from app.models.department import UserDepartment, UserDeptSharing, UserVisibilityOverride
 from app.models.user import User
 from app.utils.security import decode_access_token
+
+logger = logging.getLogger(__name__)
 
 _bearer_scheme = HTTPBearer()
 
@@ -66,65 +70,49 @@ def require_role(allowed_roles: list[str]):
     return _check_role
 
 
+def is_super_admin(user: User) -> bool:
+    """判断是否为系统超管（不可降级）。"""
+    return user.feishu_open_id == settings.super_admin_open_id
+
+
 async def get_visible_owner_ids(
     user: User,
     db: AsyncSession,
 ) -> list[str] | None:
-    """根据用户角色和部门关系，返回可见的 owner_id 列表。
+    """根据用户角色返回可见的 owner_id 列表。
 
     - admin: 返回 None（看全部）
-    - 部门 manager: 返回本部门 + 下属部门所有人的 feishu_open_id 列表
-    - 普通 employee: 返回 [自己的 feishu_open_id]
+    - 普通用户: 返回 [自己] + [直接分享给我的人] + [分享给我所在部门的人]
     """
     if user.role == "admin":
         return None
 
-    # 检查用户是否是某个部门的 manager
-    result = await db.execute(
-        select(UserDepartment).where(
-            UserDepartment.user_id == user.id,
-            UserDepartment.is_manager == True,  # noqa: E712
-        )
-    )
-    managed_depts = result.scalars().all()
+    visible_ids: list[str] = [user.feishu_open_id]
 
-    # 查询手动覆盖的可见部门
-    override_result = await db.execute(
-        select(UserVisibilityOverride.department_id).where(
-            UserVisibilityOverride.user_id == user.id,
-        )
-    )
-    override_dept_ids = [row[0] for row in override_result.fetchall()]
+    try:
+        async with db.begin_nested():
+            # 1. 谁直接分享给了我（user_id=分享者, target_user_id=我）
+            r1 = await db.execute(
+                select(User.feishu_open_id)
+                .join(UserVisibilityOverride, UserVisibilityOverride.user_id == User.id)
+                .where(UserVisibilityOverride.target_user_id == user.id)
+            )
+            visible_ids.extend(row[0] for row in r1.fetchall())
 
-    # 合并自动管理部门 + 手动覆盖部门
-    managed_dept_ids = [ud.department_id for ud in managed_depts]
-    all_dept_ids = list(set(managed_dept_ids + override_dept_ids))
+            # 2. 谁分享给了我所在的部门
+            my_dept_ids_q = await db.execute(
+                select(UserDepartment.department_id).where(UserDepartment.user_id == user.id)
+            )
+            my_dept_ids = [row[0] for row in my_dept_ids_q.fetchall()]
 
-    if not all_dept_ids:
-        return [user.feishu_open_id]
+            if my_dept_ids:
+                r2 = await db.execute(
+                    select(User.feishu_open_id)
+                    .join(UserDeptSharing, UserDeptSharing.user_id == User.id)
+                    .where(UserDeptSharing.department_id.in_(my_dept_ids))
+                )
+                visible_ids.extend(row[0] for row in r2.fetchall())
+    except Exception:
+        logger.warning("可见性查询失败，请确认已运行 alembic upgrade head")
 
-    # 使用递归 CTE 查找所有下属部门
-    placeholders = ", ".join(f":dept_{i}" for i in range(len(all_dept_ids)))
-    params = {f"dept_{i}": did for i, did in enumerate(all_dept_ids)}
-
-    cte_sql = text(f"""
-        WITH RECURSIVE dept_tree AS (
-            SELECT id FROM departments WHERE id IN ({placeholders})
-            UNION ALL
-            SELECT d.id FROM departments d
-            INNER JOIN dept_tree dt ON d.parent_id = dt.id
-        )
-        SELECT DISTINCT u.feishu_open_id
-        FROM dept_tree dt
-        JOIN user_departments ud ON ud.department_id = dt.id
-        JOIN users u ON u.id = ud.user_id
-    """)
-
-    result = await db.execute(cte_sql, params)
-    visible_ids = [row[0] for row in result.fetchall()]
-
-    # 确保包含自己
-    if user.feishu_open_id not in visible_ids:
-        visible_ids.append(user.feishu_open_id)
-
-    return visible_ids
+    return list(set(visible_ids))

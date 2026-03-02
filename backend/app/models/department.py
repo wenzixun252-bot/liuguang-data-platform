@@ -36,11 +36,25 @@ class UserDepartment(Base):
 
 
 class UserVisibilityOverride(Base):
-    """管理员手动设置的用户数据可见范围覆盖。"""
+    """管理员手动设置的用户数据可见范围覆盖（用户粒度）。"""
     __tablename__ = "user_visibility_overrides"
     __table_args__ = (
-        UniqueConstraint("user_id", "department_id", name="uq_user_vis_override"),
+        UniqueConstraint("user_id", "target_user_id", name="uq_user_vis_override"),
         Index("idx_uvo_user", "user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    target_user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
+
+
+class UserDeptSharing(Base):
+    """用户将数据分享给整个部门。user_id=分享者, department_id=目标部门。"""
+    __tablename__ = "user_dept_sharing"
+    __table_args__ = (
+        UniqueConstraint("user_id", "department_id", name="uq_user_dept_sharing"),
+        Index("idx_uds_user", "user_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)

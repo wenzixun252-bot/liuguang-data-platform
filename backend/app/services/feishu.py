@@ -307,10 +307,289 @@ class FeishuClient:
 
         return all_files
 
+    async def list_drive_documents(self, user_access_token: str | None = None) -> list[dict]:
+        """列出用户有权限访问的云文档和文件（docx/doc/file 类型）。
+
+        返回: [{token, name, type, url, created_time, modified_time, ...}]
+        """
+        if user_access_token:
+            token = user_access_token
+        else:
+            token = await self.get_tenant_access_token()
+
+        supported_types = {"docx", "doc", "file"}
+        all_files: list[dict] = []
+
+        async with self._client() as client:
+            page_token: str | None = None
+            while True:
+                params: dict = {"page_size": 50}
+                if page_token:
+                    params["page_token"] = page_token
+
+                resp = await client.get(
+                    f"{FEISHU_BASE_URL}/drive/v1/files",
+                    headers={"Authorization": f"Bearer {token}"},
+                    params=params,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                if data.get("code") != 0:
+                    raise FeishuAPIError(
+                        f"获取云文档列表失败: {data.get('msg', '未知错误')}"
+                    )
+
+                items = data.get("data", {}).get("files", [])
+                for item in items:
+                    if item.get("type") in supported_types:
+                        all_files.append(item)
+
+                if not data.get("data", {}).get("has_more"):
+                    break
+                page_token = data.get("data", {}).get("page_token")
+                await asyncio.sleep(0.2)
+
+        return all_files
+
+    async def list_folder_files(
+        self,
+        folder_token: str,
+        user_access_token: str | None = None,
+    ) -> list[dict]:
+        """列出指定文件夹下的所有文件。
+
+        Args:
+            folder_token: 飞书文件夹 token（可从文件夹 URL 获取）
+
+        返回: [{token, name, type, created_time, modified_time, ...}]
+        """
+        if user_access_token:
+            token = user_access_token
+        else:
+            token = await self.get_tenant_access_token()
+
+        supported_types = {"docx", "doc", "file"}
+        all_files: list[dict] = []
+
+        async with self._client() as client:
+            page_token: str | None = None
+            while True:
+                params: dict = {
+                    "page_size": 50,
+                    "folder_token": folder_token,
+                }
+                if page_token:
+                    params["page_token"] = page_token
+
+                resp = await client.get(
+                    f"{FEISHU_BASE_URL}/drive/v1/files",
+                    headers={"Authorization": f"Bearer {token}"},
+                    params=params,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                if data.get("code") != 0:
+                    raise FeishuAPIError(
+                        f"获取文件夹文件列表失败: {data.get('msg', '未知错误')}"
+                    )
+
+                items = data.get("data", {}).get("files", [])
+                for item in items:
+                    if item.get("type") in supported_types:
+                        all_files.append(item)
+
+                if not data.get("data", {}).get("has_more"):
+                    break
+                page_token = data.get("data", {}).get("page_token")
+                await asyncio.sleep(0.2)
+
+        return all_files
+
+    async def get_document_content(
+        self,
+        document_id: str,
+        user_access_token: str | None = None,
+    ) -> dict:
+        """获取飞书云文档的完整内容（通过 Block API）。
+
+        Args:
+            document_id: 飞书文档 ID
+
+        Returns:
+            {"title": "...", "content_text": "...", "created_time": ..., "modified_time": ...}
+        """
+        if user_access_token:
+            token = user_access_token
+        else:
+            token = await self.get_tenant_access_token()
+
+        async with self._client() as client:
+            # 1. 获取文档元数据
+            meta_resp = await client.get(
+                f"{FEISHU_BASE_URL}/docx/v1/documents/{document_id}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            meta_resp.raise_for_status()
+            meta_data = meta_resp.json()
+            if meta_data.get("code") != 0:
+                raise FeishuAPIError(
+                    f"获取文档元数据失败: {meta_data.get('msg', '未知错误')}"
+                )
+            doc_info = meta_data.get("data", {}).get("document", {})
+            title = doc_info.get("title", "")
+            created_time = doc_info.get("create_time")
+            modified_time = doc_info.get("modify_time")
+
+            # 2. 获取所有 block（分页）
+            all_blocks: list[dict] = []
+            page_token: str | None = None
+            while True:
+                params: dict = {"page_size": 500, "document_revision_id": -1}
+                if page_token:
+                    params["page_token"] = page_token
+
+                blocks_resp = await client.get(
+                    f"{FEISHU_BASE_URL}/docx/v1/documents/{document_id}/blocks",
+                    headers={"Authorization": f"Bearer {token}"},
+                    params=params,
+                )
+                blocks_resp.raise_for_status()
+                blocks_data = blocks_resp.json()
+                if blocks_data.get("code") != 0:
+                    raise FeishuAPIError(
+                        f"获取文档 blocks 失败: {blocks_data.get('msg', '未知错误')}"
+                    )
+
+                items = blocks_data.get("data", {}).get("items", [])
+                all_blocks.extend(items)
+
+                if not blocks_data.get("data", {}).get("has_more"):
+                    break
+                page_token = blocks_data.get("data", {}).get("page_token")
+                await asyncio.sleep(0.2)
+
+        content_text = self._blocks_to_text(all_blocks)
+        return {
+            "title": title,
+            "content_text": content_text,
+            "created_time": created_time,
+            "modified_time": modified_time,
+        }
+
+    @staticmethod
+    def _blocks_to_text(blocks: list[dict]) -> str:
+        """将飞书文档 Block 列表转换为 Markdown 风格纯文本。
+
+        支持的 block 类型:
+        1=page, 2=text, 3=heading1, 4=heading2, 5=heading3,
+        6=heading4, 7=heading5, 8=heading6,
+        9=bullet, 10=ordered, 11=code, 12=quote,
+        14=todo, 17=divider, 18=table, 27=image
+        """
+        lines: list[str] = []
+        ordered_counter = 0
+
+        for block in blocks:
+            block_type = block.get("block_type", 0)
+
+            # 跳过 page 根 block
+            if block_type == 1:
+                continue
+
+            # 提取 text elements 的辅助逻辑
+            def _extract_text(key: str) -> str:
+                elements = block.get(key, {}).get("elements", [])
+                parts = []
+                for el in elements:
+                    text_run = el.get("text_run")
+                    if text_run:
+                        parts.append(text_run.get("content", ""))
+                    mention_user = el.get("mention_user")
+                    if mention_user:
+                        parts.append(f"@{mention_user.get('user_id', '用户')}")
+                    mention_doc = el.get("mention_doc")
+                    if mention_doc:
+                        parts.append(f"[文档: {mention_doc.get('title', '')}]")
+                return "".join(parts)
+
+            if block_type == 2:  # text
+                text = _extract_text("text")
+                if text.strip():
+                    lines.append(text)
+                    ordered_counter = 0
+                else:
+                    lines.append("")  # 空行
+                    ordered_counter = 0
+
+            elif block_type == 3:  # heading1
+                lines.append(f"# {_extract_text('heading1')}")
+                ordered_counter = 0
+            elif block_type == 4:  # heading2
+                lines.append(f"## {_extract_text('heading2')}")
+                ordered_counter = 0
+            elif block_type == 5:  # heading3
+                lines.append(f"### {_extract_text('heading3')}")
+                ordered_counter = 0
+            elif block_type in (6, 7, 8):  # heading4-6
+                key = f"heading{block_type - 3}"
+                lines.append(f"{'#' * (block_type - 3)} {_extract_text(key)}")
+                ordered_counter = 0
+
+            elif block_type == 9:  # bullet
+                lines.append(f"- {_extract_text('bullet')}")
+                ordered_counter = 0
+            elif block_type == 10:  # ordered
+                ordered_counter += 1
+                lines.append(f"{ordered_counter}. {_extract_text('ordered')}")
+
+            elif block_type == 11:  # code
+                code_text = _extract_text("code")
+                lang = block.get("code", {}).get("style", {}).get("language", "")
+                lines.append(f"```{lang}")
+                lines.append(code_text)
+                lines.append("```")
+                ordered_counter = 0
+
+            elif block_type == 12:  # quote
+                lines.append(f"> {_extract_text('quote')}")
+                ordered_counter = 0
+
+            elif block_type == 14:  # todo
+                done = block.get("todo", {}).get("style", {}).get("done", False)
+                mark = "[x]" if done else "[ ]"
+                lines.append(f"- {mark} {_extract_text('todo')}")
+                ordered_counter = 0
+
+            elif block_type == 17:  # divider
+                lines.append("---")
+                ordered_counter = 0
+
+            elif block_type == 27:  # image
+                lines.append("[图片]")
+                ordered_counter = 0
+
+            elif block_type == 18:  # table
+                # 简单处理：标记为表格区域
+                lines.append("[表格]")
+                ordered_counter = 0
+
+            elif block_type == 23:  # callout
+                lines.append(f"> {_extract_text('callout')}")
+                ordered_counter = 0
+
+            else:
+                # 其他未知 block 类型，静默跳过
+                ordered_counter = 0
+
+        return "\n".join(lines)
+
     # ── 文件下载 API ─────────────────────────────────────────
 
     async def download_media(self, file_token: str, user_access_token: str | None = None) -> bytes:
-        """下载飞书附件/媒体文件。
+        """下载飞书附件/媒体文件（多维表格附件等素材）。
+
+        调用: GET /drive/v1/medias/{file_token}/download
+        适用于 Bitable 附件等素材资源。
 
         Args:
             file_token: 飞书文件 token
@@ -327,6 +606,32 @@ class FeishuClient:
         async with httpx.AsyncClient(proxy=None, timeout=60.0) as client:
             resp = await client.get(
                 f"{FEISHU_BASE_URL}/drive/v1/medias/{file_token}/download",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            resp.raise_for_status()
+            return resp.content
+
+    async def download_drive_file(self, file_token: str, user_access_token: str | None = None) -> bytes:
+        """下载飞书云空间中的文件（PDF/PPT/DOCX 等上传到 Drive 的文件）。
+
+        调用: GET /drive/v1/files/{file_token}/download
+        适用于 Drive 中 type='file' 的文件（不适用于 docx/sheet 等云文档）。
+
+        Args:
+            file_token: 飞书文件 token
+            user_access_token: 用户级 token
+
+        Returns:
+            文件二进制内容
+        """
+        if user_access_token:
+            token = user_access_token
+        else:
+            token = await self.get_tenant_access_token()
+
+        async with httpx.AsyncClient(proxy=None, timeout=120.0) as client:
+            resp = await client.get(
+                f"{FEISHU_BASE_URL}/drive/v1/files/{file_token}/download",
                 headers={"Authorization": f"Bearer {token}"},
             )
             resp.raise_for_status()

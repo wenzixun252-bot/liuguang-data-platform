@@ -49,19 +49,12 @@ export default function App() {
             <Route path="/reports/:id" element={<ReportDetail />} />
             <Route path="/knowledge-graph" element={<KnowledgeGraph />} />
             <Route path="/leadership-insight" element={<LeadershipInsight />} />
+            <Route path="/permissions" element={<DepartmentAdmin />} />
             <Route
               path="/admin/etl"
               element={
                 <ProtectedRoute requiredRole="admin">
                   <ETLAdmin />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="/admin/departments"
-              element={
-                <ProtectedRoute requiredRole="admin">
-                  <DepartmentAdmin />
                 </ProtectedRoute>
               }
             />

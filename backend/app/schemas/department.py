@@ -26,10 +26,16 @@ class UserDepartmentOut(BaseModel):
     role: str = "employee"
 
 
-class VisibleDeptItem(BaseModel):
-    """可见部门项。"""
+class DeptBrief(BaseModel):
+    """部门简要信息。"""
     department_id: int
     department_name: str
+
+
+class VisibleUserItem(BaseModel):
+    """可见用户项。"""
+    user_id: int
+    user_name: str
 
 
 class UserPermissionOut(BaseModel):
@@ -38,12 +44,13 @@ class UserPermissionOut(BaseModel):
     user_name: str
     feishu_open_id: str
     role: str
-    departments: list[str]
+    dept_list: list[DeptBrief]
     is_manager: bool
-    auto_visible_depts: list[VisibleDeptItem]
-    override_visible_depts: list[VisibleDeptItem]
+    shared_to_users: list[VisibleUserItem]
+    shared_to_depts: list[DeptBrief]
 
 
-class SetVisibilityRequest(BaseModel):
-    """设置可见范围请求体。"""
-    department_ids: list[int]
+class SetSharingRequest(BaseModel):
+    """设置分享请求体（同时支持用户和部门）。"""
+    user_ids: list[int] = []
+    department_ids: list[int] = []

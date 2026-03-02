@@ -19,12 +19,12 @@ def upgrade() -> None:
         "user_visibility_overrides",
         sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
         sa.Column("user_id", sa.Integer(), nullable=False),
-        sa.Column("department_id", sa.Integer(), nullable=False),
+        sa.Column("target_user_id", sa.Integer(), nullable=False),
         sa.Column("created_at", sa.DateTime(), server_default=sa.text("now()"), nullable=False),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"]),
-        sa.ForeignKeyConstraint(["department_id"], ["departments.id"]),
+        sa.ForeignKeyConstraint(["target_user_id"], ["users.id"]),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("user_id", "department_id", name="uq_user_vis_override"),
+        sa.UniqueConstraint("user_id", "target_user_id", name="uq_user_vis_override"),
     )
     op.create_index("idx_uvo_user", "user_visibility_overrides", ["user_id"])
 

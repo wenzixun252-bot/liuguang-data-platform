@@ -183,3 +183,87 @@ async def etl_sync_job() -> None:
         total_extracted,
         total_loaded,
     )
+
+
+async def cloud_folder_sync_job() -> None:
+    """定时任务：同步所有启用的云文件夹数据源。"""
+    from app.models.asset import CloudFolderSource
+    from app.services.cloud_doc_import import cloud_doc_import_service
+
+    logger.info("云文件夹同步任务开始")
+
+    async with async_session() as db:
+        result = await db.execute(
+            select(CloudFolderSource).where(
+                CloudFolderSource.is_enabled == True,  # noqa: E712
+            )
+        )
+        folders = result.scalars().all()
+
+    if not folders:
+        logger.info("没有启用的云文件夹源，跳过")
+        return
+
+    for folder in folders:
+        try:
+            async with async_session() as db:
+                # 更新状态为 running
+                folder_obj = await db.get(CloudFolderSource, folder.id)
+                if not folder_obj:
+                    continue
+                folder_obj.last_sync_status = "running"
+                folder_obj.error_message = None
+                await db.commit()
+
+                # 获取 owner 的 token
+                user_token = await _resolve_user_token(folder.owner_id, db)
+                if not user_token:
+                    # 尝试刷新
+                    user_token = await _try_refresh_token(folder.owner_id, db)
+                if not user_token:
+                    raise Exception(f"用户 {folder.owner_id} 无可用 token")
+
+                # 查找 uploader_name
+                user_result = await db.execute(
+                    select(User).where(User.feishu_open_id == folder.owner_id)
+                )
+                user = user_result.scalar_one_or_none()
+                uploader_name = user.name if user else None
+
+                # 执行同步
+                sync_result = await cloud_doc_import_service.sync_folder(
+                    folder.folder_token,
+                    folder.owner_id,
+                    db,
+                    user_token,
+                    uploader_name,
+                )
+
+                # 更新成功状态
+                folder_obj = await db.get(CloudFolderSource, folder.id)
+                if folder_obj:
+                    folder_obj.last_sync_status = "success"
+                    folder_obj.last_sync_time = datetime.utcnow()
+                    folder_obj.files_synced = sync_result.imported + sync_result.skipped
+                    folder_obj.error_message = None
+                    await db.commit()
+
+                logger.info(
+                    "文件夹 %s 同步完成: imported=%d, skipped=%d, failed=%d",
+                    folder.folder_name, sync_result.imported,
+                    sync_result.skipped, sync_result.failed,
+                )
+
+        except Exception as e:
+            logger.error("文件夹 %s (%s) 同步失败: %s", folder.folder_name, folder.folder_token, e)
+            try:
+                async with async_session() as db:
+                    folder_obj = await db.get(CloudFolderSource, folder.id)
+                    if folder_obj:
+                        folder_obj.last_sync_status = "failed"
+                        folder_obj.error_message = str(e)[:500]
+                        await db.commit()
+            except Exception:
+                pass
+
+    logger.info("云文件夹同步任务完成")

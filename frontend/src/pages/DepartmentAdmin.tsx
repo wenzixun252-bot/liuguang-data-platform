@@ -1,19 +1,23 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
-import { RefreshCw, ChevronDown, Shield, ShieldCheck, User, Pencil, X, Check } from 'lucide-react'
+import { useEffect, useState, useCallback } from 'react'
+import { RefreshCw, ChevronDown, ChevronRight, ShieldCheck, User as UserIcon, X, Check, Search, Share2, Building2 } from 'lucide-react'
 import api from '../lib/api'
+import { getUser, isAdmin } from '../lib/auth'
 import toast from 'react-hot-toast'
+
+interface DeptBrief {
+  department_id: number
+  department_name: string
+}
+
+interface VisibleUserItem {
+  user_id: number
+  user_name: string
+}
 
 interface DepartmentNode {
   id: number
-  feishu_department_id: string
   name: string
-  parent_id: number | null
   children: DepartmentNode[]
-}
-
-interface VisibleDeptItem {
-  department_id: number
-  department_name: string
 }
 
 interface UserPermission {
@@ -21,27 +25,13 @@ interface UserPermission {
   user_name: string
   feishu_open_id: string
   role: string
-  departments: string[]
+  dept_list: DeptBrief[]
   is_manager: boolean
-  auto_visible_depts: VisibleDeptItem[]
-  override_visible_depts: VisibleDeptItem[]
+  shared_to_users: VisibleUserItem[]
+  shared_to_depts: DeptBrief[]
 }
 
-type EffectiveRole = 'admin' | 'dept_manager' | 'employee'
-
-function getEffectiveRole(u: UserPermission): EffectiveRole {
-  if (u.role === 'admin') return 'admin'
-  if (u.is_manager) return 'dept_manager'
-  return 'employee'
-}
-
-const ROLE_CONFIG: Record<EffectiveRole, { label: string; color: string; bg: string; icon: typeof Shield; desc: string }> = {
-  admin: { label: '系统管理员', color: 'text-red-700', bg: 'bg-red-100 hover:bg-red-200', icon: ShieldCheck, desc: '可查看所有数据资产' },
-  dept_manager: { label: '部门管理员', color: 'text-blue-700', bg: 'bg-blue-100 hover:bg-blue-200', icon: Shield, desc: '可查看本部门员工数据' },
-  employee: { label: '普通用户', color: 'text-gray-700', bg: 'bg-gray-100 hover:bg-gray-200', icon: User, desc: '仅查看自己的数据' },
-}
-
-/** 扁平化部门树 */
+/** 扁平化部门树（供 SharingEditor 下拉用） */
 function flattenDepts(nodes: DepartmentNode[]): { id: number; name: string }[] {
   const result: { id: number; name: string }[] = []
   function walk(list: DepartmentNode[]) {
@@ -54,8 +44,32 @@ function flattenDepts(nodes: DepartmentNode[]): { id: number; name: string }[] {
   return result
 }
 
+/** 构建 deptId → 直属用户 映射 */
+function buildDeptMemberMap(users: UserPermission[]): Map<number, UserPermission[]> {
+  const map = new Map<number, UserPermission[]>()
+  for (const u of users) {
+    for (const d of u.dept_list) {
+      if (!map.has(d.department_id)) map.set(d.department_id, [])
+      map.get(d.department_id)!.push(u)
+    }
+  }
+  return map
+}
+
+/** 统计树节点下（含子节点）的总人数 */
+function countMembers(node: DepartmentNode, memberMap: Map<number, UserPermission[]>): number {
+  let count = memberMap.get(node.id)?.length ?? 0
+  for (const child of node.children) {
+    count += countMembers(child, memberMap)
+  }
+  return count
+}
+
 export default function DepartmentAdmin() {
+  const currentUser = getUser()
+  const admin = isAdmin(currentUser)
   const [users, setUsers] = useState<UserPermission[]>([])
+  const [deptTree, setDeptTree] = useState<DepartmentNode[]>([])
   const [allDepts, setAllDepts] = useState<{ id: number; name: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
@@ -68,6 +82,7 @@ export default function DepartmentAdmin() {
     ])
       .then(([permRes, treeRes]) => {
         setUsers(permRes.data)
+        setDeptTree(treeRes.data)
         setAllDepts(flattenDepts(treeRes.data))
       })
       .finally(() => setLoading(false))
@@ -88,54 +103,26 @@ export default function DepartmentAdmin() {
     }
   }
 
-  const handleSetRole = async (u: UserPermission, targetRole: EffectiveRole) => {
-    const currentRole = getEffectiveRole(u)
-    if (currentRole === targetRole) return
-
+  const handleSaveSharing = async (
+    userId: number,
+    userIds: number[],
+    deptIds: number[],
+    isSelf: boolean,
+  ) => {
     try {
-      if (targetRole === 'admin') {
-        await api.patch(`/departments/users/${u.user_id}/role`, null, { params: { role: 'admin' } })
-        if (u.is_manager) {
-          // 需要取消所有部门的 manager 身份 — 这里用第一个部门
-          await api.patch(`/departments/users/${u.user_id}/manager`, null, {
-            params: { department_id: u.auto_visible_depts[0]?.department_id, is_manager: false },
-          })
-        }
-      } else if (targetRole === 'dept_manager') {
-        if (u.role === 'admin') {
-          await api.patch(`/departments/users/${u.user_id}/role`, null, { params: { role: 'employee' } })
-        }
-        // 需要用户有部门，取第一个部门设为 manager
-        // 注意：如果用户属于多个部门，可能需要更复杂的逻辑
-        await api.patch(`/departments/users/${u.user_id}/manager`, null, {
-          params: { department_id: u.auto_visible_depts[0]?.department_id || 0, is_manager: true },
-        })
+      if (isSelf) {
+        await api.put('/departments/my/sharing', { user_ids: userIds, department_ids: deptIds })
       } else {
-        if (u.role === 'admin') {
-          await api.patch(`/departments/users/${u.user_id}/role`, null, { params: { role: 'employee' } })
-        }
-        if (u.is_manager) {
-          await api.patch(`/departments/users/${u.user_id}/manager`, null, {
-            params: { department_id: u.auto_visible_depts[0]?.department_id, is_manager: false },
-          })
-        }
+        await api.put(`/departments/users/${userId}/visibility`, { user_ids: userIds, department_ids: deptIds })
       }
-      toast.success(`已设置为${ROLE_CONFIG[targetRole].label}`)
-      loadData()
-    } catch {
-      toast.error('操作失败')
-    }
-  }
-
-  const handleSaveVisibility = async (userId: number, deptIds: number[]) => {
-    try {
-      await api.put(`/departments/users/${userId}/visibility`, { department_ids: deptIds })
-      toast.success('可见范围已更新')
+      toast.success('分享设置已更新')
       loadData()
     } catch (e: any) {
       toast.error(e.response?.data?.detail || '更新失败')
     }
   }
+
+  const myData = users.find(u => u.feishu_open_id === currentUser?.feishu_open_id)
 
   if (loading) {
     return (
@@ -145,6 +132,54 @@ export default function DepartmentAdmin() {
       </div>
     )
   }
+
+  // ── 普通用户视图：只看自己 ──
+  if (!admin) {
+    return (
+      <div className="space-y-6">
+        <h1 className="text-2xl font-bold text-gray-800">权限管理</h1>
+        {myData && (
+          <div className="bg-white rounded-xl shadow-sm p-6 space-y-5">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold">
+                {myData.user_name[0]}
+              </div>
+              <div>
+                <div className="font-semibold text-gray-800">{myData.user_name}</div>
+                <div className="text-xs text-gray-500">
+                  {myData.dept_list.map(d => d.department_name).join(', ') || '未分配部门'}
+                </div>
+              </div>
+              <RoleBadge role={myData.role} />
+            </div>
+            <div className="border-t border-gray-100 pt-5">
+              <h3 className="text-sm font-semibold text-gray-700 mb-1 flex items-center gap-2">
+                <Share2 size={15} />
+                我的数据分享
+              </h3>
+              <p className="text-xs text-gray-500 mb-4">
+                选择要分享给哪些同事或部门。被分享的人可以查看你的文档、会议和聊天记录。
+              </p>
+              <SharingEditor
+                currentUsers={myData.shared_to_users}
+                currentDepts={myData.shared_to_depts}
+                allUsers={users}
+                allDepts={allDepts}
+                selfId={myData.user_id}
+                onSave={(uids, dids) => handleSaveSharing(myData.user_id, uids, dids, true)}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // ── 超管视图：按部门树层级展示 ──
+  const memberMap = buildDeptMemberMap(users)
+
+  // 未分配部门的用户
+  const noDeptUsers = users.filter(u => u.dept_list.length === 0)
 
   return (
     <div className="space-y-6">
@@ -156,256 +191,457 @@ export default function DepartmentAdmin() {
           className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 disabled:opacity-50"
         >
           <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} />
-          同步飞书部门
+          同步飞书通讯录
         </button>
       </div>
 
-      {/* Role legend */}
-      <div className="flex flex-wrap gap-4">
-        {(Object.entries(ROLE_CONFIG) as [EffectiveRole, typeof ROLE_CONFIG[EffectiveRole]][]).map(([key, cfg]) => {
-          const Icon = cfg.icon
-          return (
-            <div key={key} className="flex items-center gap-2 text-sm text-gray-600">
-              <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${cfg.bg} ${cfg.color}`}>
-                <Icon size={12} />
-                {cfg.label}
-              </span>
-              <span>{cfg.desc}</span>
+      {deptTree.length > 0 ? (
+        <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+          {deptTree.map(node => (
+            <DeptTreeNode
+              key={node.id}
+              node={node}
+              depth={0}
+              memberMap={memberMap}
+              currentUser={currentUser}
+              allUsers={users}
+              allDepts={allDepts}
+              onSaveSharing={handleSaveSharing}
+            />
+          ))}
+          {noDeptUsers.length > 0 && (
+            <NoDeptSection
+              users={noDeptUsers}
+              currentUser={currentUser}
+              allUsers={users}
+              allDepts={allDepts}
+              onSaveSharing={handleSaveSharing}
+            />
+          )}
+        </div>
+      ) : (
+        <div className="bg-white rounded-xl shadow-sm p-8 text-center text-gray-400">
+          暂无用户数据，请点击"同步飞书通讯录"
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** 递归渲染部门树节点 */
+function DeptTreeNode({
+  node,
+  depth,
+  memberMap,
+  currentUser,
+  allUsers,
+  allDepts,
+  onSaveSharing,
+}: {
+  node: DepartmentNode
+  depth: number
+  memberMap: Map<number, UserPermission[]>
+  currentUser: any
+  allUsers: UserPermission[]
+  allDepts: { id: number; name: string }[]
+  onSaveSharing: (userId: number, userIds: number[], deptIds: number[], isSelf: boolean) => void
+}) {
+  const [open, setOpen] = useState(depth === 0)
+  const directMembers = memberMap.get(node.id) ?? []
+  const totalCount = countMembers(node, memberMap)
+  const hasContent = totalCount > 0 || node.children.length > 0
+
+  if (!hasContent && directMembers.length === 0) return null
+
+  // 不同层级的缩进和样式
+  const depthStyles = [
+    { bg: 'bg-gray-50', text: 'text-gray-900', size: 'text-sm', py: 'py-3.5', icon: 18 },    // 一级
+    { bg: 'bg-gray-50/50', text: 'text-gray-800', size: 'text-sm', py: 'py-3', icon: 16 },    // 二级
+    { bg: '', text: 'text-gray-700', size: 'text-xs', py: 'py-2.5', icon: 14 },               // 三级+
+  ]
+  const style = depthStyles[Math.min(depth, depthStyles.length - 1)]
+
+  return (
+    <div>
+      {/* 部门行 */}
+      <button
+        onClick={() => setOpen(!open)}
+        className={`w-full flex items-center gap-2 ${style.py} hover:bg-gray-50 transition-colors border-b border-gray-100`}
+        style={{ paddingLeft: `${20 + depth * 24}px` }}
+      >
+        {open
+          ? <ChevronDown size={14} className="text-gray-400 shrink-0" />
+          : <ChevronRight size={14} className="text-gray-400 shrink-0" />
+        }
+        <Building2 size={style.icon} className="text-indigo-500 shrink-0" />
+        <span className={`font-semibold ${style.text} ${style.size}`}>{node.name}</span>
+        <span className="text-xs text-gray-400 ml-1">
+          {directMembers.length > 0 && `${directMembers.length} 人`}
+          {directMembers.length > 0 && node.children.length > 0 && '，'}
+          {node.children.length > 0 && `${node.children.length} 个子部门`}
+        </span>
+      </button>
+
+      {open && (
+        <>
+          {/* 直属成员表格 */}
+          {directMembers.length > 0 && (
+            <div style={{ paddingLeft: `${depth * 24}px` }}>
+              <table className="w-full text-sm">
+                <tbody>
+                  {directMembers.map(u => (
+                    <tr key={u.user_id} className="border-b border-gray-50 hover:bg-gray-50/50">
+                      <td className="py-2.5 pl-14 pr-4 text-gray-800 font-medium w-40">
+                        {u.user_name}
+                        {u.feishu_open_id === currentUser?.feishu_open_id && (
+                          <span className="ml-1.5 text-xs text-indigo-500">(我)</span>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-4 w-28">
+                        <div className="flex items-center justify-center">
+                          <RoleBadge role={u.role} />
+                        </div>
+                      </td>
+                      <td className="py-2.5 px-4">
+                        <SharingDisplay
+                          user={u}
+                          allUsers={allUsers}
+                          allDepts={allDepts}
+                          canEdit
+                          onSave={(uids, dids) => onSaveSharing(u.user_id, uids, dids, false)}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
+          )}
+
+          {/* 子部门（递归） */}
+          {node.children.map(child => (
+            <DeptTreeNode
+              key={child.id}
+              node={child}
+              depth={depth + 1}
+              memberMap={memberMap}
+              currentUser={currentUser}
+              allUsers={allUsers}
+              allDepts={allDepts}
+              onSaveSharing={onSaveSharing}
+            />
+          ))}
+        </>
+      )}
+    </div>
+  )
+}
+
+/** 未分配部门用户 */
+function NoDeptSection({
+  users,
+  currentUser,
+  allUsers,
+  allDepts,
+  onSaveSharing,
+}: {
+  users: UserPermission[]
+  currentUser: any
+  allUsers: UserPermission[]
+  allDepts: { id: number; name: string }[]
+  onSaveSharing: (userId: number, userIds: number[], deptIds: number[], isSelf: boolean) => void
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-2 py-3 px-5 hover:bg-gray-50 transition-colors border-b border-gray-100"
+      >
+        {open ? <ChevronDown size={14} className="text-gray-400" /> : <ChevronRight size={14} className="text-gray-400" />}
+        <UserIcon size={16} className="text-gray-400" />
+        <span className="font-semibold text-gray-500 text-sm">未分配部门</span>
+        <span className="text-xs text-gray-400 ml-1">{users.length} 人</span>
+      </button>
+      {open && (
+        <table className="w-full text-sm">
+          <tbody>
+            {users.map(u => (
+              <tr key={u.user_id} className="border-b border-gray-50 hover:bg-gray-50/50">
+                <td className="py-2.5 pl-14 pr-4 text-gray-800 font-medium w-40">
+                  {u.user_name}
+                  {u.feishu_open_id === currentUser?.feishu_open_id && (
+                    <span className="ml-1.5 text-xs text-indigo-500">(我)</span>
+                  )}
+                </td>
+                <td className="py-2.5 px-4 w-28">
+                  <div className="flex items-center justify-center">
+                    <RoleBadge role={u.role} />
+                  </div>
+                </td>
+                <td className="py-2.5 px-4">
+                  <SharingDisplay
+                    user={u}
+                    allUsers={allUsers}
+                    allDepts={allDepts}
+                    canEdit
+                    onSave={(uids, dids) => onSaveSharing(u.user_id, uids, dids, false)}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  )
+}
+
+function RoleBadge({ role }: { role: string }) {
+  if (role === 'admin') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700">
+        <ShieldCheck size={12} />
+        超级管理员
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
+      <UserIcon size={12} />
+      普通用户
+    </span>
+  )
+}
+
+/** 表格中的分享展示（admin 可编辑） */
+function SharingDisplay({
+  user,
+  allUsers,
+  allDepts,
+  canEdit,
+  onSave,
+}: {
+  user: UserPermission
+  allUsers: UserPermission[]
+  allDepts: { id: number; name: string }[]
+  canEdit: boolean
+  onSave: (userIds: number[], deptIds: number[]) => void
+}) {
+  const [editing, setEditing] = useState(false)
+
+  if (user.role === 'admin') {
+    return <span className="text-xs text-red-600 font-medium">全部（超管）</span>
+  }
+
+  if (editing && canEdit) {
+    return (
+      <SharingEditor
+        currentUsers={user.shared_to_users}
+        currentDepts={user.shared_to_depts}
+        allUsers={allUsers}
+        allDepts={allDepts}
+        selfId={user.user_id}
+        onSave={(uids, dids) => { onSave(uids, dids); setEditing(false) }}
+        onCancel={() => setEditing(false)}
+      />
+    )
+  }
+
+  const hasUsers = user.shared_to_users.length > 0
+  const hasDepts = user.shared_to_depts.length > 0
+
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      {!hasUsers && !hasDepts && <span className="text-xs text-gray-400">未分享</span>}
+      {user.shared_to_depts.map(d => (
+        <span key={`d-${d.department_id}`} className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-green-100 text-green-700">
+          <Building2 size={10} />
+          {d.department_name}
+        </span>
+      ))}
+      {user.shared_to_users.map(u => (
+        <span key={`u-${u.user_id}`} className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-indigo-100 text-indigo-700">
+          {u.user_name}
+        </span>
+      ))}
+      {canEdit && (
+        <button
+          onClick={() => setEditing(true)}
+          className="p-1 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded text-xs"
+        >
+          编辑
+        </button>
+      )}
+    </div>
+  )
+}
+
+/** 分享编辑器：双 Tab — 选用户 / 选部门 */
+function SharingEditor({
+  currentUsers,
+  currentDepts,
+  allUsers,
+  allDepts,
+  selfId,
+  onSave,
+  onCancel,
+}: {
+  currentUsers: VisibleUserItem[]
+  currentDepts: DeptBrief[]
+  allUsers: UserPermission[]
+  allDepts: { id: number; name: string }[]
+  selfId: number
+  onSave: (userIds: number[], deptIds: number[]) => void
+  onCancel?: () => void
+}) {
+  const [selectedUsers, setSelectedUsers] = useState<number[]>(currentUsers.map(u => u.user_id))
+  const [selectedDepts, setSelectedDepts] = useState<number[]>(currentDepts.map(d => d.department_id))
+  const [tab, setTab] = useState<'user' | 'dept'>('user')
+  const [search, setSearch] = useState('')
+  const [dropdownOpen, setDropdownOpen] = useState(false)
+
+  const toggleUser = (id: number) => {
+    setSelectedUsers(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+  }
+  const toggleDept = (id: number) => {
+    setSelectedDepts(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+  }
+
+  const userCandidates = allUsers.filter(u => u.user_id !== selfId && u.role !== 'admin')
+  const filteredUsers = search ? userCandidates.filter(u => u.user_name.includes(search)) : userCandidates
+  const filteredDepts = search ? allDepts.filter(d => d.name.includes(search)) : allDepts
+
+  return (
+    <div className="flex flex-col gap-3">
+      {/* 已选标签 */}
+      <div className="flex flex-wrap gap-1.5 min-h-[28px]">
+        {selectedDepts.length === 0 && selectedUsers.length === 0 && (
+          <span className="text-xs text-gray-400 py-1">尚未分享给任何人</span>
+        )}
+        {selectedDepts.map(id => {
+          const d = allDepts.find(d => d.id === id)
+          return (
+            <span key={`d-${id}`} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs bg-green-100 text-green-700">
+              <Building2 size={10} />
+              {d?.name || id}
+              <button onClick={() => toggleDept(id)} className="hover:text-red-500"><X size={10} /></button>
+            </span>
+          )
+        })}
+        {selectedUsers.map(id => {
+          const u = allUsers.find(u => u.user_id === id)
+          return (
+            <span key={`u-${id}`} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs bg-indigo-100 text-indigo-700">
+              {u?.user_name || id}
+              <button onClick={() => toggleUser(id)} className="hover:text-red-500"><X size={10} /></button>
+            </span>
           )
         })}
       </div>
 
-      {/* Full-width user table */}
-      <div className="bg-white rounded-xl shadow-sm p-6">
-        {users.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="text-left py-3 px-4 text-gray-500 font-medium">姓名</th>
-                  <th className="text-left py-3 px-4 text-gray-500 font-medium">部门</th>
-                  <th className="text-center py-3 px-4 text-gray-500 font-medium">用户权限</th>
-                  <th className="text-left py-3 px-4 text-gray-500 font-medium">数据可见范围</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((u) => {
-                  const effectiveRole = getEffectiveRole(u)
-                  const cfg = ROLE_CONFIG[effectiveRole]
-                  const Icon = cfg.icon
-                  return (
-                    <tr key={u.user_id} className="border-t border-gray-100">
-                      <td className="py-3 px-4 text-gray-800 font-medium">{u.user_name}</td>
-                      <td className="py-3 px-4 text-gray-500">{u.departments.join(', ')}</td>
-                      <td className="py-3 px-4">
-                        <div className="flex items-center justify-center">
-                          <RoleDropdown
-                            currentRole={effectiveRole}
-                            config={cfg}
-                            icon={Icon}
-                            onSelect={(role) => handleSetRole(u, role)}
-                          />
-                        </div>
-                      </td>
-                      <td className="py-3 px-4">
-                        <VisibilityCell
-                          user={u}
-                          allDepts={allDepts}
-                          onSave={(deptIds) => handleSaveVisibility(u.user_id, deptIds)}
-                        />
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="text-gray-400 text-center py-8">暂无用户数据，请点击"同步飞书部门"</p>
+      {/* 选择下拉 */}
+      <div className="relative">
+        <button
+          onClick={() => { setDropdownOpen(!dropdownOpen); setSearch('') }}
+          className="text-left border border-gray-300 rounded-lg px-3 py-2 text-xs bg-white flex items-center gap-2 hover:border-indigo-400 transition-colors"
+        >
+          <Search size={12} className="text-gray-400" />
+          <span className="text-gray-500">添加分享对象（用户或部门）...</span>
+          <ChevronDown size={12} className="ml-auto text-gray-400" />
+        </button>
+        {dropdownOpen && (
+          <>
+            <div className="fixed inset-0 z-10" onClick={() => setDropdownOpen(false)} />
+            <div className="absolute left-0 mt-1 w-80 bg-white rounded-lg shadow-lg border border-gray-200 z-20">
+              {/* Tab 切换 */}
+              <div className="flex border-b border-gray-100">
+                <button
+                  onClick={() => { setTab('user'); setSearch('') }}
+                  className={`flex-1 py-2 text-xs font-medium ${tab === 'user' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500'}`}
+                >
+                  <UserIcon size={12} className="inline mr-1" />
+                  选择用户
+                </button>
+                <button
+                  onClick={() => { setTab('dept'); setSearch('') }}
+                  className={`flex-1 py-2 text-xs font-medium ${tab === 'dept' ? 'text-green-600 border-b-2 border-green-600' : 'text-gray-500'}`}
+                >
+                  <Building2 size={12} className="inline mr-1" />
+                  选择部门
+                </button>
+              </div>
+
+              {/* 搜索 */}
+              <div className="p-2 border-b border-gray-100">
+                <div className="flex items-center gap-1.5 px-2 py-1 bg-gray-50 rounded">
+                  <Search size={12} className="text-gray-400" />
+                  <input
+                    type="text"
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                    placeholder={tab === 'user' ? '搜索用户...' : '搜索部门...'}
+                    className="bg-transparent text-xs outline-none flex-1"
+                    autoFocus
+                  />
+                </div>
+              </div>
+
+              {/* 列表 */}
+              <div className="max-h-52 overflow-y-auto py-1">
+                {tab === 'user' ? (
+                  filteredUsers.length > 0 ? filteredUsers.map(u => (
+                    <label key={u.user_id} className="flex items-center gap-2 px-3 py-2 text-xs hover:bg-gray-50 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedUsers.includes(u.user_id)}
+                        onChange={() => toggleUser(u.user_id)}
+                        className="rounded border-gray-300 text-indigo-600"
+                      />
+                      <span className="font-medium">{u.user_name}</span>
+                      <span className="text-gray-400 ml-auto truncate max-w-[140px]">
+                        {u.dept_list.map(d => d.department_name).join(', ')}
+                      </span>
+                    </label>
+                  )) : <div className="px-3 py-3 text-xs text-gray-400 text-center">无匹配用户</div>
+                ) : (
+                  filteredDepts.length > 0 ? filteredDepts.map(d => (
+                    <label key={d.id} className="flex items-center gap-2 px-3 py-2 text-xs hover:bg-gray-50 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedDepts.includes(d.id)}
+                        onChange={() => toggleDept(d.id)}
+                        className="rounded border-gray-300 text-green-600"
+                      />
+                      <Building2 size={12} className="text-green-600" />
+                      <span className="font-medium">{d.name}</span>
+                    </label>
+                  )) : <div className="px-3 py-3 text-xs text-gray-400 text-center">无匹配部门</div>
+                )}
+              </div>
+            </div>
+          </>
         )}
       </div>
-    </div>
-  )
-}
 
-function VisibilityCell({
-  user,
-  allDepts,
-  onSave,
-}: {
-  user: UserPermission
-  allDepts: { id: number; name: string }[]
-  onSave: (deptIds: number[]) => void
-}) {
-  const [editing, setEditing] = useState(false)
-  const [selected, setSelected] = useState<number[]>([])
-  const [dropdownOpen, setDropdownOpen] = useState(false)
-  const dropdownRef = useRef<HTMLDivElement>(null)
-
-  // admin 显示"全部"
-  if (user.role === 'admin') {
-    return <span className="text-xs text-red-600 font-medium">全部</span>
-  }
-
-  const autoIds = new Set(user.auto_visible_depts.map(d => d.department_id))
-
-  const startEdit = () => {
-    setSelected(user.override_visible_depts.map(d => d.department_id))
-    setEditing(true)
-  }
-
-  const handleSave = () => {
-    onSave(selected)
-    setEditing(false)
-    setDropdownOpen(false)
-  }
-
-  const toggleDept = (id: number) => {
-    setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
-  }
-
-  if (editing) {
-    return (
-      <div className="flex flex-col gap-2">
-        {/* auto tags */}
-        <div className="flex flex-wrap gap-1">
-          {user.auto_visible_depts.map(d => (
-            <span key={`auto-${d.department_id}`} className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-500">
-              {d.department_name}
-              <span className="ml-1 text-gray-400">(自动)</span>
-            </span>
-          ))}
-        </div>
-
-        {/* multi-select dropdown */}
-        <div className="relative" ref={dropdownRef}>
+      {/* 操作按钮 */}
+      <div className="flex gap-2">
+        <button
+          onClick={() => { onSave(selectedUsers, selectedDepts); setDropdownOpen(false) }}
+          className="inline-flex items-center gap-1 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs hover:bg-indigo-700"
+        >
+          <Check size={12} />
+          保存
+        </button>
+        {onCancel && (
           <button
-            onClick={() => setDropdownOpen(!dropdownOpen)}
-            className="w-full text-left border border-gray-300 rounded-lg px-3 py-1.5 text-xs bg-white flex items-center justify-between"
+            onClick={onCancel}
+            className="inline-flex items-center gap-1 px-3 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-xs hover:bg-gray-200"
           >
-            <span className="text-gray-600">
-              {selected.length > 0
-                ? `已选 ${selected.length} 个部门`
-                : '选择额外可见部门...'}
-            </span>
-            <ChevronDown size={12} />
+            取消
           </button>
-          {dropdownOpen && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setDropdownOpen(false)} />
-              <div className="absolute left-0 mt-1 w-64 max-h-48 overflow-y-auto bg-white rounded-lg shadow-lg border border-gray-200 z-20 py-1">
-                {allDepts.filter(d => !autoIds.has(d.id)).map(d => (
-                  <label
-                    key={d.id}
-                    className="flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-gray-50 cursor-pointer"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selected.includes(d.id)}
-                      onChange={() => toggleDept(d.id)}
-                      className="rounded border-gray-300"
-                    />
-                    <span>{d.name}</span>
-                  </label>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-
-        <div className="flex gap-1">
-          <button onClick={handleSave} className="p-1 text-green-600 hover:bg-green-50 rounded" title="保存">
-            <Check size={14} />
-          </button>
-          <button onClick={() => { setEditing(false); setDropdownOpen(false) }} className="p-1 text-gray-400 hover:bg-gray-50 rounded" title="取消">
-            <X size={14} />
-          </button>
-        </div>
+        )}
       </div>
-    )
-  }
-
-  // 非编辑态
-  const hasAuto = user.auto_visible_depts.length > 0
-  const hasOverride = user.override_visible_depts.length > 0
-
-  return (
-    <div className="flex items-center gap-2 flex-wrap">
-      {!hasAuto && !hasOverride && (
-        <span className="text-xs text-gray-400">仅自己</span>
-      )}
-      {user.auto_visible_depts.map(d => (
-        <span key={`auto-${d.department_id}`} className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-500">
-          {d.department_name}
-          <span className="ml-1 text-gray-400">(自动)</span>
-        </span>
-      ))}
-      {user.override_visible_depts.map(d => (
-        <span key={`ov-${d.department_id}`} className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-indigo-100 text-indigo-700">
-          {d.department_name}
-        </span>
-      ))}
-      <button
-        onClick={startEdit}
-        className="p-1 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded"
-        title="编辑可见范围"
-      >
-        <Pencil size={12} />
-      </button>
-    </div>
-  )
-}
-
-function RoleDropdown({
-  currentRole,
-  config,
-  icon: Icon,
-  onSelect,
-}: {
-  currentRole: EffectiveRole
-  config: typeof ROLE_CONFIG[EffectiveRole]
-  icon: typeof Shield
-  onSelect: (role: EffectiveRole) => void
-}) {
-  const [open, setOpen] = useState(false)
-
-  return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen(!open)}
-        className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium transition-colors ${config.bg} ${config.color}`}
-      >
-        <Icon size={12} />
-        {config.label}
-        <ChevronDown size={10} />
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 mt-1 w-40 bg-white rounded-lg shadow-lg border border-gray-200 z-20 py-1">
-            {(Object.entries(ROLE_CONFIG) as [EffectiveRole, typeof ROLE_CONFIG[EffectiveRole]][]).map(([key, rcfg]) => {
-              const RIcon = rcfg.icon
-              return (
-                <button
-                  key={key}
-                  onClick={() => {
-                    onSelect(key)
-                    setOpen(false)
-                  }}
-                  className={`w-full text-left px-3 py-2 text-xs flex items-center gap-2 hover:bg-gray-50 ${
-                    key === currentRole ? 'font-semibold bg-gray-50' : ''
-                  }`}
-                >
-                  <RIcon size={12} className={rcfg.color} />
-                  <span>{rcfg.label}</span>
-                  {key === currentRole && <span className="ml-auto text-indigo-500">&#10003;</span>}
-                </button>
-              )
-            })}
-          </div>
-        </>
-      )}
     </div>
   )
 }

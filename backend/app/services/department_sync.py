@@ -93,6 +93,12 @@ async def sync_user_departments(db: AsyncSession) -> int:
     result = await db.execute(select(Department))
     all_depts = result.scalars().all()
 
+    # 预加载已有用户，避免重复创建
+    existing_users_result = await db.execute(select(User))
+    user_cache: dict[str, User] = {
+        u.feishu_open_id: u for u in existing_users_result.scalars().all()
+    }
+
     count = 0
     for dept in all_depts:
         try:
@@ -108,15 +114,24 @@ async def sync_user_departments(db: AsyncSession) -> int:
             if not open_id:
                 continue
 
-            # 查找用户
-            user_result = await db.execute(
-                select(User).where(User.feishu_open_id == open_id)
-            )
-            user = user_result.scalar_one_or_none()
+            # 从缓存查找或自动创建用户
+            user = user_cache.get(open_id)
             if not user:
-                # 用户未登录过，跳过
-                logger.debug("用户 %s 未在系统中注册，跳过", open_id)
-                continue
+                # 自动创建用户（飞书通讯录中的人）
+                user_name = u.get("name", open_id)
+                avatar = u.get("avatar", {}).get("avatar_72", "") if isinstance(u.get("avatar"), dict) else ""
+                email = u.get("email", "")
+                user = User(
+                    feishu_open_id=open_id,
+                    name=user_name,
+                    avatar_url=avatar or None,
+                    email=email or None,
+                    role="employee",
+                )
+                db.add(user)
+                await db.flush()
+                user_cache[open_id] = user
+                logger.info("自动创建用户: %s (%s)", user_name, open_id)
 
             is_leader = (open_id == leader_open_id) if leader_open_id else False
 
