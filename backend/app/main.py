@@ -22,6 +22,9 @@ from app.api.todos import router as todos_router
 from app.api.reports import router as reports_router
 from app.api.knowledge_graph import router as kg_router
 from app.api.insights import router as insights_router
+from app.api.profile import router as profile_router
+from app.api.search import router as search_router
+from app.api.structured_tables import router as structured_tables_router
 from app.database import async_session, engine
 from app.worker.scheduler import init_scheduler, shutdown_scheduler
 
@@ -79,6 +82,9 @@ app.include_router(todos_router)
 app.include_router(reports_router)
 app.include_router(kg_router)
 app.include_router(insights_router)
+app.include_router(profile_router)
+app.include_router(search_router)
+app.include_router(structured_tables_router)
 
 
 @app.get("/health", summary="健康检查")

@@ -7,6 +7,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,6 +37,7 @@ async def list_documents(
     search: str | None = Query(None),
     source_type: str | None = Query(None),
     category: str | None = Query(None),
+    uploader_name: str | None = Query(None),
 ) -> DocumentListResponse:
     visible_ids = await get_visible_owner_ids(current_user, db)
 
@@ -58,6 +60,11 @@ async def list_documents(
     if category:
         base = base.where(Document.category == category)
         count_stmt = count_stmt.where(Document.category == category)
+
+    if uploader_name:
+        like = f"%{uploader_name}%"
+        base = base.where(Document.uploader_name.ilike(like))
+        count_stmt = count_stmt.where(Document.uploader_name.ilike(like))
 
     total = (await db.execute(count_stmt)).scalar() or 0
     items_stmt = base.order_by(Document.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
@@ -140,3 +147,31 @@ async def delete_document(
     await db.delete(row)
     await db.commit()
     return {"message": "已删除"}
+
+
+class BatchDeleteRequest(BaseModel):
+    ids: list[int]
+
+
+@router.post("/batch-delete", summary="批量删除文档")
+async def batch_delete_documents(
+    body: BatchDeleteRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """批量删除文档（仅限 owner 或 admin）。"""
+    stmt = select(Document).where(Document.id.in_(body.ids))
+    if current_user.role != "admin":
+        stmt = stmt.where(Document.owner_id == current_user.feishu_open_id)
+    rows = (await db.execute(stmt)).scalars().all()
+
+    for row in rows:
+        if row.file_path and os.path.exists(row.file_path):
+            try:
+                os.remove(row.file_path)
+            except OSError as e:
+                logger.warning("删除磁盘文件失败: %s, %s", row.file_path, e)
+        await db.delete(row)
+
+    await db.commit()
+    return {"deleted": len(rows)}

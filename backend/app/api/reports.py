@@ -6,6 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -86,6 +87,7 @@ async def create_report(
         time_end=body.time_range_end,
         data_sources=body.data_sources,
         extra_instructions=body.extra_instructions,
+        target_reader_ids=body.target_reader_ids,
     )
     return report
 
@@ -107,6 +109,7 @@ async def create_report_stream(
             time_end=body.time_range_end,
             data_sources=body.data_sources,
             extra_instructions=body.extra_instructions,
+            target_reader_ids=body.target_reader_ids,
         ):
             yield f"data: {chunk}\n\n"
         yield "data: [DONE]\n\n"
@@ -124,9 +127,17 @@ async def list_reports(
     db: Annotated[AsyncSession, Depends(get_db)],
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    search: str | None = Query(None),
+    status: str | None = Query(None),
 ):
     """获取用户的报告列表。"""
     conditions = [Report.owner_id == current_user.feishu_open_id]
+
+    if search:
+        conditions.append(Report.title.ilike(f"%{search}%"))
+
+    if status:
+        conditions.append(Report.status == status)
 
     count_result = await db.execute(
         select(func.count()).select_from(Report).where(and_(*conditions))
@@ -223,3 +234,29 @@ async def push_report_to_feishu(
         if "重新登录" in err_msg:
             raise HTTPException(status_code=401, detail=err_msg)
         raise HTTPException(status_code=502, detail=f"飞书文档创建失败: {e}")
+
+
+class BatchDeleteRequest(BaseModel):
+    ids: list[int]
+
+
+@router.post("/reports/batch-delete", summary="批量删除报告")
+async def batch_delete_reports(
+    body: BatchDeleteRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """批量删除报告（仅限 owner）。"""
+    result = await db.execute(
+        select(Report).where(
+            Report.id.in_(body.ids),
+            Report.owner_id == current_user.feishu_open_id,
+        )
+    )
+    rows = result.scalars().all()
+
+    for row in rows:
+        await db.delete(row)
+
+    await db.commit()
+    return {"deleted": len(rows)}

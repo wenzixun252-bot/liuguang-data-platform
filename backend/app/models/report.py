@@ -52,5 +52,6 @@ class Report(Base):
     data_sources_used: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
     feishu_doc_token: Mapped[str | None] = mapped_column(String(256))
     feishu_doc_url: Mapped[str | None] = mapped_column(String(1024))
+    target_readers: Mapped[dict] = mapped_column(JSONB, nullable=True, server_default="[]")
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now(), onupdate=func.now())

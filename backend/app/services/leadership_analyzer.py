@@ -13,6 +13,7 @@ from app.models.chat_message import ChatMessage
 from app.models.document import Document
 from app.models.meeting import Meeting
 from app.models.leadership_insight import LeadershipInsight
+from app.models.user import User
 from app.services.llm import llm_client
 
 logger = logging.getLogger(__name__)
@@ -87,6 +88,14 @@ async def get_leadership_candidates(
             if name not in candidates:
                 candidates[name] = {"name": name, "meeting_count": 0, "message_count": 0, "document_count": 0}
             candidates[name]["document_count"] = count
+
+    # 获取所有内部用户名集合
+    user_result = await db.execute(select(User.name).where(User.name.isnot(None)))
+    internal_names = {row[0] for row in user_result.all() if row[0]}
+
+    # 标记内部/外部
+    for c in candidates.values():
+        c["is_internal"] = c["name"] in internal_names
 
     # 按总数据量排序
     result = sorted(

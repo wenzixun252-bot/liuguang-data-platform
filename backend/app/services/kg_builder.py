@@ -28,6 +28,7 @@ EXTRACT_KG_PROMPT = """你是一个知识图谱构建专家。请从以下文本
 - organization: 组织/部门
 - event: 事件
 - document: 文档
+- community: 社群/群组/团队
 
 ## 关系类型
 - collaborates_with: 合作关系（person ↔ person）

@@ -115,6 +115,7 @@ function FeishuSyncTab() {
   const existingKeys = new Set(sources.map((s) => `${s.app_token}:${s.table_id}`))
 
   const [polling, setPolling] = useState(false)
+  const [syncingSourceId, setSyncingSourceId] = useState<number | null>(null)
 
   const loadSources = useCallback((silent = false) => {
     if (!silent) setLoading(true)
@@ -285,6 +286,19 @@ function FeishuSyncTab() {
     }
   }
 
+  const handleSyncSingle = async (sourceId: number) => {
+    setSyncingSourceId(sourceId)
+    try {
+      await api.post(`/import/feishu-sync/${sourceId}`)
+      toast.success('同步任务已触发')
+      setPolling(true)
+    } catch (e: any) {
+      toast.error(e.response?.data?.detail || '触发失败')
+    } finally {
+      setSyncingSourceId(null)
+    }
+  }
+
   const handleDelete = async (id: number) => {
     if (!confirm('确定删除此数据源？')) return
     try {
@@ -444,6 +458,7 @@ function FeishuSyncTab() {
                 <th className="text-left py-3 px-4 text-gray-500 font-medium">类型</th>
                 <th className="text-left py-3 px-4 text-gray-500 font-medium">同步状态</th>
                 <th className="text-left py-3 px-4 text-gray-500 font-medium">记录数</th>
+                <th className="text-left py-3 px-4 text-gray-500 font-medium">最近同步</th>
                 <th className="text-left py-3 px-4 text-gray-500 font-medium hidden md:table-cell">App Token</th>
                 <th className="text-left py-3 px-4 text-gray-500 font-medium">添加时间</th>
                 <th className="text-right py-3 px-4 text-gray-500 font-medium">操作</th>
@@ -462,12 +477,24 @@ function FeishuSyncTab() {
                     <SyncStatusBadge status={s.last_sync_status} errorMessage={s.error_message} />
                   </td>
                   <td className="py-3 px-4 text-gray-600">{s.records_synced ?? '-'}</td>
+                  <td className="py-3 px-4 text-gray-500 text-xs">
+                    {s.last_sync_time ? new Date(s.last_sync_time).toLocaleString('zh-CN') : '从未同步'}
+                  </td>
                   <td className="py-3 px-4 text-gray-500 hidden md:table-cell font-mono text-xs">{s.app_token}</td>
                   <td className="py-3 px-4 text-gray-500">{new Date(s.created_at).toLocaleString('zh-CN')}</td>
-                  <td className="py-3 px-4 text-right">
+                  <td className="py-3 px-4 text-right flex items-center justify-end gap-1">
+                    <button
+                      onClick={() => handleSyncSingle(s.id)}
+                      disabled={syncingSourceId === s.id || s.last_sync_status === 'running'}
+                      className="p-1.5 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 rounded disabled:opacity-50"
+                      title="同步此数据源"
+                    >
+                      <RefreshCw size={16} className={(syncingSourceId === s.id || s.last_sync_status === 'running') ? 'animate-spin' : ''} />
+                    </button>
                     <button
                       onClick={() => handleDelete(s.id)}
                       className="p-1.5 text-gray-400 hover:text-red-500 rounded"
+                      title="删除"
                     >
                       <Trash2 size={16} />
                     </button>

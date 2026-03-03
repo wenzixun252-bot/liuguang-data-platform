@@ -3,6 +3,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +29,7 @@ async def list_chat_messages(
     page_size: int = Query(20, ge=1, le=100),
     search: str | None = Query(None),
     chat_id: str | None = Query(None),
+    sender: str | None = Query(None),
 ) -> ChatMessageListResponse:
     visible_ids = await get_visible_owner_ids(current_user, db)
 
@@ -46,6 +48,11 @@ async def list_chat_messages(
     if chat_id:
         base = base.where(ChatMessage.chat_id == chat_id)
         count_stmt = count_stmt.where(ChatMessage.chat_id == chat_id)
+
+    if sender:
+        like = f"%{sender}%"
+        base = base.where(ChatMessage.sender.ilike(like))
+        count_stmt = count_stmt.where(ChatMessage.sender.ilike(like))
 
     total = (await db.execute(count_stmt)).scalar() or 0
     items_stmt = base.order_by(ChatMessage.sent_at.desc().nullslast()).offset((page - 1) * page_size).limit(page_size)
@@ -94,3 +101,26 @@ async def delete_chat_message(
     await db.delete(row)
     await db.commit()
     return {"message": "已删除"}
+
+
+class BatchDeleteRequest(BaseModel):
+    ids: list[int]
+
+
+@router.post("/batch-delete", summary="批量删除聊天消息")
+async def batch_delete_chat_messages(
+    body: BatchDeleteRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """批量删除聊天消息（仅限 owner 或 admin）。"""
+    stmt = select(ChatMessage).where(ChatMessage.id.in_(body.ids))
+    if current_user.role != "admin":
+        stmt = stmt.where(ChatMessage.owner_id == current_user.feishu_open_id)
+    rows = (await db.execute(stmt)).scalars().all()
+
+    for row in rows:
+        await db.delete(row)
+
+    await db.commit()
+    return {"deleted": len(rows)}

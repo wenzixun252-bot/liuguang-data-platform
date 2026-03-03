@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import {
   RefreshCw, Play, CheckCircle, XCircle, Clock, Loader2,
-  Plus, Trash2, ToggleLeft, ToggleRight,
+  Plus, Trash2, ToggleLeft, ToggleRight, Search,
 } from 'lucide-react'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
@@ -41,6 +41,8 @@ export default function ETLAdmin() {
   const [loading, setLoading] = useState(true)
   const [triggering, setTriggering] = useState(false)
   const [showAddForm, setShowAddForm] = useState(false)
+  const [search, setSearch] = useState('')
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
 
   const [form, setForm] = useState({
     app_token: '',
@@ -61,6 +63,47 @@ export default function ETLAdmin() {
   useEffect(() => {
     fetchData()
   }, [])
+
+  useEffect(() => {
+    setSelectedIds(new Set())
+  }, [search])
+
+  // 前端搜索过滤
+  const filtered = search
+    ? sources.filter((s) =>
+        (s.table_name || '').toLowerCase().includes(search.toLowerCase()) ||
+        (s.asset_type || '').toLowerCase().includes(search.toLowerCase()) ||
+        (s.owner_name || '').toLowerCase().includes(search.toLowerCase())
+      )
+    : sources
+
+  const currentIds = filtered.map((s) => s.id)
+  const allSelected = currentIds.length > 0 && currentIds.every((id) => selectedIds.has(id))
+
+  const toggleSelectAll = () => {
+    if (allSelected) setSelectedIds(new Set())
+    else setSelectedIds(new Set(currentIds))
+  }
+
+  const toggleSelect = (id: number) => {
+    const next = new Set(selectedIds)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    setSelectedIds(next)
+  }
+
+  const handleBatchDelete = async () => {
+    if (selectedIds.size === 0) return
+    if (!confirm(`确定要删除选中的 ${selectedIds.size} 个数据源吗？`)) return
+    try {
+      const res = await api.post('/etl/sources/batch-delete', { ids: Array.from(selectedIds) })
+      toast.success(`已删除 ${res.data.deleted} 个`)
+      setSelectedIds(new Set())
+      fetchData()
+    } catch {
+      toast.error('批量删除失败')
+    }
+  }
 
   const handleTrigger = async () => {
     if (sources.filter(s => s.is_enabled).length === 0) {
@@ -157,13 +200,25 @@ export default function ETLAdmin() {
       <div className="bg-white rounded-xl shadow-sm p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-700">数据源管理</h2>
-          <button
-            onClick={() => setShowAddForm(!showAddForm)}
-            className="flex items-center gap-1 px-3 py-2 text-sm text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-          >
-            <Plus size={14} />
-            添加数据源
-          </button>
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                placeholder="搜索数据源..."
+                className="pl-8 pr-4 py-2 border border-gray-200 rounded-lg text-sm w-48 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+            <button
+              onClick={() => setShowAddForm(!showAddForm)}
+              className="flex items-center gap-1 px-3 py-2 text-sm text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+            >
+              <Plus size={14} />
+              添加数据源
+            </button>
+          </div>
         </div>
 
         {showAddForm && (
@@ -196,14 +251,37 @@ export default function ETLAdmin() {
           </form>
         )}
 
+        {/* Batch action bar */}
+        {selectedIds.size > 0 && (
+          <div className="flex items-center gap-3 px-4 py-2 mb-4 bg-indigo-50 border border-indigo-200 rounded-lg">
+            <span className="text-sm text-indigo-700 font-medium">已选择 {selectedIds.size} 个</span>
+            <button
+              onClick={handleBatchDelete}
+              className="flex items-center gap-1 px-3 py-1.5 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 text-sm"
+            >
+              <Trash2 size={14} />
+              批量删除
+            </button>
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="px-3 py-1.5 text-gray-500 hover:bg-gray-100 rounded-lg text-sm"
+            >
+              取消选择
+            </button>
+          </div>
+        )}
+
         {/* 合并的数据源 + 同步状态表 */}
         {loading ? (
           <div className="text-center text-gray-400 py-8">加载中...</div>
-        ) : sources.length > 0 ? (
+        ) : filtered.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50">
                 <tr>
+                  <th className="py-3 px-4 w-10">
+                    <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="rounded" />
+                  </th>
                   <th className="text-left py-3 px-4 text-gray-500 font-medium">表名称</th>
                   <th className="text-left py-3 px-4 text-gray-500 font-medium">类型</th>
                   <th className="text-left py-3 px-4 text-gray-500 font-medium hidden md:table-cell">添加人</th>
@@ -216,10 +294,13 @@ export default function ETLAdmin() {
                 </tr>
               </thead>
               <tbody>
-                {sources.map((s) => {
+                {filtered.map((s) => {
                   const syncCfg = STATUS_CONFIG[s.last_sync_status || ''] || null
                   return (
-                    <tr key={s.id} className="border-t border-gray-50 hover:bg-gray-50/50">
+                    <tr key={s.id} className={`border-t border-gray-50 hover:bg-gray-50/50 ${selectedIds.has(s.id) ? 'bg-indigo-50/30' : ''}`}>
+                      <td className="py-3 px-4">
+                        <input type="checkbox" checked={selectedIds.has(s.id)} onChange={() => toggleSelect(s.id)} className="rounded" />
+                      </td>
                       <td className="py-3 px-4">
                         <div className="text-gray-800 font-medium">{s.table_name || '-'}</div>
                         <div className="text-xs text-gray-400 font-mono mt-0.5">{s.app_token.slice(0, 12)}.../{s.table_id}</div>
@@ -272,8 +353,8 @@ export default function ETLAdmin() {
           </div>
         ) : (
           <div className="text-center py-12">
-            <div className="text-gray-400 mb-2">暂无数据源</div>
-            <div className="text-sm text-gray-300">点击「添加数据源」配置飞书多维表格，或由用户在「数据导入」页面添加</div>
+            <div className="text-gray-400 mb-2">{search ? '没有匹配的数据源' : '暂无数据源'}</div>
+            {!search && <div className="text-sm text-gray-300">点击「添加数据源」配置飞书多维表格，或由用户在「数据导入」页面添加</div>}
           </div>
         )}
       </div>

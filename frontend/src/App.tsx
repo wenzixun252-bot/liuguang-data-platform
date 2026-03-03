@@ -17,6 +17,7 @@ import Reports from './pages/Reports'
 import ReportDetail from './pages/ReportDetail'
 import KnowledgeGraph from './pages/KnowledgeGraph'
 import LeadershipInsight from './pages/LeadershipInsight'
+import StructuredTables from './pages/StructuredTables'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -40,6 +41,7 @@ export default function App() {
           >
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/import" element={<DataImport />} />
+            <Route path="/structured-tables" element={<StructuredTables />} />
             <Route path="/documents" element={<Documents />} />
             <Route path="/meetings" element={<Meetings />} />
             <Route path="/messages" element={<Messages />} />

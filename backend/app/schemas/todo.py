@@ -24,6 +24,7 @@ class TodoOut(BaseModel):
     status: str
     feishu_task_id: str | None = None
     pushed_at: datetime | None = None
+    completed_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -39,14 +40,10 @@ class TodoUpdate(BaseModel):
     status: str | None = None
 
 
-class TodoBatchConfirm(BaseModel):
-    """批量确认请求。"""
+class TodoStatusUpdate(BaseModel):
+    """批量状态变更请求。"""
     ids: list[int]
-
-
-class TodoBatchPush(BaseModel):
-    """批量推送请求。"""
-    ids: list[int]
+    status: str
 
 
 class TodoListResponse(BaseModel):

@@ -214,6 +214,76 @@ async def gather_data(
     return data
 
 
+async def _build_reader_context(db: AsyncSession, owner_id: str, reader_ids: list[str]) -> str:
+    """构建阅读者画像上下文，注入到 LLM prompt 中。"""
+    if not reader_ids:
+        return ""
+
+    from app.models.knowledge_graph import KGEntity, KGRelation
+    from app.models.leadership_insight import LeadershipInsight
+
+    reader_profiles = []
+    for reader_name in reader_ids:
+        profile_parts = []
+
+        # 从知识图谱查找此人的关联
+        entity_result = await db.execute(
+            select(KGEntity).where(and_(
+                KGEntity.owner_id == owner_id,
+                KGEntity.entity_type == "person",
+                KGEntity.name == reader_name,
+            )).limit(1)
+        )
+        entity = entity_result.scalar_one_or_none()
+
+        if entity:
+            # 获取其关联的项目和话题
+            from sqlalchemy import or_
+            rel_result = await db.execute(
+                select(KGRelation).where(and_(
+                    KGRelation.owner_id == owner_id,
+                    or_(
+                        KGRelation.source_entity_id == entity.id,
+                        KGRelation.target_entity_id == entity.id,
+                    ),
+                )).limit(20)
+            )
+            rels = rel_result.scalars().all()
+            related_ids = set()
+            for r in rels:
+                related_ids.add(r.source_entity_id)
+                related_ids.add(r.target_entity_id)
+            related_ids.discard(entity.id)
+
+            if related_ids:
+                re_result = await db.execute(
+                    select(KGEntity).where(KGEntity.id.in_(related_ids))
+                )
+                for re in re_result.scalars().all():
+                    if re.entity_type == "project":
+                        profile_parts.append(f"关注项目: {re.name}")
+                    elif re.entity_type == "topic":
+                        profile_parts.append(f"关注话题: {re.name}")
+
+        # 查找领导力洞察
+        insight_result = await db.execute(
+            select(LeadershipInsight)
+            .where(LeadershipInsight.target_user_name == reader_name)
+            .order_by(LeadershipInsight.generated_at.desc())
+            .limit(1)
+        )
+        insight = insight_result.scalar_one_or_none()
+        if insight and insight.report_markdown:
+            profile_parts.append(f"风格特点: {insight.report_markdown[:200]}")
+
+        if profile_parts:
+            reader_profiles.append(f"- {reader_name}: {'; '.join(profile_parts)}")
+        else:
+            reader_profiles.append(f"- {reader_name}")
+
+    return "\n\n## 报告阅读者画像\n以下是本报告的目标阅读者信息，请根据他们的关注点和偏好来调整报告内容的侧重：\n" + "\n".join(reader_profiles) + "\n"
+
+
 async def generate_report(
     db: AsyncSession,
     owner_id: str,
@@ -223,6 +293,7 @@ async def generate_report(
     time_end: datetime,
     data_sources: list[str],
     extra_instructions: str | None = None,
+    target_reader_ids: list[str] | None = None,
 ) -> Report:
     """生成报告（非流式）。"""
     # 确保 naive datetime（三表和 reports 表都是 TIMESTAMP WITHOUT TIME ZONE）
@@ -239,11 +310,14 @@ async def generate_report(
     # 收集数据
     data = await gather_data(db, owner_id, time_start, time_end, data_sources)
 
+    # 构建阅读者上下文
+    reader_context = await _build_reader_context(db, owner_id, target_reader_ids or [])
+
     # 构建 prompt
     data_text = json.dumps(data, ensure_ascii=False, indent=2)
     prompt = template.prompt_template.format(
         data=data_text[:8000],
-        extra_instructions=extra_instructions or "",
+        extra_instructions=(extra_instructions or "") + reader_context,
     )
 
     # 创建报告记录
@@ -254,6 +328,7 @@ async def generate_report(
         status="generating",
         time_range_start=time_start,
         time_range_end=time_end,
+        target_readers=target_reader_ids or [],
         data_sources_used={
             "sources": data_sources,
             "counts": {
@@ -295,6 +370,7 @@ async def generate_report_stream(
     time_end: datetime,
     data_sources: list[str],
     extra_instructions: str | None = None,
+    target_reader_ids: list[str] | None = None,
 ) -> AsyncGenerator[str, None]:
     """流式生成报告（SSE）。"""
     if time_start.tzinfo is not None:
@@ -309,10 +385,13 @@ async def generate_report_stream(
 
     data = await gather_data(db, owner_id, time_start, time_end, data_sources)
 
+    # 构建阅读者上下文
+    reader_context = await _build_reader_context(db, owner_id, target_reader_ids or [])
+
     data_text = json.dumps(data, ensure_ascii=False, indent=2)
     prompt = template.prompt_template.format(
         data=data_text[:8000],
-        extra_instructions=extra_instructions or "",
+        extra_instructions=(extra_instructions or "") + reader_context,
     )
 
     # 创建报告记录
@@ -323,6 +402,7 @@ async def generate_report_stream(
         status="generating",
         time_range_start=time_start,
         time_range_end=time_end,
+        target_readers=target_reader_ids or [],
         data_sources_used={
             "sources": data_sources,
             "counts": {

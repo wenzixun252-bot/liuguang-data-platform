@@ -951,6 +951,314 @@ class FeishuClient:
 
         return blocks
 
+    async def get_task_detail(
+        self,
+        task_id: str,
+        user_access_token: str | None = None,
+    ) -> dict | None:
+        """获取飞书任务详情，返回任务数据（含完成状态）。
+
+        Returns:
+            任务详情 dict，失败返回 None
+        """
+        token = user_access_token
+        if not token:
+            token = await self.get_tenant_access_token()
+
+        async with self._client() as client:
+            try:
+                resp = await client.get(
+                    f"{FEISHU_BASE_URL}/task/v2/tasks/{task_id}",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json; charset=utf-8",
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                if data.get("code") == 0:
+                    return data.get("data", {}).get("task")
+                logger.warning("获取飞书任务 %s 失败: code=%s", task_id, data.get("code"))
+                return None
+            except Exception as e:
+                logger.warning("获取飞书任务 %s 异常: %s", task_id, e)
+                return None
+
+
+    # ── 飞书表格 (Spreadsheet) API ────────────────────────────
+
+    async def get_spreadsheet_meta(self, spreadsheet_token: str, user_access_token: str | None = None) -> dict:
+        """获取飞书表格元信息（名称等）。
+
+        GET /open-apis/sheets/v3/spreadsheets/{token}
+        返回: {title, owner_id, url, ...}
+        """
+        if user_access_token:
+            token = user_access_token
+        else:
+            token = await self.get_tenant_access_token()
+
+        async with self._client() as client:
+            resp = await client.get(
+                f"{FEISHU_BASE_URL}/sheets/v3/spreadsheets/{spreadsheet_token}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("code") != 0:
+                raise FeishuAPIError(
+                    f"获取飞书表格元信息失败: {data.get('msg', '未知错误')}"
+                )
+            return data.get("data", {}).get("spreadsheet", {})
+
+    async def get_spreadsheet_sheets(self, spreadsheet_token: str, user_access_token: str | None = None) -> list[dict]:
+        """获取飞书表格下的所有工作表。
+
+        GET /open-apis/sheets/v3/spreadsheets/{token}/sheets/query
+        返回: [{sheet_id, title, row_count, column_count}, ...]
+        """
+        if user_access_token:
+            token = user_access_token
+        else:
+            token = await self.get_tenant_access_token()
+
+        async with self._client() as client:
+            resp = await client.get(
+                f"{FEISHU_BASE_URL}/sheets/v3/spreadsheets/{spreadsheet_token}/sheets/query",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("code") != 0:
+                raise FeishuAPIError(
+                    f"获取工作表列表失败: {data.get('msg', '未知错误')}"
+                )
+            return data.get("data", {}).get("sheets", [])
+
+    async def get_spreadsheet_values(self, spreadsheet_token: str, sheet_range: str, user_access_token: str | None = None) -> list[list]:
+        """读取飞书表格指定范围的数据。
+
+        GET /open-apis/sheets/v2/spreadsheets/{token}/values/{range}
+        range 格式: "SheetName!A1:Z1000"
+        返回: 二维数组 [[行1值...], [行2值...], ...]
+        """
+        if user_access_token:
+            token = user_access_token
+        else:
+            token = await self.get_tenant_access_token()
+
+        async with self._client() as client:
+            resp = await client.get(
+                f"{FEISHU_BASE_URL}/sheets/v2/spreadsheets/{spreadsheet_token}/values/{sheet_range}",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("code") != 0:
+                raise FeishuAPIError(
+                    f"读取飞书表格数据失败: {data.get('msg', '未知错误')}"
+                )
+            value_range = data.get("data", {}).get("valueRange", {})
+            return value_range.get("values", [])
+
+    async def list_drive_spreadsheets(self, user_access_token: str | None = None) -> list[dict]:
+        """列出用户有权限访问的所有飞书表格（sheet 类型）文件。
+
+        返回: [{token, name, type, url, ...}]
+        """
+        if user_access_token:
+            token = user_access_token
+        else:
+            token = await self.get_tenant_access_token()
+
+        all_files: list[dict] = []
+
+        async with self._client() as client:
+            page_token: str | None = None
+            while True:
+                params: dict = {"page_size": 50}
+                if page_token:
+                    params["page_token"] = page_token
+
+                resp = await client.get(
+                    f"{FEISHU_BASE_URL}/drive/v1/files",
+                    headers={"Authorization": f"Bearer {token}"},
+                    params=params,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                if data.get("code") != 0:
+                    raise FeishuAPIError(
+                        f"获取云文档列表失败: {data.get('msg', '未知错误')}"
+                    )
+
+                items = data.get("data", {}).get("files", [])
+                for item in items:
+                    if item.get("type") == "sheet":
+                        all_files.append(item)
+
+                if not data.get("data", {}).get("has_more"):
+                    break
+                page_token = data.get("data", {}).get("page_token")
+                await asyncio.sleep(0.2)
+
+        return all_files
+
+
+    # ── 知识空间 (Wiki) API ──────────────────────────────────
+
+    async def get_wiki_node_info(self, node_token: str, user_access_token: str | None = None) -> dict:
+        """根据 wiki node_token 获取节点信息，解析出实际的 obj_token 和 obj_type。
+
+        GET /open-apis/wiki/v2/spaces/get_node?token={node_token}
+        返回: {node_token, obj_token, obj_type, title, space_id, ...}
+        obj_token 就是多维表格的 app_token 或飞书表格的 spreadsheet_token。
+        """
+        if user_access_token:
+            token = user_access_token
+        else:
+            token = await self.get_tenant_access_token()
+
+        async with self._client() as client:
+            resp = await client.get(
+                f"{FEISHU_BASE_URL}/wiki/v2/spaces/get_node",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"token": node_token},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("code") != 0:
+                raise FeishuAPIError(
+                    f"获取 Wiki 节点信息失败: {data.get('msg', '未知错误')}"
+                )
+            return data.get("data", {}).get("node", {})
+
+    async def list_wiki_spaces(self, user_access_token: str | None = None) -> list[dict]:
+        """列出用户有权限访问的所有知识空间。
+
+        GET /open-apis/wiki/v2/spaces
+        返回: [{space_id, name, description, ...}]
+        """
+        if user_access_token:
+            token = user_access_token
+        else:
+            token = await self.get_tenant_access_token()
+
+        all_spaces: list[dict] = []
+
+        async with self._client() as client:
+            page_token: str | None = None
+            while True:
+                params: dict = {"page_size": 50}
+                if page_token:
+                    params["page_token"] = page_token
+
+                resp = await client.get(
+                    f"{FEISHU_BASE_URL}/wiki/v2/spaces",
+                    headers={"Authorization": f"Bearer {token}"},
+                    params=params,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                if data.get("code") != 0:
+                    raise FeishuAPIError(
+                        f"获取知识空间列表失败: {data.get('msg', '未知错误')}"
+                    )
+
+                items = data.get("data", {}).get("items", [])
+                all_spaces.extend(items)
+
+                if not data.get("data", {}).get("has_more"):
+                    break
+                page_token = data.get("data", {}).get("page_token")
+                await asyncio.sleep(0.2)
+
+        return all_spaces
+
+    async def list_wiki_nodes(
+        self,
+        space_id: str,
+        parent_node_token: str | None = None,
+        user_access_token: str | None = None,
+    ) -> list[dict]:
+        """列出知识空间下的节点（递归获取第一层）。
+
+        GET /open-apis/wiki/v2/spaces/{space_id}/nodes
+        每个节点包含: {node_token, obj_token, obj_type, title, ...}
+        obj_type 可能是: "doc"/"docx"/"sheet"/"bitable"/"file" 等
+        """
+        if user_access_token:
+            token = user_access_token
+        else:
+            token = await self.get_tenant_access_token()
+
+        all_nodes: list[dict] = []
+
+        async with self._client() as client:
+            page_token: str | None = None
+            while True:
+                params: dict = {"page_size": 50}
+                if page_token:
+                    params["page_token"] = page_token
+                if parent_node_token:
+                    params["parent_node_token"] = parent_node_token
+
+                resp = await client.get(
+                    f"{FEISHU_BASE_URL}/wiki/v2/spaces/{space_id}/nodes",
+                    headers={"Authorization": f"Bearer {token}"},
+                    params=params,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                if data.get("code") != 0:
+                    raise FeishuAPIError(
+                        f"获取知识空间节点失败: {data.get('msg', '未知错误')}"
+                    )
+
+                items = data.get("data", {}).get("items", [])
+                all_nodes.extend(items)
+
+                if not data.get("data", {}).get("has_more"):
+                    break
+                page_token = data.get("data", {}).get("page_token")
+                await asyncio.sleep(0.2)
+
+        return all_nodes
+
+    async def list_wiki_nodes_by_type(
+        self,
+        obj_types: set[str],
+        user_access_token: str | None = None,
+    ) -> list[dict]:
+        """从所有知识空间中收集指定类型的节点。
+
+        Args:
+            obj_types: 要筛选的类型集合，如 {"bitable", "sheet"}
+
+        返回: [{obj_token, title, obj_type, space_name, ...}]
+        """
+        results: list[dict] = []
+        try:
+            spaces = await self.list_wiki_spaces(user_access_token)
+        except FeishuAPIError as e:
+            logger.warning("获取知识空间列表失败（可能缺少权限）: %s", e)
+            return results
+
+        for space in spaces:
+            space_id = space.get("space_id", "")
+            space_name = space.get("name", "")
+            try:
+                nodes = await self.list_wiki_nodes(space_id, user_access_token=user_access_token)
+                for node in nodes:
+                    if node.get("obj_type") in obj_types:
+                        node["space_name"] = space_name
+                        results.append(node)
+            except FeishuAPIError as e:
+                logger.warning("获取知识空间 %s 节点失败: %s", space_name, e)
+                continue
+
+        return results
+
 
 class FeishuAPIError(Exception):
     """飞书 API 调用异常。"""

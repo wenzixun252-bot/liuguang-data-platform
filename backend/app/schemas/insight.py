@@ -39,3 +39,4 @@ class CandidateOut(BaseModel):
     meeting_count: int = 0
     message_count: int = 0
     document_count: int = 0
+    is_internal: bool = False

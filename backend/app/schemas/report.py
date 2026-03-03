@@ -35,6 +35,7 @@ class ReportGenerateRequest(BaseModel):
     time_range_end: datetime
     data_sources: list[str] = ["document", "meeting", "chat_message"]
     extra_instructions: str | None = None
+    target_reader_ids: list[str] | None = None
 
 
 class ReportOut(BaseModel):
@@ -48,6 +49,7 @@ class ReportOut(BaseModel):
     time_range_start: datetime | None = None
     time_range_end: datetime | None = None
     data_sources_used: dict = {}
+    target_readers: list | None = None
     feishu_doc_token: str | None = None
     feishu_doc_url: str | None = None
     created_at: datetime

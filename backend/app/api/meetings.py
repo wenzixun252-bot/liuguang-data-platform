@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,6 +31,7 @@ async def list_meetings(
     search: str | None = Query(None),
     start_date: datetime | None = Query(None),
     end_date: datetime | None = Query(None),
+    organizer: str | None = Query(None),
 ) -> MeetingListResponse:
     visible_ids = await get_visible_owner_ids(current_user, db)
 
@@ -52,6 +54,11 @@ async def list_meetings(
     if end_date:
         base = base.where(Meeting.meeting_time <= end_date)
         count_stmt = count_stmt.where(Meeting.meeting_time <= end_date)
+
+    if organizer:
+        like = f"%{organizer}%"
+        base = base.where(Meeting.organizer.ilike(like))
+        count_stmt = count_stmt.where(Meeting.organizer.ilike(like))
 
     total = (await db.execute(count_stmt)).scalar() or 0
     items_stmt = base.order_by(Meeting.meeting_time.desc().nullslast()).offset((page - 1) * page_size).limit(page_size)
@@ -100,3 +107,26 @@ async def delete_meeting(
     await db.delete(row)
     await db.commit()
     return {"message": "已删除"}
+
+
+class BatchDeleteRequest(BaseModel):
+    ids: list[int]
+
+
+@router.post("/batch-delete", summary="批量删除会议")
+async def batch_delete_meetings(
+    body: BatchDeleteRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """批量删除会议记录（仅限 owner 或 admin）。"""
+    stmt = select(Meeting).where(Meeting.id.in_(body.ids))
+    if current_user.role != "admin":
+        stmt = stmt.where(Meeting.owner_id == current_user.feishu_open_id)
+    rows = (await db.execute(stmt)).scalars().all()
+
+    for row in rows:
+        await db.delete(row)
+
+    await db.commit()
+    return {"deleted": len(rows)}

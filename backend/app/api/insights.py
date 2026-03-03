@@ -6,6 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -75,9 +76,13 @@ async def list_insights(
     db: Annotated[AsyncSession, Depends(get_db)],
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    search: str | None = Query(None),
 ):
     """获取用户的领导洞察列表。"""
     conditions = [LeadershipInsight.analyst_user_id == current_user.feishu_open_id]
+
+    if search:
+        conditions.append(LeadershipInsight.target_user_name.ilike(f"%{search}%"))
 
     count_result = await db.execute(
         select(func.count()).select_from(LeadershipInsight).where(and_(*conditions))
@@ -110,6 +115,7 @@ async def list_candidates(
             meeting_count=c["meeting_count"],
             message_count=c["message_count"],
             document_count=c["document_count"],
+            is_internal=c.get("is_internal", False),
         )
         for c in candidates
     ]
@@ -126,3 +132,29 @@ async def get_insight(
     if not insight or insight.analyst_user_id != current_user.feishu_open_id:
         raise HTTPException(status_code=404, detail="洞察不存在")
     return insight
+
+
+class BatchDeleteRequest(BaseModel):
+    ids: list[int]
+
+
+@router.post("/leadership/batch-delete", summary="批量删除洞察")
+async def batch_delete_insights(
+    body: BatchDeleteRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """批量删除洞察记录。"""
+    result = await db.execute(
+        select(LeadershipInsight).where(
+            LeadershipInsight.id.in_(body.ids),
+            LeadershipInsight.analyst_user_id == current_user.feishu_open_id,
+        )
+    )
+    rows = result.scalars().all()
+
+    for row in rows:
+        await db.delete(row)
+
+    await db.commit()
+    return {"deleted": len(rows)}

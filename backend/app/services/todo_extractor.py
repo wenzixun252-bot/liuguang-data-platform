@@ -1,5 +1,6 @@
 """待办事项提取服务 — 从会议和聊天消息中AI提取待办。"""
 
+import hashlib
 import json
 import logging
 from datetime import datetime, timedelta
@@ -145,15 +146,27 @@ async def extract_and_save(
             seen_titles.add(title_key)
             unique_todos.append(t)
 
-    # 检查数据库中已存在的待办（避免重复）
-    existing = await db.execute(
+    # 检查数据库中已存在的待办（用 content_hash + title 双重去重）
+    existing_hash_result = await db.execute(
+        select(TodoItem.content_hash).where(
+            and_(TodoItem.owner_id == owner_id, TodoItem.content_hash.isnot(None))
+        )
+    )
+    existing_hashes = {r for r in existing_hash_result.scalars().all()}
+
+    existing_title_result = await db.execute(
         select(TodoItem.title).where(TodoItem.owner_id == owner_id)
     )
-    existing_titles = {r.lower() for r in existing.scalars().all()}
+    existing_titles = {r.lower() for r in existing_title_result.scalars().all()}
 
     saved = []
     for t in unique_todos:
-        if t["title"].strip().lower() in existing_titles:
+        title_lower = t["title"].strip().lower()
+        content_hash = hashlib.md5(
+            f"{t['source_type']}:{t.get('source_id', '')}:{title_lower}".encode()
+        ).hexdigest()
+
+        if content_hash in existing_hashes or title_lower in existing_titles:
             continue
 
         due_date = None
@@ -173,6 +186,7 @@ async def extract_and_save(
             source_id=t.get("source_id"),
             source_text=t.get("source_text"),
             status="pending_review",
+            content_hash=content_hash,
         )
         db.add(item)
         saved.append(item)

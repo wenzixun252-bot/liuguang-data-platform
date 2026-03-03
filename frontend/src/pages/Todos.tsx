@@ -7,6 +7,8 @@ import {
   X,
   Edit3,
   Check,
+  Search,
+  Trash2,
 } from 'lucide-react'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
@@ -36,15 +38,15 @@ const PRIORITY_COLORS = {
 
 const STATUS_LABELS: Record<string, string> = {
   pending_review: '待确认',
-  confirmed: '已确认',
-  pushed: '已推送',
+  in_progress: '进行中',
   dismissed: '已驳回',
+  completed: '已完成',
 }
 
 const TABS = [
   { key: 'pending_review', label: '待确认' },
-  { key: 'confirmed', label: '已确认' },
-  { key: 'pushed', label: '已推送' },
+  { key: 'in_progress', label: '进行中' },
+  { key: 'completed', label: '已完成' },
 ]
 
 export default function Todos() {
@@ -56,11 +58,14 @@ export default function Todos() {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editTitle, setEditTitle] = useState('')
   const [days, setDays] = useState(7)
+  const [search, setSearch] = useState('')
 
   const fetchTodos = () => {
     setLoading(true)
+    const params: Record<string, unknown> = { status: tab, page_size: 100 }
+    if (search) params.search = search
     api
-      .get('/todos', { params: { status: tab, page_size: 100 } })
+      .get('/todos', { params })
       .then((res) => setItems(res.data.items))
       .catch(() => toast.error('加载待办失败'))
       .finally(() => setLoading(false))
@@ -69,7 +74,7 @@ export default function Todos() {
   useEffect(() => {
     fetchTodos()
     setSelected(new Set())
-  }, [tab])
+  }, [tab, search])
 
   const handleExtract = async () => {
     setExtracting(true)
@@ -106,27 +111,28 @@ export default function Todos() {
     }
   }
 
-  const handleBatchConfirm = async () => {
+  const handleBatchDelete = async () => {
     if (selected.size === 0) return
+    if (!confirm(`确定要删除选中的 ${selected.size} 条待办吗？`)) return
     try {
-      await api.post('/todos/batch-confirm', { ids: Array.from(selected) })
-      toast.success(`已确认 ${selected.size} 条`)
+      const res = await api.post('/todos/batch-delete', { ids: Array.from(selected) })
+      toast.success(`已删除 ${res.data.deleted} 条`)
       setSelected(new Set())
       fetchTodos()
     } catch {
-      toast.error('批量确认失败')
+      toast.error('批量删除失败')
     }
   }
 
-  const handleBatchPush = async () => {
+  const handleBatchStatus = async (status: string) => {
     if (selected.size === 0) return
     try {
-      const res = await api.post('/todos/batch-push', { ids: Array.from(selected) })
-      toast.success(`已推送 ${res.data.length} 条到飞书`)
+      await api.post('/todos/batch-status', { ids: Array.from(selected), status })
+      toast.success(`已更新 ${selected.size} 条`)
       setSelected(new Set())
       fetchTodos()
     } catch {
-      toast.error('批量推送失败')
+      toast.error('批量操作失败')
     }
   }
 
@@ -159,7 +165,17 @@ export default function Todos() {
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <h1 className="text-2xl font-bold text-gray-800">智能待办</h1>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="relative">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              placeholder="搜索待办..."
+              className="pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm w-48 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
           <select
             value={days}
             onChange={(e) => setDays(Number(e.target.value))}
@@ -199,7 +215,7 @@ export default function Todos() {
       </div>
 
       {/* Batch actions */}
-      {tab !== 'pushed' && items.length > 0 && (
+      {items.length > 0 && (
         <div className="flex items-center gap-3">
           <label className="flex items-center gap-2 text-sm text-gray-500 cursor-pointer">
             <input
@@ -215,7 +231,7 @@ export default function Todos() {
               <span className="text-sm text-gray-400">已选 {selected.size} 条</span>
               {tab === 'pending_review' && (
                 <button
-                  onClick={handleBatchConfirm}
+                  onClick={() => handleBatchStatus('in_progress')}
                   className="flex items-center gap-1 px-3 py-1.5 bg-green-50 text-green-700 rounded-lg hover:bg-green-100 text-sm"
                 >
                   <CheckCircle size={14} />
@@ -223,11 +239,11 @@ export default function Todos() {
                 </button>
               )}
               <button
-                onClick={handleBatchPush}
-                className="flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 text-sm"
+                onClick={handleBatchDelete}
+                className="flex items-center gap-1 px-3 py-1.5 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 text-sm"
               >
-                <Send size={14} />
-                批量推送飞书
+                <Trash2 size={14} />
+                批量删除
               </button>
             </>
           )}
@@ -248,14 +264,12 @@ export default function Todos() {
               key={item.id}
               className="bg-white rounded-xl shadow-sm p-4 flex items-start gap-3 hover:shadow-md transition-shadow"
             >
-              {tab !== 'pushed' && (
-                <input
-                  type="checkbox"
-                  checked={selected.has(item.id)}
-                  onChange={() => toggleSelect(item.id)}
-                  className="mt-1 rounded"
-                />
-              )}
+              <input
+                type="checkbox"
+                checked={selected.has(item.id)}
+                onChange={() => toggleSelect(item.id)}
+                className="mt-1 rounded"
+              />
 
               <div className="flex-1 min-w-0">
                 {editingId === item.id ? (
@@ -301,7 +315,13 @@ export default function Todos() {
                       {new Date(item.due_date).toLocaleDateString('zh-CN')}
                     </span>
                   )}
-                  {item.pushed_at && (
+                  {item.feishu_task_id && (
+                    <span className="text-xs text-green-600 flex items-center gap-1">
+                      <CheckCircle size={12} />
+                      已推送飞书
+                    </span>
+                  )}
+                  {item.pushed_at && !item.feishu_task_id && (
                     <span className="text-xs text-green-600 flex items-center gap-1">
                       <CheckCircle size={12} />
                       已推送 {new Date(item.pushed_at).toLocaleDateString('zh-CN')}
@@ -315,7 +335,7 @@ export default function Todos() {
                 {tab === 'pending_review' && (
                   <>
                     <button
-                      onClick={() => handleUpdateStatus(item.id, 'confirmed')}
+                      onClick={() => handleUpdateStatus(item.id, 'in_progress')}
                       className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg"
                       title="确认"
                     >
@@ -328,10 +348,6 @@ export default function Todos() {
                     >
                       <X size={16} />
                     </button>
-                  </>
-                )}
-                {(tab === 'pending_review' || tab === 'confirmed') && (
-                  <>
                     <button
                       onClick={() => {
                         setEditingId(item.id)
@@ -349,6 +365,26 @@ export default function Todos() {
                     >
                       <Send size={16} />
                     </button>
+                  </>
+                )}
+                {tab === 'in_progress' && (
+                  <>
+                    <button
+                      onClick={() => handleUpdateStatus(item.id, 'completed')}
+                      className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg"
+                      title="标记完成"
+                    >
+                      <CheckCircle size={16} />
+                    </button>
+                    {!item.feishu_task_id && (
+                      <button
+                        onClick={() => handlePushSingle(item.id)}
+                        className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg"
+                        title="推送到飞书"
+                      >
+                        <Send size={16} />
+                      </button>
+                    )}
                   </>
                 )}
               </div>

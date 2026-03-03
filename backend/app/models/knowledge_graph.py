@@ -13,12 +13,13 @@ class KGEntity(Base):
     __tablename__ = "kg_entities"
     __table_args__ = (
         CheckConstraint(
-            "entity_type IN ('person', 'project', 'topic', 'organization', 'event', 'document')",
+            "entity_type IN ('person', 'project', 'topic', 'organization', 'event', 'document', 'community')",
             name="ck_kg_entity_type",
         ),
         Index("idx_kg_entity_owner", "owner_id"),
         Index("idx_kg_entity_type", "entity_type"),
         Index("idx_kg_entity_name", "name"),
+        Index("idx_kg_entity_community", "community_id"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -26,6 +27,7 @@ class KGEntity(Base):
     name: Mapped[str] = mapped_column(String(256), nullable=False)
     entity_type: Mapped[str] = mapped_column(String(32), nullable=False)
     properties: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
+    community_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     mention_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     first_seen_at: Mapped[datetime | None] = mapped_column()
     last_seen_at: Mapped[datetime | None] = mapped_column()

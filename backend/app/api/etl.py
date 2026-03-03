@@ -4,7 +4,8 @@ import asyncio
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,8 +34,15 @@ router = APIRouter(prefix="/api/etl", tags=["ETL 管理"])
 async def list_sources(
     _admin: Annotated[User, Depends(require_role(["admin"]))],
     db: Annotated[AsyncSession, Depends(get_db)],
+    search: str | None = Query(None),
 ) -> list[DataSourceOut]:
-    result = await db.execute(select(ETLDataSource).order_by(ETLDataSource.id))
+    stmt = select(ETLDataSource)
+    if search:
+        like = f"%{search}%"
+        stmt = stmt.where(
+            ETLDataSource.table_name.ilike(like) | ETLDataSource.asset_type.ilike(like)
+        )
+    result = await db.execute(stmt.order_by(ETLDataSource.id))
     return [DataSourceOut.model_validate(s) for s in result.scalars().all()]
 
 
@@ -94,6 +102,29 @@ async def delete_source(
     await db.delete(ds)
     await db.commit()
     return {"message": "已删除"}
+
+
+class BatchDeleteRequest(BaseModel):
+    ids: list[int]
+
+
+@router.post("/sources/batch-delete", summary="批量删除数据源")
+async def batch_delete_sources(
+    body: BatchDeleteRequest,
+    _admin: Annotated[User, Depends(require_role(["admin"]))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """批量删除数据源（仅管理员）。"""
+    result = await db.execute(
+        select(ETLDataSource).where(ETLDataSource.id.in_(body.ids))
+    )
+    rows = result.scalars().all()
+
+    for row in rows:
+        await db.delete(row)
+
+    await db.commit()
+    return {"deleted": len(rows)}
 
 
 @router.get("/sources-with-status", response_model=list[DataSourceWithSyncOut], summary="数据源+同步状态合并视图")

@@ -20,7 +20,7 @@ class TodoItem(Base):
             name="ck_todo_source_type",
         ),
         CheckConstraint(
-            "status IN ('pending_review', 'confirmed', 'pushed', 'dismissed')",
+            "status IN ('pending_review', 'in_progress', 'dismissed', 'completed')",
             name="ck_todo_status",
         ),
         Index("idx_todo_owner", "owner_id"),
@@ -39,5 +39,7 @@ class TodoItem(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="pending_review")
     feishu_task_id: Mapped[str | None] = mapped_column(String(128))
     pushed_at: Mapped[datetime | None] = mapped_column()
+    content_hash: Mapped[str | None] = mapped_column(String(64))
+    completed_at: Mapped[datetime | None] = mapped_column()
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now(), onupdate=func.now())

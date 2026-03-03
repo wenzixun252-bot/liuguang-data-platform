@@ -62,7 +62,9 @@
       "Bash(npx vite:*)",
       "Bash(__NEW_LINE_2b891aac1930c66d__ echo:*)",
       "Bash(__NEW_LINE_674fbfb9a00a51f7__ echo:*)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(wc:*)",
+      "Bash(grep:*)"
     ]
   }
 }

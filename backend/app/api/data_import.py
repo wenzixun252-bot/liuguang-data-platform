@@ -150,6 +150,24 @@ async def trigger_my_sync(
     return {"message": "同步任务已触发", "sources_count": len(sources)}
 
 
+@router.post("/feishu-sync/{source_id}", summary="触发单个数据源同步")
+async def trigger_single_sync(
+    source_id: int,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """触发指定数据源的同步。"""
+    ds = await db.get(ETLDataSource, source_id)
+    if not ds:
+        raise HTTPException(404, "数据源不存在")
+    if ds.owner_id != current_user.feishu_open_id and current_user.role != "admin":
+        raise HTTPException(403, "无权操作此数据源")
+
+    from app.worker.tasks import etl_sync_single_source
+    asyncio.create_task(etl_sync_single_source(ds.app_token, ds.table_id, ds.owner_id, ds.asset_type))
+    return {"message": "同步任务已触发", "source_id": source_id}
+
+
 @router.delete("/feishu-source/{source_id}", summary="删除数据源")
 async def delete_my_source(
     source_id: int,
@@ -223,12 +241,37 @@ async def discover_feishu_bitables(
         raise HTTPException(500, f"获取飞书多维表格列表失败: {e}")
 
     results: list[BitableAppInfo] = []
+    seen_tokens: set[str] = set()
     for f in bitable_files:
-        results.append(BitableAppInfo(
-            app_token=f.get("token", ""),
-            app_name=f.get("name", "未命名"),
-            tables=[],  # 不预加载子表，由前端按需请求
-        ))
+        t = f.get("token", "")
+        if t and t not in seen_tokens:
+            seen_tokens.add(t)
+            results.append(BitableAppInfo(
+                app_token=t,
+                app_name=f.get("name", "未命名"),
+                tables=[],
+            ))
+
+    # 同时搜索知识空间（Wiki）中的多维表格
+    try:
+        wiki_nodes = await feishu_client.list_wiki_nodes_by_type(
+            {"bitable"},
+            user_access_token=user_token,
+        )
+        for node in wiki_nodes:
+            t = node.get("obj_token", "")
+            if t and t not in seen_tokens:
+                seen_tokens.add(t)
+                space_name = node.get("space_name", "")
+                title = node.get("title", "未命名")
+                name = f"[{space_name}] {title}" if space_name else title
+                results.append(BitableAppInfo(
+                    app_token=t,
+                    app_name=name,
+                    tables=[],
+                ))
+    except Exception as e:
+        logger.warning("获取知识空间多维表格失败: %s", e)
 
     return results
 

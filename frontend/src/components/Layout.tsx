@@ -7,6 +7,7 @@ import {
   MessageSquare,
   MessageCircle,
   Upload,
+  Table2,
   Settings,
   Shield,
   LogOut,
@@ -22,6 +23,7 @@ import { useState } from 'react'
 const NAV_ITEMS = [
   { path: '/dashboard', label: '数据看板', icon: LayoutDashboard },
   { path: '/import', label: '数据导入', icon: Upload },
+  { path: '/structured-tables', label: '数据表', icon: Table2 },
   { path: '/documents', label: '文档', icon: FileText },
   { path: '/meetings', label: '会议', icon: Calendar },
   { path: '/messages', label: '聊天记录', icon: MessageSquare },

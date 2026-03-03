@@ -70,7 +70,9 @@ export default function Documents() {
   const [search, setSearch] = useState('')
   const [sourceFilter, setSourceFilter] = useState('')
   const [categoryFilter, _setCategoryFilter] = useState('')
+  const [uploaderFilter, setUploaderFilter] = useState('')
   const [selected, setSelected] = useState<DocumentItem | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [refreshKey, setRefreshKey] = useState(0)
   const { isVisible, toggle, columns: colDefs } = useColumnSettings('documents', DOC_COLUMNS)
 
@@ -82,21 +84,57 @@ export default function Documents() {
     if (search) params.search = search
     if (sourceFilter) params.source_type = sourceFilter
     if (categoryFilter) params.category = categoryFilter
+    if (uploaderFilter) params.uploader_name = uploaderFilter
 
     api.get('/documents/list', { params })
       .then((res) => setData(res.data))
       .catch(() => toast.error('加载文档列表失败'))
       .finally(() => setLoading(false))
-  }, [page, search, sourceFilter, categoryFilter, refreshKey])
+  }, [page, search, sourceFilter, categoryFilter, uploaderFilter, refreshKey])
+
+  // 翻页/筛选变化时清空选择
+  useEffect(() => {
+    setSelectedIds(new Set())
+  }, [page, search, sourceFilter, categoryFilter, uploaderFilter])
 
   const totalPages = data ? Math.ceil(data.total / pageSize) : 0
+  const currentIds = data?.items.map((i) => i.id) || []
+  const allSelected = currentIds.length > 0 && currentIds.every((id) => selectedIds.has(id))
+
+  const toggleSelectAll = () => {
+    if (allSelected) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(currentIds))
+    }
+  }
+
+  const toggleSelect = (id: number) => {
+    const next = new Set(selectedIds)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    setSelectedIds(next)
+  }
+
+  const handleBatchDelete = async () => {
+    if (selectedIds.size === 0) return
+    if (!confirm(`确定要删除选中的 ${selectedIds.size} 条数据吗？`)) return
+    try {
+      const res = await api.post('/documents/batch-delete', { ids: Array.from(selectedIds) })
+      toast.success(`已删除 ${res.data.deleted} 条`)
+      setSelectedIds(new Set())
+      setRefreshKey((k) => k + 1)
+    } catch {
+      toast.error('批量删除失败')
+    }
+  }
 
   return (
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <h1 className="text-2xl font-bold text-gray-800">文档</h1>
 
-        <div className="flex items-center gap-3 w-full sm:w-auto">
+        <div className="flex items-center gap-3 w-full sm:w-auto flex-wrap">
           <div className="relative flex-1 sm:flex-initial">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
@@ -117,9 +155,36 @@ export default function Documents() {
             <option value="cloud">飞书同步</option>
             <option value="local">本地上传</option>
           </select>
+          <input
+            type="text"
+            placeholder="上传人筛选"
+            className="px-3 py-2 border border-gray-200 rounded-lg text-sm w-32 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+            value={uploaderFilter}
+            onChange={(e) => { setUploaderFilter(e.target.value); setPage(1) }}
+          />
           <ColumnSettingsButton columns={colDefs} isVisible={isVisible} toggle={toggle} />
         </div>
       </div>
+
+      {/* Batch action bar */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 px-4 py-2 bg-indigo-50 border border-indigo-200 rounded-lg">
+          <span className="text-sm text-indigo-700 font-medium">已选择 {selectedIds.size} 项</span>
+          <button
+            onClick={handleBatchDelete}
+            className="flex items-center gap-1 px-3 py-1.5 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 text-sm"
+          >
+            <Trash2 size={14} />
+            批量删除
+          </button>
+          <button
+            onClick={() => setSelectedIds(new Set())}
+            className="px-3 py-1.5 text-gray-500 hover:bg-gray-100 rounded-lg text-sm"
+          >
+            取消选择
+          </button>
+        </div>
+      )}
 
       {/* Table */}
       <div className="bg-white rounded-xl shadow-sm overflow-hidden">
@@ -131,6 +196,14 @@ export default function Documents() {
               <table className="w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr>
+                    <th className="py-3 px-4 w-10">
+                      <input
+                        type="checkbox"
+                        checked={allSelected}
+                        onChange={toggleSelectAll}
+                        className="rounded"
+                      />
+                    </th>
                     {isVisible('title') && <th className="text-left py-3 px-4 text-gray-500 font-medium">标题</th>}
                     {isVisible('summary') && <th className="text-left py-3 px-4 text-gray-500 font-medium">摘要</th>}
                     {isVisible('source_type') && <th className="text-left py-3 px-4 text-gray-500 font-medium">来源</th>}
@@ -145,9 +218,17 @@ export default function Documents() {
                   {data.items.map((item) => (
                     <tr
                       key={item.id}
-                      className="border-t border-gray-50 hover:bg-indigo-50/50 cursor-pointer transition-colors"
+                      className={`border-t border-gray-50 hover:bg-indigo-50/50 cursor-pointer transition-colors ${selectedIds.has(item.id) ? 'bg-indigo-50/30' : ''}`}
                       onClick={() => setSelected(item)}
                     >
+                      <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(item.id)}
+                          onChange={() => toggleSelect(item.id)}
+                          className="rounded"
+                        />
+                      </td>
                       {isVisible('title') && <td className="py-3 px-4 text-gray-800 font-medium max-w-[200px] truncate">{item.title || '无标题'}</td>}
                       {isVisible('summary') && <td className="py-3 px-4 text-gray-500 max-w-[250px] truncate">{item.summary || item.content_text?.slice(0, 60) || '-'}</td>}
                       {isVisible('source_type') && (
