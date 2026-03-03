@@ -13,6 +13,10 @@ class ChatRequest(BaseModel):
     """聊天请求体。"""
     question: str
     history: list[ChatMessage] = []
+    conversation_id: int | None = None
+    source_tables: list[str] | None = None
+    source_ids: list[tuple[str, int]] | None = None
+    attachment_context: str | None = None
 
 
 class ChatResponse(BaseModel):

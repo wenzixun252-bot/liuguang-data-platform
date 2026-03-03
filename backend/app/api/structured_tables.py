@@ -123,24 +123,24 @@ def _parse_feishu_url(url: str) -> dict:
     url = url.strip()
 
     # 多维表格直链: /base/{app_token}
-    m = re.search(r'/base/([A-Za-z0-9]+)', url)
+    m = re.search(r'/base/([A-Za-z0-9_-]+)', url)
     if m:
         app_token = m.group(1)
         # 尝试提取 table_id
-        tm = re.search(r'[?&]table=([A-Za-z0-9]+)', url)
+        tm = re.search(r'[?&]table=([A-Za-z0-9_-]+)', url)
         table_id = tm.group(1) if tm else None
         return {"type": "bitable", "token": app_token, "table_id": table_id}
 
     # 飞书表格直链: /sheets/{token}
-    m = re.search(r'/sheets/([A-Za-z0-9]+)', url)
+    m = re.search(r'/sheets/([A-Za-z0-9_-]+)', url)
     if m:
         return {"type": "spreadsheet", "token": m.group(1), "table_id": None}
 
     # Wiki 链接: /wiki/{node_token}
-    m = re.search(r'/wiki/([A-Za-z0-9]+)', url)
+    m = re.search(r'/wiki/([A-Za-z0-9_-]+)', url)
     if m:
         node_token = m.group(1)
-        tm = re.search(r'[?&]table=([A-Za-z0-9]+)', url)
+        tm = re.search(r'[?&]table=([A-Za-z0-9_-]+)', url)
         table_id = tm.group(1) if tm else None
         return {"type": "wiki", "token": node_token, "table_id": table_id}
 
@@ -165,11 +165,20 @@ async def parse_feishu_url(
     user_token = current_user.feishu_access_token
 
     # 如果是 wiki 链接，先解析出实际的 obj_token 和 obj_type
+    # 注意：用 tenant_access_token 解析 Wiki 节点（避免用户 token 缺少 wiki 权限）
     if parsed["type"] == "wiki":
         try:
-            node_info = await feishu_client.get_wiki_node_info(
-                parsed["token"], user_access_token=user_token,
-            )
+            # 先尝试用户 token，失败再用应用 token
+            try:
+                node_info = await feishu_client.get_wiki_node_info(
+                    parsed["token"], user_access_token=user_token,
+                )
+            except Exception:
+                logger.info("用户 token 解析 Wiki 节点失败，改用应用 token")
+                node_info = await feishu_client.get_wiki_node_info(
+                    parsed["token"],
+                )
+            logger.info("Wiki 节点解析结果: %s", node_info)
             obj_type = node_info.get("obj_type", "")
             obj_token = node_info.get("obj_token", "")
             if obj_type == "bitable":
@@ -181,43 +190,44 @@ async def parse_feishu_url(
                     status_code=400,
                     detail=f"该 Wiki 页面类型是 {obj_type}，不是多维表格或飞书表格",
                 )
-        except FeishuAPIError as e:
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error("解析 Wiki 链接失败: %s", e, exc_info=True)
             raise HTTPException(status_code=400, detail=f"解析 Wiki 链接失败: {e}")
 
-    if parsed["type"] == "bitable":
-        # 获取多维表格下的数据表列表
-        try:
+    try:
+        if parsed["type"] == "bitable":
+            # 获取多维表格下的数据表列表
             tables_raw = await feishu_client.get_bitable_tables(
                 parsed["token"], user_access_token=user_token,
             )
             tables = [{"table_id": t.get("table_id", ""), "name": t.get("name", "")} for t in tables_raw]
-        except Exception as e:
-            logger.warning("获取多维表格子表列表失败: %s", e)
-            tables = []
 
-        return URLParseResult(
-            source_type="bitable",
-            app_token=parsed["token"],
-            table_id=parsed.get("table_id"),
-            tables=tables,
-        )
+            return URLParseResult(
+                source_type="bitable",
+                app_token=parsed["token"],
+                table_id=parsed.get("table_id"),
+                tables=tables,
+            )
 
-    elif parsed["type"] == "spreadsheet":
-        # 获取飞书表格下的工作表列表
-        try:
+        elif parsed["type"] == "spreadsheet":
+            # 获取飞书表格下的工作表列表
             sheets_raw = await feishu_client.get_spreadsheet_sheets(
                 parsed["token"], user_access_token=user_token,
             )
             sheets = [{"sheet_id": s.get("sheet_id", ""), "title": s.get("title", "")} for s in sheets_raw]
-        except Exception as e:
-            logger.warning("获取工作表列表失败: %s", e)
-            sheets = []
 
-        return URLParseResult(
-            source_type="spreadsheet",
-            app_token=parsed["token"],
-            sheets=sheets,
-        )
+            return URLParseResult(
+                source_type="spreadsheet",
+                app_token=parsed["token"],
+                sheets=sheets,
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("获取子表/工作表列表失败: %s", e, exc_info=True)
+        raise HTTPException(status_code=400, detail=f"获取表格信息失败: {e}")
 
     raise HTTPException(status_code=400, detail="无法识别的链接类型")
 
@@ -239,12 +249,17 @@ async def import_from_url(
 
     user_token = current_user.feishu_access_token
 
-    # Wiki 链接解析
+    # Wiki 链接解析（先尝试用户 token，失败再用应用 token）
     if parsed["type"] == "wiki":
         try:
-            node_info = await feishu_client.get_wiki_node_info(
-                parsed["token"], user_access_token=user_token,
-            )
+            try:
+                node_info = await feishu_client.get_wiki_node_info(
+                    parsed["token"], user_access_token=user_token,
+                )
+            except Exception:
+                node_info = await feishu_client.get_wiki_node_info(
+                    parsed["token"],
+                )
             obj_type = node_info.get("obj_type", "")
             obj_token = node_info.get("obj_token", "")
             if obj_type == "bitable":
@@ -253,7 +268,9 @@ async def import_from_url(
                 parsed = {"type": "spreadsheet", "token": obj_token, "table_id": None}
             else:
                 raise HTTPException(status_code=400, detail=f"该页面类型 {obj_type} 不支持导入")
-        except FeishuAPIError as e:
+        except HTTPException:
+            raise
+        except Exception as e:
             raise HTTPException(status_code=400, detail=f"解析 Wiki 链接失败: {e}")
 
     try:

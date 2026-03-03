@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
   Search, ChevronLeft, ChevronRight, X, Trash2, RefreshCw,
-  ExternalLink, Upload, Table2, Plus, FileSpreadsheet,
+  ExternalLink, Upload, Table2, Cloud, ChevronDown,
 } from 'lucide-react'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
@@ -86,7 +86,8 @@ export default function StructuredTables() {
   const [detailLoading, setDetailLoading] = useState(false)
 
   // 导入弹窗
-  const [showImport, setShowImport] = useState(false)
+  const [showLocalUpload, setShowLocalUpload] = useState(false)
+  const [showFeishuImport, setShowFeishuImport] = useState(false)
 
   const pageSize = 20
 
@@ -224,14 +225,21 @@ export default function StructuredTables() {
     <div className="space-y-4">
       {/* 标题栏 */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold text-gray-800">数据表</h1>
+        <h1 className="text-2xl font-bold text-gray-800">表格数据</h1>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setShowImport(true)}
+            onClick={() => setShowLocalUpload(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 transition-colors"
+          >
+            <Upload size={16} />
+            导入本地数据
+          </button>
+          <button
+            onClick={() => setShowFeishuImport(true)}
             className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 transition-colors"
           >
-            <Plus size={16} />
-            导入表格
+            <Cloud size={16} />
+            同步飞书数据
           </button>
         </div>
       </div>
@@ -416,7 +424,7 @@ export default function StructuredTables() {
             )}
           </>
         ) : (
-          <div className="p-12 text-center text-gray-400">暂无数据表，点击"导入表格"开始</div>
+          <div className="p-12 text-center text-gray-400">暂无表格数据，点击上方按钮导入</div>
         )}
       </div>
 
@@ -438,11 +446,19 @@ export default function StructuredTables() {
         />
       )}
 
-      {/* 导入弹窗 */}
-      {showImport && (
-        <ImportModal
-          onClose={() => setShowImport(false)}
-          onSuccess={() => { setShowImport(false); setRefreshKey((k) => k + 1) }}
+      {/* 本地上传弹窗 */}
+      {showLocalUpload && (
+        <LocalUploadModal
+          onClose={() => setShowLocalUpload(false)}
+          onSuccess={() => { setShowLocalUpload(false); setRefreshKey((k) => k + 1) }}
+        />
+      )}
+
+      {/* 飞书导入弹窗 */}
+      {showFeishuImport && (
+        <FeishuImportModal
+          onClose={() => setShowFeishuImport(false)}
+          onSuccess={() => { setShowFeishuImport(false); setRefreshKey((k) => k + 1) }}
         />
       )}
     </div>
@@ -570,13 +586,82 @@ function TableDetailPanel({
   )
 }
 
-/* ── 导入弹窗 ─────────────────────────────────── */
+/* ── 本地上传弹窗 ─────────────────────────────── */
 
-function ImportModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
-  const [tab, setTab] = useState<'url' | 'bitable' | 'spreadsheet' | 'local'>('url')
+function LocalUploadModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
+  const [file, setFile] = useState<File | null>(null)
   const [importing, setImporting] = useState(false)
 
-  // 粘贴链接
+  const handleImport = async () => {
+    if (!file) { toast.error('请选择文件'); return }
+    setImporting(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      await api.post('/structured-tables/import/upload', formData)
+      toast.success('导入成功')
+      onSuccess()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || '导入失败')
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+          <h3 className="text-lg font-semibold text-gray-800">导入本地数据</h3>
+          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded"><X size={20} /></button>
+        </div>
+        <div className="p-6 space-y-4">
+          <label className="block text-sm text-gray-600 mb-2">选择文件 (.csv / .xlsx / .xls / .json / .txt)</label>
+          <input
+            type="file"
+            accept=".csv,.xlsx,.xls,.json,.txt"
+            onChange={(e) => setFile(e.target.files?.[0] || null)}
+            className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+          />
+          {file && <p className="mt-2 text-sm text-gray-500">已选择: {file.name} ({(file.size / 1024).toFixed(1)} KB)</p>}
+        </div>
+        <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">
+          <button onClick={onClose} className="px-4 py-2 text-gray-500 hover:bg-gray-100 rounded-lg text-sm">取消</button>
+          <button
+            onClick={handleImport}
+            disabled={importing || !file}
+            className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2"
+          >
+            {importing && <RefreshCw size={14} className="animate-spin" />}
+            {importing ? '导入中...' : '开始导入'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ── 飞书导入弹窗 ─────────────────────────────── */
+
+function FeishuImportModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
+  const [importing, setImporting] = useState(false)
+
+  // 可选列表
+  const [bitables, setBitables] = useState<{ token: string; name: string; type: string }[]>([])
+  const [selectedItem, setSelectedItem] = useState('')
+  const [listSearch, setListSearch] = useState('')
+  const [loadingList, setLoadingList] = useState(true)
+
+  // 子表/工作表选择
+  const [subTables, setSubTables] = useState<{ table_id: string; name: string }[]>([])
+  const [selectedSubTable, setSelectedSubTable] = useState('')
+  const [subTableSearch, setSubTableSearch] = useState('')
+
+  const [sheets, setSheets] = useState<{ sheet_id: string; title: string }[]>([])
+  const [selectedSheet, setSelectedSheet] = useState('')
+
+  // 粘贴链接（兜底）
+  const [showPasteUrl, setShowPasteUrl] = useState(false)
   const [pasteUrl, setPasteUrl] = useState('')
   const [urlParsed, setUrlParsed] = useState<{
     source_type: string; app_token: string; table_id?: string | null;
@@ -587,27 +672,48 @@ function ImportModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
   const [urlSelectedTable, setUrlSelectedTable] = useState('')
   const [urlSelectedSheet, setUrlSelectedSheet] = useState('')
 
-  // 飞书多维表格（列表模式）
-  const [bitables, setBitables] = useState<{ token: string; name: string }[]>([])
-  const [selectedBitable, setSelectedBitable] = useState('')
-  const [bitableSearch, setBitableSearch] = useState('')
-  const [bitableTables, setBitableTables] = useState<{ table_id: string; name: string }[]>([])
-  const [selectedBitableTable, setSelectedBitableTable] = useState('')
-  const [bitableTableSearch, setBitableTableSearch] = useState('')
-  const [loadingBitables, setLoadingBitables] = useState(false)
+  // 加载多维表格 + 飞书表格合并列表
+  useEffect(() => {
+    const load = async () => {
+      setLoadingList(true)
+      const merged: { token: string; name: string; type: string }[] = []
+      try {
+        const res = await api.get('/import/feishu-discover')
+        for (const f of res.data || []) {
+          merged.push({ token: f.app_token, name: f.app_name, type: 'bitable' })
+        }
+      } catch { /* ignore */ }
+      try {
+        const res = await api.get('/structured-tables/discover-spreadsheets')
+        for (const f of res.data.files || []) {
+          merged.push({ token: f.token, name: f.name, type: 'spreadsheet' })
+        }
+      } catch { /* ignore */ }
+      setBitables(merged)
+      setLoadingList(false)
+    }
+    load()
+  }, [])
 
-  // 飞书表格（列表模式）
-  const [spreadsheets, setSpreadsheets] = useState<{ token: string; name: string }[]>([])
-  const [selectedSpreadsheet, setSelectedSpreadsheet] = useState('')
-  const [spreadsheetSearch, setSpreadsheetSearch] = useState('')
-  const [sheetList, setSheetList] = useState<{ sheet_id: string; title: string }[]>([])
-  const [selectedSheet, setSelectedSheet] = useState('')
-  const [loadingSheets, setLoadingSheets] = useState(false)
+  const handleSelectItem = async (token: string, type: string) => {
+    setSelectedItem(token)
+    setSelectedSubTable('')
+    setSelectedSheet('')
+    setSubTables([])
+    setSheets([])
+    if (type === 'bitable') {
+      try {
+        const res = await api.get(`/import/feishu-discover/${token}/tables`)
+        setSubTables((res.data || []).map((t: any) => ({ table_id: t.table_id, name: t.name })))
+      } catch { toast.error('获取表列表失败') }
+    } else {
+      try {
+        const res = await api.get(`/structured-tables/discover-sheets/${token}`)
+        setSheets(res.data.sheets || [])
+      } catch { toast.error('获取工作表列表失败') }
+    }
+  }
 
-  // 本地上传
-  const [file, setFile] = useState<File | null>(null)
-
-  /* 解析粘贴的链接 */
   const handleParseUrl = async () => {
     if (!pasteUrl.trim()) { toast.error('请粘贴飞书链接'); return }
     setUrlParsing(true)
@@ -617,9 +723,7 @@ function ImportModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
     try {
       const res = await api.post('/structured-tables/parse-url', { url: pasteUrl })
       setUrlParsed(res.data)
-      // 如果链接里已自带 table_id，自动选上
       if (res.data.table_id) setUrlSelectedTable(res.data.table_id)
-      // 如果只有一个子表/工作表，自动选上
       if (res.data.tables?.length === 1) setUrlSelectedTable(res.data.tables[0].table_id)
       if (res.data.sheets?.length === 1) setUrlSelectedSheet(res.data.sheets[0].sheet_id)
     } catch (err: any) {
@@ -629,70 +733,29 @@ function ImportModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
     }
   }
 
-  /* 加载飞书多维表格列表 */
-  const loadBitables = async () => {
-    setLoadingBitables(true)
-    try {
-      const res = await api.get('/import/feishu-discover')
-      const items = (res.data || []).map((f: any) => ({ token: f.app_token, name: f.app_name }))
-      setBitables(items)
-    } catch { toast.error('获取多维表格列表失败') }
-    finally { setLoadingBitables(false) }
-  }
-
-  const loadBitableTables = async (appToken: string) => {
-    try {
-      const res = await api.get(`/import/feishu-discover/${appToken}/tables`)
-      setBitableTables((res.data || []).map((t: any) => ({ table_id: t.table_id, name: t.name })))
-    } catch { toast.error('获取表列表失败') }
-  }
-
-  /* 加载飞书表格列表 */
-  const loadSpreadsheets = async () => {
-    setLoadingSheets(true)
-    try {
-      const res = await api.get('/structured-tables/discover-spreadsheets')
-      setSpreadsheets(res.data.files || [])
-    } catch { toast.error('获取飞书表格列表失败') }
-    finally { setLoadingSheets(false) }
-  }
-
-  const loadSheets = async (token: string) => {
-    try {
-      const res = await api.get(`/structured-tables/discover-sheets/${token}`)
-      setSheetList(res.data.sheets || [])
-    } catch { toast.error('获取工作表列表失败') }
-  }
-
-  useEffect(() => {
-    if (tab === 'bitable' && bitables.length === 0) loadBitables()
-    if (tab === 'spreadsheet' && spreadsheets.length === 0) loadSpreadsheets()
-  }, [tab])
-
-  /* 导入 */
   const handleImport = async () => {
     setImporting(true)
     try {
-      if (tab === 'url') {
-        if (!urlParsed) { toast.error('请先粘贴链接并解析'); return }
+      if (showPasteUrl && urlParsed) {
+        // 粘贴链接模式
         if (urlParsed.source_type === 'bitable') {
-          if (!urlSelectedTable) { toast.error('请选择要导入的数据表'); return }
+          if (!urlSelectedTable) { toast.error('请选择要导入的数据表'); setImporting(false); return }
           await api.post('/structured-tables/import/bitable', { app_token: urlParsed.app_token, table_id: urlSelectedTable })
         } else {
-          if (!urlSelectedSheet) { toast.error('请选择要导入的工作表'); return }
+          if (!urlSelectedSheet) { toast.error('请选择要导入的工作表'); setImporting(false); return }
           await api.post('/structured-tables/import/spreadsheet', { spreadsheet_token: urlParsed.app_token, sheet_id: urlSelectedSheet })
         }
-      } else if (tab === 'bitable') {
-        if (!selectedBitable || !selectedBitableTable) { toast.error('请选择多维表格和数据表'); return }
-        await api.post('/structured-tables/import/bitable', { app_token: selectedBitable, table_id: selectedBitableTable })
-      } else if (tab === 'spreadsheet') {
-        if (!selectedSpreadsheet || !selectedSheet) { toast.error('请选择飞书表格和工作表'); return }
-        await api.post('/structured-tables/import/spreadsheet', { spreadsheet_token: selectedSpreadsheet, sheet_id: selectedSheet })
       } else {
-        if (!file) { toast.error('请选择文件'); return }
-        const formData = new FormData()
-        formData.append('file', file)
-        await api.post('/structured-tables/import/upload', formData)
+        // 列表选择模式
+        const item = bitables.find(b => b.token === selectedItem)
+        if (!item) { toast.error('请选择一个表格'); setImporting(false); return }
+        if (item.type === 'bitable') {
+          if (!selectedSubTable) { toast.error('请选择数据表'); setImporting(false); return }
+          await api.post('/structured-tables/import/bitable', { app_token: item.token, table_id: selectedSubTable })
+        } else {
+          if (!selectedSheet) { toast.error('请选择工作表'); setImporting(false); return }
+          await api.post('/structured-tables/import/spreadsheet', { spreadsheet_token: item.token, sheet_id: selectedSheet })
+        }
       }
       toast.success('导入成功')
       onSuccess()
@@ -703,42 +766,107 @@ function ImportModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
     }
   }
 
-  const TABS = [
-    { key: 'url' as const, label: '粘贴链接', icon: <ExternalLink size={14} /> },
-    { key: 'bitable' as const, label: '多维表格', icon: <Table2 size={14} /> },
-    { key: 'spreadsheet' as const, label: '飞书表格', icon: <FileSpreadsheet size={14} /> },
-    { key: 'local' as const, label: '本地上传', icon: <Upload size={14} /> },
-  ]
+  const selectedType = bitables.find(b => b.token === selectedItem)?.type
+  const filteredList = bitables.filter(b => !listSearch || b.name.toLowerCase().includes(listSearch.toLowerCase()))
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-800">导入表格</h3>
+          <h3 className="text-lg font-semibold text-gray-800">同步飞书数据</h3>
           <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded"><X size={20} /></button>
         </div>
 
-        {/* Tab */}
-        <div className="flex border-b border-gray-200 overflow-x-auto">
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium transition-colors whitespace-nowrap ${tab === t.key ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
-            >
-              {t.icon} {t.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="p-6 space-y-4 min-h-[200px]">
-
-          {/* 粘贴链接 Tab */}
-          {tab === 'url' && (
+        <div className="p-6 space-y-4 overflow-y-auto flex-1">
+          {/* 可选列表 */}
+          {loadingList ? (
+            <div className="text-center text-gray-400 py-8">
+              <RefreshCw size={20} className="animate-spin mx-auto mb-2" />
+              正在加载飞书表格列表...
+            </div>
+          ) : (
             <>
               <div>
-                <label className="block text-sm text-gray-600 mb-1">粘贴飞书表格链接</label>
-                <p className="text-xs text-gray-400 mb-2">支持多维表格、飞书表格、知识空间 Wiki 内嵌表格的链接</p>
+                <label className="block text-sm text-gray-600 mb-1">选择表格</label>
+                <p className="text-xs text-gray-400 mb-2">同时展示多维表格和飞书表格</p>
+                <div className="relative mb-2">
+                  <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="搜索表格名称..."
+                    className="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                    value={listSearch}
+                    onChange={(e) => setListSearch(e.target.value)}
+                  />
+                </div>
+                <div className="max-h-40 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-50">
+                  {filteredList.map((b) => (
+                    <div
+                      key={`${b.type}:${b.token}`}
+                      onClick={() => handleSelectItem(b.token, b.type)}
+                      className={`px-3 py-2 text-sm cursor-pointer transition-colors flex items-center gap-2 ${selectedItem === b.token ? 'bg-indigo-50 text-indigo-700 font-medium' : 'hover:bg-gray-50 text-gray-700'}`}
+                    >
+                      <span className="flex-1 truncate">{b.name}</span>
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] ${b.type === 'bitable' ? 'bg-blue-50 text-blue-600' : 'bg-purple-50 text-purple-600'}`}>
+                        {b.type === 'bitable' ? '多维表格' : '表格'}
+                      </span>
+                    </div>
+                  ))}
+                  {filteredList.length === 0 && (
+                    <div className="px-3 py-4 text-sm text-gray-400 text-center">无匹配结果</div>
+                  )}
+                </div>
+                <p className="text-xs text-gray-400 mt-1">共 {bitables.length} 个表格</p>
+              </div>
+
+              {/* 子表/工作表 */}
+              {selectedItem && selectedType === 'bitable' && subTables.length > 0 && (
+                <div>
+                  <label className="block text-sm text-gray-600 mb-1">
+                    选择数据表
+                    {selectedSubTable && <span className="ml-2 text-indigo-600">✓ {subTables.find(t => t.table_id === selectedSubTable)?.name}</span>}
+                  </label>
+                  {subTables.length > 5 && (
+                    <div className="relative mb-2">
+                      <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                      <input type="text" placeholder="搜索数据表..." className="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200" value={subTableSearch} onChange={(e) => setSubTableSearch(e.target.value)} />
+                    </div>
+                  )}
+                  <div className="max-h-36 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-50">
+                    {subTables.filter(t => !subTableSearch || t.name.toLowerCase().includes(subTableSearch.toLowerCase())).map((t) => (
+                      <div key={t.table_id} onClick={() => setSelectedSubTable(t.table_id)} className={`px-3 py-2 text-sm cursor-pointer transition-colors ${selectedSubTable === t.table_id ? 'bg-indigo-50 text-indigo-700 font-medium' : 'hover:bg-gray-50 text-gray-700'}`}>{t.name}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {selectedItem && selectedType === 'spreadsheet' && sheets.length > 0 && (
+                <div>
+                  <label className="block text-sm text-gray-600 mb-1">
+                    选择工作表
+                    {selectedSheet && <span className="ml-2 text-indigo-600">✓ {sheets.find(s => s.sheet_id === selectedSheet)?.title}</span>}
+                  </label>
+                  <div className="max-h-36 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-50">
+                    {sheets.map((s) => (
+                      <div key={s.sheet_id} onClick={() => setSelectedSheet(s.sheet_id)} className={`px-3 py-2 text-sm cursor-pointer transition-colors ${selectedSheet === s.sheet_id ? 'bg-indigo-50 text-indigo-700 font-medium' : 'hover:bg-gray-50 text-gray-700'}`}>{s.title}</div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* 兜底：粘贴链接 */}
+          <div className="border-t border-gray-100 pt-3">
+            <button
+              onClick={() => setShowPasteUrl(!showPasteUrl)}
+              className="flex items-center gap-1 text-sm text-gray-500 hover:text-indigo-600"
+            >
+              <ChevronDown size={14} className={`transition-transform ${showPasteUrl ? 'rotate-180' : ''}`} />
+              在列表中找不到？粘贴飞书链接
+            </button>
+            {showPasteUrl && (
+              <div className="mt-3 space-y-3">
                 <div className="flex gap-2">
                   <input
                     type="text"
@@ -748,221 +876,36 @@ function ImportModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
                     onChange={(e) => setPasteUrl(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') handleParseUrl() }}
                   />
-                  <button
-                    onClick={handleParseUrl}
-                    disabled={urlParsing}
-                    className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm hover:bg-gray-200 disabled:opacity-50 whitespace-nowrap"
-                  >
+                  <button onClick={handleParseUrl} disabled={urlParsing} className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm hover:bg-gray-200 disabled:opacity-50 whitespace-nowrap">
                     {urlParsing ? '解析中...' : '解析'}
                   </button>
                 </div>
-              </div>
-
-              {urlParsed && (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <span className={`px-2 py-0.5 rounded-full text-xs ${urlParsed.source_type === 'bitable' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}`}>
-                      {urlParsed.source_type === 'bitable' ? '多维表格' : '飞书表格'}
-                    </span>
-                    <span className="text-xs text-gray-400">token: {urlParsed.app_token.slice(0, 12)}...</span>
-                  </div>
-
-                  {/* 多维表格 → 选择数据表 */}
-                  {urlParsed.source_type === 'bitable' && urlParsed.tables && (
-                    <div>
-                      <label className="block text-sm text-gray-600 mb-1">
-                        选择数据表
-                        {urlSelectedTable && <span className="ml-2 text-indigo-600">✓ {urlParsed.tables.find((t: any) => t.table_id === urlSelectedTable)?.name}</span>}
-                      </label>
-                      <div className="max-h-40 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-50">
+                {urlParsed && (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-0.5 rounded-full text-xs ${urlParsed.source_type === 'bitable' ? 'bg-blue-50 text-blue-700' : 'bg-purple-50 text-purple-700'}`}>
+                        {urlParsed.source_type === 'bitable' ? '多维表格' : '飞书表格'}
+                      </span>
+                    </div>
+                    {urlParsed.source_type === 'bitable' && urlParsed.tables && (
+                      <div className="max-h-32 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-50">
                         {urlParsed.tables.map((t: any) => (
-                          <div
-                            key={t.table_id}
-                            onClick={() => setUrlSelectedTable(t.table_id)}
-                            className={`px-3 py-2 text-sm cursor-pointer transition-colors ${urlSelectedTable === t.table_id ? 'bg-indigo-50 text-indigo-700 font-medium' : 'hover:bg-gray-50 text-gray-700'}`}
-                          >
-                            {t.name}
-                          </div>
+                          <div key={t.table_id} onClick={() => setUrlSelectedTable(t.table_id)} className={`px-3 py-2 text-sm cursor-pointer ${urlSelectedTable === t.table_id ? 'bg-indigo-50 text-indigo-700 font-medium' : 'hover:bg-gray-50'}`}>{t.name}</div>
                         ))}
                       </div>
-                    </div>
-                  )}
-
-                  {/* 飞书表格 → 选择工作表 */}
-                  {urlParsed.source_type === 'spreadsheet' && urlParsed.sheets && (
-                    <div>
-                      <label className="block text-sm text-gray-600 mb-1">
-                        选择工作表
-                        {urlSelectedSheet && <span className="ml-2 text-indigo-600">✓ {urlParsed.sheets.find((s: any) => s.sheet_id === urlSelectedSheet)?.title}</span>}
-                      </label>
-                      <div className="max-h-40 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-50">
+                    )}
+                    {urlParsed.source_type === 'spreadsheet' && urlParsed.sheets && (
+                      <div className="max-h-32 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-50">
                         {urlParsed.sheets.map((s: any) => (
-                          <div
-                            key={s.sheet_id}
-                            onClick={() => setUrlSelectedSheet(s.sheet_id)}
-                            className={`px-3 py-2 text-sm cursor-pointer transition-colors ${urlSelectedSheet === s.sheet_id ? 'bg-indigo-50 text-indigo-700 font-medium' : 'hover:bg-gray-50 text-gray-700'}`}
-                          >
-                            {s.title}
-                          </div>
+                          <div key={s.sheet_id} onClick={() => setUrlSelectedSheet(s.sheet_id)} className={`px-3 py-2 text-sm cursor-pointer ${urlSelectedSheet === s.sheet_id ? 'bg-indigo-50 text-indigo-700 font-medium' : 'hover:bg-gray-50'}`}>{s.title}</div>
                         ))}
                       </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </>
-          )}
-
-          {/* 飞书多维表格 Tab */}
-          {tab === 'bitable' && (
-            <>
-              {loadingBitables ? <div className="text-center text-gray-400 py-8">加载中...</div> : (
-                <>
-                  <div>
-                    <label className="block text-sm text-gray-600 mb-1">
-                      选择多维表格
-                      {selectedBitable && <span className="ml-2 text-indigo-600">✓ {bitables.find(b => b.token === selectedBitable)?.name}</span>}
-                    </label>
-                    <p className="text-xs text-gray-400 mb-2">仅显示云空间中的表格，知识空间的请用"粘贴链接"导入</p>
-                    <div className="relative mb-2">
-                      <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                      <input
-                        type="text"
-                        placeholder="搜索多维表格名称..."
-                        className="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                        value={bitableSearch}
-                        onChange={(e) => setBitableSearch(e.target.value)}
-                      />
-                    </div>
-                    <div className="max-h-40 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-50">
-                      {bitables.filter(b => !bitableSearch || b.name.toLowerCase().includes(bitableSearch.toLowerCase())).map((b) => (
-                        <div
-                          key={b.token}
-                          onClick={() => { setSelectedBitable(b.token); setSelectedBitableTable(''); setBitableTableSearch(''); loadBitableTables(b.token) }}
-                          className={`px-3 py-2 text-sm cursor-pointer transition-colors ${selectedBitable === b.token ? 'bg-indigo-50 text-indigo-700 font-medium' : 'hover:bg-gray-50 text-gray-700'}`}
-                        >
-                          {b.name}
-                        </div>
-                      ))}
-                      {bitables.filter(b => !bitableSearch || b.name.toLowerCase().includes(bitableSearch.toLowerCase())).length === 0 && (
-                        <div className="px-3 py-4 text-sm text-gray-400 text-center">无匹配结果</div>
-                      )}
-                    </div>
-                    <p className="text-xs text-gray-400 mt-1">共 {bitables.length} 个多维表格</p>
+                    )}
                   </div>
-                  {selectedBitable && (
-                    <div>
-                      <label className="block text-sm text-gray-600 mb-1">
-                        选择数据表
-                        {selectedBitableTable && <span className="ml-2 text-indigo-600">✓ {bitableTables.find(t => t.table_id === selectedBitableTable)?.name}</span>}
-                      </label>
-                      {bitableTables.length > 5 && (
-                        <div className="relative mb-2">
-                          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                          <input
-                            type="text"
-                            placeholder="搜索数据表名称..."
-                            className="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                            value={bitableTableSearch}
-                            onChange={(e) => setBitableTableSearch(e.target.value)}
-                          />
-                        </div>
-                      )}
-                      <div className="max-h-36 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-50">
-                        {bitableTables.filter(t => !bitableTableSearch || t.name.toLowerCase().includes(bitableTableSearch.toLowerCase())).map((t) => (
-                          <div
-                            key={t.table_id}
-                            onClick={() => setSelectedBitableTable(t.table_id)}
-                            className={`px-3 py-2 text-sm cursor-pointer transition-colors ${selectedBitableTable === t.table_id ? 'bg-indigo-50 text-indigo-700 font-medium' : 'hover:bg-gray-50 text-gray-700'}`}
-                          >
-                            {t.name}
-                          </div>
-                        ))}
-                        {bitableTables.filter(t => !bitableTableSearch || t.name.toLowerCase().includes(bitableTableSearch.toLowerCase())).length === 0 && (
-                          <div className="px-3 py-4 text-sm text-gray-400 text-center">无匹配结果</div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
-            </>
-          )}
-
-          {/* 飞书表格 Tab */}
-          {tab === 'spreadsheet' && (
-            <>
-              {loadingSheets ? <div className="text-center text-gray-400 py-8">加载中...</div> : (
-                <>
-                  <div>
-                    <label className="block text-sm text-gray-600 mb-1">
-                      选择飞书表格
-                      {selectedSpreadsheet && <span className="ml-2 text-indigo-600">✓ {spreadsheets.find(s => s.token === selectedSpreadsheet)?.name}</span>}
-                    </label>
-                    <p className="text-xs text-gray-400 mb-2">仅显示云空间中的表格，知识空间的请用"粘贴链接"导入</p>
-                    <div className="relative mb-2">
-                      <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                      <input
-                        type="text"
-                        placeholder="搜索飞书表格名称..."
-                        className="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                        value={spreadsheetSearch}
-                        onChange={(e) => setSpreadsheetSearch(e.target.value)}
-                      />
-                    </div>
-                    <div className="max-h-40 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-50">
-                      {spreadsheets.filter(s => !spreadsheetSearch || s.name.toLowerCase().includes(spreadsheetSearch.toLowerCase())).map((s) => (
-                        <div
-                          key={s.token}
-                          onClick={() => { setSelectedSpreadsheet(s.token); setSelectedSheet(''); loadSheets(s.token) }}
-                          className={`px-3 py-2 text-sm cursor-pointer transition-colors ${selectedSpreadsheet === s.token ? 'bg-indigo-50 text-indigo-700 font-medium' : 'hover:bg-gray-50 text-gray-700'}`}
-                        >
-                          {s.name}
-                        </div>
-                      ))}
-                      {spreadsheets.filter(s => !spreadsheetSearch || s.name.toLowerCase().includes(spreadsheetSearch.toLowerCase())).length === 0 && (
-                        <div className="px-3 py-4 text-sm text-gray-400 text-center">无匹配结果</div>
-                      )}
-                    </div>
-                    <p className="text-xs text-gray-400 mt-1">共 {spreadsheets.length} 个飞书表格</p>
-                  </div>
-                  {selectedSpreadsheet && (
-                    <div>
-                      <label className="block text-sm text-gray-600 mb-1">
-                        选择工作表
-                        {selectedSheet && <span className="ml-2 text-indigo-600">✓ {sheetList.find(s => s.sheet_id === selectedSheet)?.title}</span>}
-                      </label>
-                      <div className="max-h-36 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-50">
-                        {sheetList.map((s) => (
-                          <div
-                            key={s.sheet_id}
-                            onClick={() => setSelectedSheet(s.sheet_id)}
-                            className={`px-3 py-2 text-sm cursor-pointer transition-colors ${selectedSheet === s.sheet_id ? 'bg-indigo-50 text-indigo-700 font-medium' : 'hover:bg-gray-50 text-gray-700'}`}
-                          >
-                            {s.title}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
-            </>
-          )}
-
-          {/* 本地上传 Tab */}
-          {tab === 'local' && (
-            <div>
-              <label className="block text-sm text-gray-600 mb-2">选择文件 (.csv / .xlsx / .xls)</label>
-              <input
-                type="file"
-                accept=".csv,.xlsx,.xls"
-                onChange={(e) => setFile(e.target.files?.[0] || null)}
-                className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
-              />
-              {file && <p className="mt-2 text-sm text-gray-500">已选择: {file.name} ({(file.size / 1024).toFixed(1)} KB)</p>}
-            </div>
-          )}
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-3">

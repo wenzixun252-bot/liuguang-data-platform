@@ -210,7 +210,8 @@ async def import_from_spreadsheet(
     max_rows = min(sheet_row_count, 5000) if sheet_row_count > 0 else 5000
     max_cols = min(sheet_col_count, 26) if sheet_col_count > 0 else 26  # 最多 Z 列
     end_col_letter = chr(ord("A") + max_cols - 1)
-    sheet_range = f"{sheet_title}!A1:{end_col_letter}{max_rows}"
+    # 飞书 v2 API 要求用 sheet_id（技术ID）而不是 sheet_title（显示名）
+    sheet_range = f"{sheet_id}!A1:{end_col_letter}{max_rows}"
 
     values = await feishu_client.get_spreadsheet_values(
         spreadsheet_token, sheet_range, user_access_token

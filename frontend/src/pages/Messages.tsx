@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Search, ChevronLeft, ChevronRight, X, Paperclip, ExternalLink, Download, Image, User, Trash2 } from 'lucide-react'
+import { Search, ChevronLeft, ChevronRight, X, Paperclip, ExternalLink, Download, Image, User, Trash2, Settings } from 'lucide-react'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
 import { ColumnSettingsButton, useColumnSettings, type ColumnDef } from '../components/ColumnSettings'
 import { getUser } from '../lib/auth'
+import RecipeSyncConfig from '../components/RecipeSyncConfig'
 
 const MSG_COLUMNS: ColumnDef[] = [
   { key: 'sender', label: '发送人' },
@@ -64,6 +65,7 @@ export default function Messages() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [refreshKey, setRefreshKey] = useState(0)
   const { isVisible, toggle, columns: colDefs } = useColumnSettings('messages', MSG_COLUMNS)
+  const [showSyncConfig, setShowSyncConfig] = useState(false)
 
   const pageSize = 20
 
@@ -116,8 +118,15 @@ export default function Messages() {
   return (
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold text-gray-800">聊天记录</h1>
+        <h1 className="text-2xl font-bold text-gray-800">会话记录</h1>
         <div className="flex items-center gap-3 w-full sm:w-auto flex-wrap">
+          <button
+            onClick={() => setShowSyncConfig(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 transition-colors"
+          >
+            <Settings size={16} />
+            导入配置
+          </button>
           <div className="relative flex-1 sm:flex-initial">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
@@ -239,6 +248,22 @@ export default function Messages() {
           <div className="p-12 text-center text-gray-400">暂无聊天记录</div>
         )}
       </div>
+
+      {showSyncConfig && (
+        <RecipeSyncConfig
+          title="会话记录导入配置"
+          recipeUrl="https://recipes.feishu.cn/recipe?template_id=36&ref=share"
+          assetType="chat_message"
+          recipeKeywords={['群聊摘要', '消息汇总', 'Chat', '聊天记录', '群消息']}
+          steps={[
+            '点击下方按钮打开飞书工作配方页面',
+            '在飞书中启用配方，它会自动把会话记录写入一个多维表格',
+            '回到流光，系统会自动检索到配方创建的表格，确认关联即可',
+          ]}
+          onClose={() => setShowSyncConfig(false)}
+          onSyncComplete={() => setRefreshKey((k) => k + 1)}
+        />
+      )}
 
       {selected && <MessageDetail msg={selected} onClose={() => setSelected(null)} onDelete={async (id) => {
         if (!confirm('确定要删除这条数据吗？')) return

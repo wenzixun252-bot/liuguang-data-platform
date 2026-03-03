@@ -8,6 +8,7 @@ from app.models.todo_item import TodoItem
 from app.models.report import Report, ReportTemplate
 from app.models.knowledge_graph import KGEntity, KGRelation
 from app.models.leadership_insight import LeadershipInsight
+from app.models.conversation import Conversation, ConversationMessage
 
 __all__ = [
     "User",
@@ -28,4 +29,6 @@ __all__ = [
     "KGEntity",
     "KGRelation",
     "LeadershipInsight",
+    "Conversation",
+    "ConversationMessage",
 ]

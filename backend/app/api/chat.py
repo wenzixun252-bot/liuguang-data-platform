@@ -1,16 +1,19 @@
-""""流光"智能问答接口 — 流式 SSE + 非流式 JSON。"""
+""""流光"智能问答接口 — 流式 SSE + 非流式 JSON + 附件解析。"""
 
+import io
 import json
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from openai import AsyncOpenAI
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, get_visible_owner_ids
 from app.config import settings
+from app.models.conversation import Conversation, ConversationMessage
 from app.models.user import User
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.rag import SearchResult, hybrid_searcher
@@ -43,16 +46,18 @@ SOURCE_TABLE_LABELS = {
 }
 
 
-def _build_context(results: list[SearchResult]) -> str:
+def _build_context(results: list[SearchResult], attachment_context: str | None = None) -> str:
     """构建检索上下文文本。"""
-    if not results:
+    if not results and not attachment_context:
         return "（未检索到相关数据）"
     parts = []
     for i, r in enumerate(results, 1):
         title = r.title or "无标题"
         label = SOURCE_TABLE_LABELS.get(r.source_table, r.source_table)
         parts.append(f"[{i}] 类型: {label}\n标题: {title}\nID: {r.source_table}:{r.id}\n内容: {r.content_text[:500]}")
-    return "\n\n".join(parts)
+    if attachment_context:
+        parts.append(f"\n## 用户上传附件内容\n{attachment_context[:2000]}")
+    return "\n\n".join(parts) if parts else "（未检索到相关数据）"
 
 
 def _build_messages(
@@ -74,6 +79,42 @@ def _get_agent_client() -> AsyncOpenAI:
     )
 
 
+async def _save_messages(
+    db: AsyncSession,
+    conversation_id: int,
+    owner_id: str,
+    user_content: str,
+    assistant_content: str,
+    source_ids: list[str],
+    attachments: list | None = None,
+):
+    """保存用户和助手消息到 conversation_messages 表。"""
+    # 验证会话属于当前用户
+    result = await db.execute(
+        select(Conversation).where(
+            Conversation.id == conversation_id,
+            Conversation.owner_id == owner_id,
+        )
+    )
+    conv = result.scalar_one_or_none()
+    if not conv:
+        return
+
+    db.add(ConversationMessage(
+        conversation_id=conversation_id,
+        role="user",
+        content=user_content,
+        attachments=attachments,
+    ))
+    db.add(ConversationMessage(
+        conversation_id=conversation_id,
+        role="assistant",
+        content=assistant_content,
+        sources=source_ids,
+    ))
+    await db.commit()
+
+
 # ── 流式接口 ─────────────────────────────────────────────
 
 
@@ -90,16 +131,19 @@ async def chat_stream(
         query_text=body.question,
         visible_ids=visible_ids,
         db=db,
+        source_tables=body.source_tables,
+        source_ids=body.source_ids,
     )
 
-    context = _build_context(results)
+    context = _build_context(results, body.attachment_context)
     history = [{"role": m.role, "content": m.content} for m in body.history]
     messages = _build_messages(body.question, history, context)
 
-    source_ids = [f"{r.source_table}:{r.id}" for r in results]
+    source_id_list = [f"{r.source_table}:{r.id}" for r in results]
 
     async def _event_generator():
         client = _get_agent_client()
+        full_content = ""
         try:
             stream = await client.chat.completions.create(
                 model=settings.agent_llm_model,
@@ -109,12 +153,23 @@ async def chat_stream(
             async for chunk in stream:
                 delta = chunk.choices[0].delta
                 if delta.content:
+                    full_content += delta.content
                     data = json.dumps({"type": "content", "content": delta.content}, ensure_ascii=False)
                     yield f"data: {data}\n\n"
 
-            data = json.dumps({"type": "sources", "sources": source_ids}, ensure_ascii=False)
+            data = json.dumps({"type": "sources", "sources": source_id_list}, ensure_ascii=False)
             yield f"data: {data}\n\n"
             yield "data: [DONE]\n\n"
+
+            # 流式完成后保存消息
+            if body.conversation_id and full_content:
+                try:
+                    await _save_messages(
+                        db, body.conversation_id, current_user.feishu_open_id,
+                        body.question, full_content, source_id_list,
+                    )
+                except Exception as e:
+                    logger.warning("保存对话消息失败: %s", e)
         except Exception as e:
             logger.error("流式问答异常: %s", e)
             data = json.dumps({"type": "error", "content": "生成回答时出错，请稍后重试"}, ensure_ascii=False)
@@ -144,9 +199,11 @@ async def chat_ask(
         query_text=body.question,
         visible_ids=visible_ids,
         db=db,
+        source_tables=body.source_tables,
+        source_ids=body.source_ids,
     )
 
-    context = _build_context(results)
+    context = _build_context(results, body.attachment_context)
     history = [{"role": m.role, "content": m.content} for m in body.history]
     messages = _build_messages(body.question, history, context)
 
@@ -161,6 +218,65 @@ async def chat_ask(
         logger.error("问答异常: %s", e)
         answer = "生成回答时出错，请稍后重试"
 
-    source_ids = [f"{r.source_table}:{r.id}" for r in results]
+    source_id_list = [f"{r.source_table}:{r.id}" for r in results]
 
-    return ChatResponse(answer=answer, sources=source_ids)
+    # 保存消息
+    if body.conversation_id and answer:
+        try:
+            await _save_messages(
+                db, body.conversation_id, current_user.feishu_open_id,
+                body.question, answer, source_id_list,
+            )
+        except Exception as e:
+            logger.warning("保存对话消息失败: %s", e)
+
+    return ChatResponse(answer=answer, sources=source_id_list)
+
+
+# ── 附件解析 ─────────────────────────────────────────────
+
+
+def _extract_text_from_pdf(data: bytes) -> str:
+    from pypdf import PdfReader
+    reader = PdfReader(io.BytesIO(data))
+    return "\n".join(page.extract_text() or "" for page in reader.pages)
+
+
+def _extract_text_from_docx(data: bytes) -> str:
+    from docx import Document
+    doc = Document(io.BytesIO(data))
+    return "\n".join(p.text for p in doc.paragraphs)
+
+
+@router.post("/parse-attachment", summary="解析附件文本")
+async def parse_attachment(
+    file: Annotated[UploadFile, File()],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    """解析上传文件，提取文本内容。支持 PDF、Word、TXT。不持久化。"""
+    if not file.filename:
+        raise HTTPException(400, "缺少文件名")
+
+    data = await file.read()
+    filename = file.filename.lower()
+
+    try:
+        if filename.endswith(".pdf"):
+            content_text = _extract_text_from_pdf(data)
+        elif filename.endswith((".docx", ".doc")):
+            content_text = _extract_text_from_docx(data)
+        elif filename.endswith((".txt", ".md", ".csv")):
+            content_text = data.decode("utf-8", errors="replace")
+        else:
+            raise HTTPException(400, f"不支持的文件格式: {file.filename}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("解析附件失败: %s", e)
+        raise HTTPException(400, f"文件解析失败: {e}")
+
+    return {
+        "filename": file.filename,
+        "content_text": content_text,
+        "char_count": len(content_text),
+    }

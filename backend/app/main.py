@@ -25,6 +25,7 @@ from app.api.insights import router as insights_router
 from app.api.profile import router as profile_router
 from app.api.search import router as search_router
 from app.api.structured_tables import router as structured_tables_router
+from app.api.conversations import router as conversations_router
 from app.database import async_session, engine
 from app.worker.scheduler import init_scheduler, shutdown_scheduler
 
@@ -85,6 +86,7 @@ app.include_router(insights_router)
 app.include_router(profile_router)
 app.include_router(search_router)
 app.include_router(structured_tables_router)
+app.include_router(conversations_router)
 
 
 @app.get("/health", summary="健康检查")

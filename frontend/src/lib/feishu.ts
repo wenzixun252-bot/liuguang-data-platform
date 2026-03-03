@@ -14,6 +14,8 @@ export function getFeishuAuthUrl(): string {
   const scopes = [
     'drive:drive:readonly',
     'bitable:app:readonly',
+    'sheets:spreadsheet',  // 飞书表格读写
+    'wiki:wiki:readonly',  // 知识空间（Wiki）只读，解析 Wiki 内嵌表格
     'docx:document',       // 云文档读写（含创建）
     'task:task',           // 任务读写（含创建）
     'offline_access',      // 获取 refresh_token

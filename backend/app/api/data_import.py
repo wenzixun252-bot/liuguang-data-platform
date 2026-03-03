@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -91,13 +91,17 @@ async def list_my_sources(
 async def get_my_sync_status(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    asset_type: str | None = Query(None, description="可选：按 asset_type 过滤"),
 ) -> list[DataSourceWithSyncOut]:
     """返回当前用户的数据源列表，附带每个数据源的同步状态。"""
-    result = await db.execute(
+    query = (
         select(ETLDataSource)
         .where(ETLDataSource.owner_id == current_user.feishu_open_id)
         .order_by(ETLDataSource.id)
     )
+    if asset_type:
+        query = query.where(ETLDataSource.asset_type == asset_type)
+    result = await db.execute(query)
     sources = result.scalars().all()
 
     out: list[DataSourceWithSyncOut] = []
@@ -352,6 +356,127 @@ async def add_feishu_sources_batch(
         created.append(DataSourceOut.model_validate(ds))
 
     return created
+
+
+class FeishuSourceFromURLRequest(BaseModel):
+    url: str
+    asset_type: str = "document"
+
+
+@router.post("/feishu-source-from-url", response_model=DataSourceOut, summary="从飞书链接创建数据源")
+async def add_feishu_source_from_url(
+    body: FeishuSourceFromURLRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> DataSourceOut:
+    """解析飞书链接并自动创建 ETLDataSource 记录。
+
+    支持多维表格直链、Wiki 内嵌多维表格链接。
+    如果链接中没有 table_id，自动取第一个子表。
+    """
+    import re
+
+    if body.asset_type not in ("document", "meeting", "chat_message"):
+        raise HTTPException(400, "asset_type 必须是 document / meeting / chat_message")
+
+    url = body.url.strip()
+
+    # 解析 URL
+    parsed_type = None
+    token = None
+    table_id = None
+
+    # 多维表格直链: /base/{app_token}
+    m = re.search(r'/base/([A-Za-z0-9_-]+)', url)
+    if m:
+        parsed_type = "bitable"
+        token = m.group(1)
+        tm = re.search(r'[?&]table=([A-Za-z0-9_-]+)', url)
+        table_id = tm.group(1) if tm else None
+
+    # Wiki 链接: /wiki/{node_token}
+    if not parsed_type:
+        m = re.search(r'/wiki/([A-Za-z0-9_-]+)', url)
+        if m:
+            parsed_type = "wiki"
+            token = m.group(1)
+            tm = re.search(r'[?&]table=([A-Za-z0-9_-]+)', url)
+            table_id = tm.group(1) if tm else None
+
+    if not parsed_type or not token:
+        raise HTTPException(400, "无法识别的链接格式，请粘贴飞书多维表格的链接")
+
+    user_token = await _get_user_token(current_user, db)
+    if not user_token:
+        raise HTTPException(401, "飞书授权已失效，请重新登录")
+
+    # Wiki → 解析实际 obj_token
+    if parsed_type == "wiki":
+        try:
+            try:
+                node_info = await feishu_client.get_wiki_node_info(
+                    token, user_access_token=user_token,
+                )
+            except Exception:
+                node_info = await feishu_client.get_wiki_node_info(token)
+            obj_type = node_info.get("obj_type", "")
+            obj_token = node_info.get("obj_token", "")
+            if obj_type != "bitable":
+                raise HTTPException(400, f"该页面类型 {obj_type} 不支持，仅支持多维表格")
+            token = obj_token
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(400, f"解析 Wiki 链接失败: {e}")
+
+    # 如果没有 table_id，取第一个子表
+    if not table_id:
+        try:
+            tables_raw = await feishu_client.get_bitable_tables(
+                token, user_access_token=user_token,
+            )
+            if not tables_raw:
+                raise HTTPException(400, "该多维表格下没有数据表")
+            table_id = tables_raw[0].get("table_id", "")
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(500, f"获取数据表列表失败: {e}")
+
+    # 查重
+    existing = await db.execute(
+        select(ETLDataSource).where(
+            ETLDataSource.app_token == token,
+            ETLDataSource.table_id == table_id,
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(400, "该数据源已存在")
+
+    # 获取表名
+    table_name = ""
+    try:
+        tables_raw = await feishu_client.get_bitable_tables(
+            token, user_access_token=user_token,
+        )
+        for t in tables_raw:
+            if t.get("table_id") == table_id:
+                table_name = t.get("name", "")
+                break
+    except Exception:
+        pass
+
+    ds = ETLDataSource(
+        app_token=token,
+        table_id=table_id,
+        table_name=table_name,
+        asset_type=body.asset_type,
+        owner_id=current_user.feishu_open_id,
+    )
+    db.add(ds)
+    await db.commit()
+    await db.refresh(ds)
+    return DataSourceOut.model_validate(ds)
 
 
 # ── 云文档/文件导入 ─────────────────────────────────────────

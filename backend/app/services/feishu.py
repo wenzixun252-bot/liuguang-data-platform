@@ -1125,11 +1125,12 @@ class FeishuClient:
                 headers={"Authorization": f"Bearer {token}"},
                 params={"token": node_token},
             )
-            resp.raise_for_status()
             data = resp.json()
-            if data.get("code") != 0:
+            logger.info("get_wiki_node_info 响应: status=%s, code=%s, msg=%s",
+                        resp.status_code, data.get("code"), data.get("msg"))
+            if resp.status_code != 200 or data.get("code") != 0:
                 raise FeishuAPIError(
-                    f"获取 Wiki 节点信息失败: {data.get('msg', '未知错误')}"
+                    f"获取 Wiki 节点信息失败 (HTTP {resp.status_code}): {data.get('msg', '未知错误')}"
                 )
             return data.get("data", {}).get("node", {})
 

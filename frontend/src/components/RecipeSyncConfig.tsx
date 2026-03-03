@@ -1,0 +1,578 @@
+import { useEffect, useState, useCallback } from 'react'
+import {
+  Search, RefreshCw, Trash2, Plus, ExternalLink, Check,
+  ChevronDown, ChevronRight, Loader2, X, Settings,
+} from 'lucide-react'
+import api from '../lib/api'
+import toast from 'react-hot-toast'
+
+/* ── 类型 ─────────────────────────────────── */
+
+interface DataSource {
+  id: number
+  app_token: string
+  table_id: string
+  table_name: string
+  asset_type: string
+  is_enabled: boolean
+  created_at: string
+  last_sync_status?: string | null
+  last_sync_time?: string | null
+  records_synced?: number | null
+  error_message?: string | null
+}
+
+interface BitableApp {
+  app_token: string
+  app_name: string
+  tables: { table_id: string; name: string }[]
+}
+
+/* ── Props ────────────────────────────────── */
+
+interface RecipeSyncConfigProps {
+  title: string
+  recipeUrl: string
+  assetType: string
+  recipeKeywords: string[]
+  steps: string[]
+  onClose: () => void
+  onSyncComplete?: () => void
+}
+
+export default function RecipeSyncConfig({
+  title, recipeUrl, assetType, recipeKeywords, steps, onClose, onSyncComplete,
+}: RecipeSyncConfigProps) {
+  // 数据源列表
+  const [sources, setSources] = useState<DataSource[]>([])
+  const [sourcesLoading, setSourcesLoading] = useState(true)
+
+  // 自动检索
+  const [bitableApps, setBitableApps] = useState<BitableApp[]>([])
+  const [discovering, setDiscovering] = useState(false)
+  const [matchedApps, setMatchedApps] = useState<BitableApp[]>([])
+  const [unmatchedApps, setUnmatchedApps] = useState<BitableApp[]>([])
+  const [expandedApps, setExpandedApps] = useState<Set<string>>(new Set())
+  const [loadingTables, setLoadingTables] = useState<Set<string>>(new Set())
+  const [selectedTable, setSelectedTable] = useState<{ app_token: string; table_id: string; table_name: string } | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const [appSearch, setAppSearch] = useState('')
+
+  // 粘贴链接
+  const [showPasteUrl, setShowPasteUrl] = useState(false)
+  const [pasteUrl, setPasteUrl] = useState('')
+  const [addingFromUrl, setAddingFromUrl] = useState(false)
+
+  // 轮询
+  const [polling, setPolling] = useState(false)
+  const [syncingSourceId, setSyncingSourceId] = useState<number | null>(null)
+
+  const existingKeys = new Set(sources.map((s) => `${s.app_token}:${s.table_id}`))
+
+  /* ── 加载数据源 ─────────────────────────── */
+
+  const loadSources = useCallback((silent = false) => {
+    if (!silent) setSourcesLoading(true)
+    api.get('/import/sync-status', { params: { asset_type: assetType } })
+      .then((res) => setSources(res.data))
+      .catch(() => { if (!silent) toast.error('加载数据源失败') })
+      .finally(() => { if (!silent) setSourcesLoading(false) })
+  }, [assetType])
+
+  useEffect(() => { loadSources() }, [loadSources])
+
+  // 同步轮询
+  useEffect(() => {
+    if (!polling) return
+    const timer = setInterval(() => {
+      api.get('/import/sync-status', { params: { asset_type: assetType } }).then((res) => {
+        setSources(res.data)
+        const hasRunning = res.data.some((s: DataSource) => s.last_sync_status === 'running')
+        if (!hasRunning) {
+          setPolling(false)
+          setSyncingSourceId(null)
+          const hasFailed = res.data.some((s: DataSource) => s.last_sync_status === 'failed')
+          if (hasFailed) {
+            toast.error('部分数据源同步失败')
+          } else {
+            toast.success('同步完成')
+          }
+          onSyncComplete?.()
+        }
+      })
+    }, 3000)
+    return () => clearInterval(timer)
+  }, [polling, assetType, onSyncComplete])
+
+  /* ── 自动检索配方表格 ──────────────────── */
+
+  const doDiscover = async () => {
+    setDiscovering(true)
+    try {
+      const res = await api.get('/import/feishu-discover')
+      const apps: BitableApp[] = res.data
+      setBitableApps(apps)
+
+      // 关键词匹配
+      const keywords = recipeKeywords.map(k => k.toLowerCase())
+      const matched: BitableApp[] = []
+      const unmatched: BitableApp[] = []
+      for (const app of apps) {
+        const name = app.app_name.toLowerCase()
+        if (keywords.some(k => name.includes(k))) {
+          matched.push(app)
+        } else {
+          unmatched.push(app)
+        }
+      }
+      setMatchedApps(matched)
+      setUnmatchedApps(unmatched)
+
+      // 自动展开匹配到的
+      if (matched.length > 0) {
+        const firstToken = matched[0].app_token
+        setExpandedApps(new Set([firstToken]))
+        // 自动加载子表
+        if (matched[0].tables.length === 0) {
+          await loadSubTables(firstToken)
+        }
+      }
+    } catch (e: any) {
+      toast.error(e.response?.data?.detail || '获取飞书多维表格列表失败')
+    } finally {
+      setDiscovering(false)
+    }
+  }
+
+  useEffect(() => {
+    // 自动发现
+    doDiscover()
+  }, [])
+
+  const loadSubTables = async (appToken: string) => {
+    setLoadingTables((prev) => new Set(prev).add(appToken))
+    try {
+      const res = await api.get(`/import/feishu-discover/${appToken}/tables`)
+      const updater = (prev: BitableApp[]) =>
+        prev.map((a) => a.app_token === appToken ? { ...a, tables: res.data } : a)
+      setBitableApps(updater)
+      setMatchedApps(updater)
+      setUnmatchedApps(updater)
+    } catch (e: any) {
+      toast.error(e.response?.data?.detail || '获取数据表列表失败')
+    } finally {
+      setLoadingTables((prev) => {
+        const next = new Set(prev)
+        next.delete(appToken)
+        return next
+      })
+    }
+  }
+
+  const toggleApp = async (appToken: string) => {
+    if (expandedApps.has(appToken)) {
+      setExpandedApps((prev) => {
+        const next = new Set(prev)
+        next.delete(appToken)
+        return next
+      })
+      return
+    }
+
+    const app = [...matchedApps, ...unmatchedApps].find((a) => a.app_token === appToken)
+    if (app && app.tables.length === 0) {
+      await loadSubTables(appToken)
+    }
+    setExpandedApps((prev) => new Set(prev).add(appToken))
+  }
+
+  const handleSelectTable = (appToken: string, tableId: string, tableName: string) => {
+    setSelectedTable({ app_token: appToken, table_id: tableId, table_name: tableName })
+  }
+
+  const handleAddSource = async () => {
+    if (!selectedTable) { toast.error('请选择一个数据表'); return }
+    if (existingKeys.has(`${selectedTable.app_token}:${selectedTable.table_id}`)) {
+      toast.error('该数据源已添加')
+      return
+    }
+    setSubmitting(true)
+    try {
+      await api.post('/import/feishu-source', {
+        app_token: selectedTable.app_token,
+        table_id: selectedTable.table_id,
+        table_name: selectedTable.table_name,
+        asset_type: assetType,
+      })
+      toast.success('数据源已添加')
+      setSelectedTable(null)
+      loadSources()
+    } catch (e: any) {
+      toast.error(e.response?.data?.detail || '添加失败')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  /* ── 粘贴链接 ──────────────────────────── */
+
+  const handleAddFromUrl = async () => {
+    if (!pasteUrl.trim()) { toast.error('请粘贴链接'); return }
+    setAddingFromUrl(true)
+    try {
+      await api.post('/import/feishu-source-from-url', {
+        url: pasteUrl.trim(),
+        asset_type: assetType,
+      })
+      toast.success('数据源已添加')
+      setPasteUrl('')
+      loadSources()
+    } catch (e: any) {
+      toast.error(e.response?.data?.detail || '添加失败')
+    } finally {
+      setAddingFromUrl(false)
+    }
+  }
+
+  /* ── 数据源操作 ────────────────────────── */
+
+  const handleSyncSingle = async (sourceId: number) => {
+    setSyncingSourceId(sourceId)
+    try {
+      await api.post(`/import/feishu-sync/${sourceId}`)
+      toast.success('同步任务已触发')
+      setPolling(true)
+    } catch (e: any) {
+      toast.error(e.response?.data?.detail || '触发失败')
+      setSyncingSourceId(null)
+    }
+  }
+
+  const handleDeleteSource = async (id: number) => {
+    if (!confirm('确定删除此数据源？')) return
+    try {
+      await api.delete(`/import/feishu-source/${id}`)
+      toast.success('已删除')
+      loadSources()
+    } catch {
+      toast.error('删除失败')
+    }
+  }
+
+  /* ── 渲染 ──────────────────────────────── */
+
+  const hasNoSources = sources.length === 0 && !sourcesLoading
+
+  const filteredUnmatched = unmatchedApps.filter(a =>
+    !appSearch || a.app_name.toLowerCase().includes(appSearch.toLowerCase())
+  )
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={onClose}>
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl mx-4 max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+          <h3 className="text-lg font-semibold text-gray-800 flex items-center gap-2">
+            <Settings size={18} />
+            {title}
+          </h3>
+          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded"><X size={20} /></button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6 space-y-5">
+          {/* 区域 A: 配置教程（首次无数据源时显示） */}
+          {hasNoSources && (
+            <div className="bg-blue-50 rounded-lg p-4 space-y-3">
+              <h4 className="font-medium text-blue-800 text-sm">配置教程</h4>
+              <ol className="space-y-2">
+                {steps.map((step, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-blue-700">
+                    <span className="flex-shrink-0 w-5 h-5 bg-blue-200 text-blue-800 rounded-full flex items-center justify-center text-xs font-bold">{i + 1}</span>
+                    <span>{step}</span>
+                  </li>
+                ))}
+              </ol>
+              <a
+                href={recipeUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
+              >
+                <ExternalLink size={14} />
+                打开飞书工作配方
+              </a>
+            </div>
+          )}
+
+          {/* 区域 B: 自动检索配方表格 */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h4 className="font-medium text-gray-700 text-sm">关联数据表</h4>
+              <button
+                onClick={doDiscover}
+                disabled={discovering}
+                className="flex items-center gap-1 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs hover:bg-indigo-700 disabled:opacity-50"
+              >
+                <RefreshCw size={12} className={discovering ? 'animate-spin' : ''} />
+                {discovering ? '检索中...' : '刷新列表'}
+              </button>
+            </div>
+
+            {discovering ? (
+              <div className="py-6 text-center text-gray-400">
+                <Loader2 size={20} className="animate-spin mx-auto mb-2" />
+                正在检索飞书多维表格...
+              </div>
+            ) : (
+              <>
+                {/* 匹配到的推荐 */}
+                {matchedApps.length > 0 && (
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-3 space-y-2">
+                    <p className="text-sm text-green-700 font-medium">
+                      检测到可能的配方表格：
+                    </p>
+                    {matchedApps.map((app) => (
+                      <AppItem
+                        key={app.app_token}
+                        app={app}
+                        expanded={expandedApps.has(app.app_token)}
+                        loadingTables={loadingTables.has(app.app_token)}
+                        existingKeys={existingKeys}
+                        selectedTable={selectedTable}
+                        onToggle={() => toggleApp(app.app_token)}
+                        onSelectTable={handleSelectTable}
+                        highlight
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {/* 未匹配的完整列表 */}
+                {(matchedApps.length === 0 || unmatchedApps.length > 0) && (
+                  <div className="space-y-2">
+                    {matchedApps.length > 0 && (
+                      <p className="text-xs text-gray-500">以上不是？从完整列表中选择：</p>
+                    )}
+                    {unmatchedApps.length > 5 && (
+                      <div className="relative">
+                        <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <input
+                          type="text"
+                          placeholder="搜索多维表格名称..."
+                          className="w-full pl-8 pr-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                          value={appSearch}
+                          onChange={(e) => setAppSearch(e.target.value)}
+                        />
+                      </div>
+                    )}
+                    <div className="border border-gray-200 rounded-lg max-h-48 overflow-y-auto divide-y divide-gray-50">
+                      {filteredUnmatched.map((app) => (
+                        <AppItem
+                          key={app.app_token}
+                          app={app}
+                          expanded={expandedApps.has(app.app_token)}
+                          loadingTables={loadingTables.has(app.app_token)}
+                          existingKeys={existingKeys}
+                          selectedTable={selectedTable}
+                          onToggle={() => toggleApp(app.app_token)}
+                          onSelectTable={handleSelectTable}
+                        />
+                      ))}
+                      {filteredUnmatched.length === 0 && (
+                        <div className="px-3 py-4 text-sm text-gray-400 text-center">
+                          {bitableApps.length === 0 ? '未发现多维表格' : '无匹配结果'}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* 确认添加按钮 */}
+                {selectedTable && (
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm text-gray-600">
+                      已选择: <span className="font-medium text-indigo-700">{selectedTable.table_name}</span>
+                    </span>
+                    <button
+                      onClick={handleAddSource}
+                      disabled={submitting}
+                      className="flex items-center gap-1 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 disabled:opacity-50"
+                    >
+                      <Plus size={14} />
+                      {submitting ? '添加中...' : '添加数据源'}
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* 区域 C: 兜底 — 粘贴链接 */}
+          <div className="border-t border-gray-100 pt-3">
+            <button
+              onClick={() => setShowPasteUrl(!showPasteUrl)}
+              className="flex items-center gap-1 text-sm text-gray-500 hover:text-indigo-600"
+            >
+              <ChevronDown size={14} className={`transition-transform ${showPasteUrl ? 'rotate-180' : ''}`} />
+              在列表中找不到？粘贴多维表格链接
+            </button>
+            {showPasteUrl && (
+              <div className="mt-3 flex gap-2">
+                <input
+                  type="text"
+                  placeholder="https://xxx.feishu.cn/base/... 或 /wiki/..."
+                  className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                  value={pasteUrl}
+                  onChange={(e) => setPasteUrl(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleAddFromUrl() }}
+                />
+                <button
+                  onClick={handleAddFromUrl}
+                  disabled={addingFromUrl}
+                  className="flex items-center gap-1 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 disabled:opacity-50 whitespace-nowrap"
+                >
+                  <Plus size={14} />
+                  {addingFromUrl ? '添加中...' : '添加'}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* 区域 D: 已关联数据源管理 */}
+          {sources.length > 0 && (
+            <div className="space-y-3">
+              <h4 className="font-medium text-gray-700 text-sm">已关联数据源</h4>
+              <div className="border border-gray-200 rounded-lg divide-y divide-gray-50">
+                {sources.map((s) => (
+                  <div key={s.id} className="flex items-center gap-3 px-4 py-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-800 truncate">{s.table_name || s.table_id}</p>
+                      <p className="text-xs text-gray-400">
+                        {s.last_sync_time ? `最后同步: ${new Date(s.last_sync_time).toLocaleString('zh-CN')}` : '从未同步'}
+                        {s.records_synced ? ` · ${s.records_synced} 条记录` : ''}
+                      </p>
+                    </div>
+                    <SyncStatusBadge status={s.last_sync_status} errorMessage={s.error_message} />
+                    <button
+                      onClick={() => handleSyncSingle(s.id)}
+                      disabled={syncingSourceId === s.id || s.last_sync_status === 'running'}
+                      className="p-1.5 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 rounded disabled:opacity-50"
+                      title="同步"
+                    >
+                      <RefreshCw size={14} className={(syncingSourceId === s.id || s.last_sync_status === 'running') ? 'animate-spin' : ''} />
+                    </button>
+                    <button
+                      onClick={() => handleDeleteSource(s.id)}
+                      className="p-1.5 text-gray-400 hover:text-red-500 rounded"
+                      title="删除"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {sourcesLoading && (
+            <div className="py-4 text-center text-gray-400 text-sm">加载中...</div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ── 多维表格条目 ────────────────────────── */
+
+function AppItem({
+  app, expanded, loadingTables, existingKeys, selectedTable, onToggle, onSelectTable, highlight,
+}: {
+  app: BitableApp
+  expanded: boolean
+  loadingTables: boolean
+  existingKeys: Set<string>
+  selectedTable: { app_token: string; table_id: string; table_name: string } | null
+  onToggle: () => void
+  onSelectTable: (appToken: string, tableId: string, tableName: string) => void
+  highlight?: boolean
+}) {
+  return (
+    <div>
+      <div
+        className={`flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-gray-100 rounded ${highlight ? 'bg-green-50' : ''}`}
+        onClick={onToggle}
+      >
+        {loadingTables ? (
+          <Loader2 size={14} className="text-indigo-500 animate-spin" />
+        ) : expanded ? (
+          <ChevronDown size={14} className="text-gray-400" />
+        ) : (
+          <ChevronRight size={14} className="text-gray-400" />
+        )}
+        <span className="text-sm font-medium text-gray-700 flex-1 truncate">{app.app_name}</span>
+        <span className="text-xs text-gray-400">
+          {app.tables.length > 0 ? `${app.tables.length} 个表` : '点击展开'}
+        </span>
+      </div>
+
+      {expanded && loadingTables && (
+        <div className="px-8 py-3 text-center text-gray-400 text-xs">
+          <Loader2 size={12} className="animate-spin inline mr-1" />
+          加载中...
+        </div>
+      )}
+
+      {expanded && !loadingTables && app.tables.map((table) => {
+        const key = `${app.app_token}:${table.table_id}`
+        const isExisting = existingKeys.has(key)
+        const isSelected = selectedTable?.app_token === app.app_token && selectedTable?.table_id === table.table_id
+
+        return (
+          <div
+            key={key}
+            className={`flex items-center gap-2 px-3 py-2 pl-8 text-sm ${
+              isExisting ? 'opacity-50' : 'hover:bg-indigo-50 cursor-pointer'
+            } ${isSelected ? 'bg-indigo-50' : ''}`}
+            onClick={() => !isExisting && onSelectTable(app.app_token, table.table_id, table.name)}
+          >
+            <div className={`w-3.5 h-3.5 rounded-full border flex items-center justify-center flex-shrink-0 ${
+              isExisting ? 'bg-gray-200 border-gray-300' :
+              isSelected ? 'bg-indigo-600 border-indigo-600' : 'border-gray-300'
+            }`}>
+              {(isExisting || isSelected) && <Check size={8} className="text-white" />}
+            </div>
+            <span className="text-gray-700 flex-1 truncate">{table.name}</span>
+            {isExisting && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500">已添加</span>}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/* ── 同步状态标签 ────────────────────────── */
+
+function SyncStatusBadge({ status, errorMessage }: { status?: string | null; errorMessage?: string | null }) {
+  if (!status || status === 'idle') {
+    return <span className="px-2 py-0.5 rounded-full text-[10px] bg-gray-100 text-gray-500">未同步</span>
+  }
+  if (status === 'running') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-blue-50 text-blue-600">
+        <Loader2 size={10} className="animate-spin" />
+        同步中
+      </span>
+    )
+  }
+  if (status === 'success') {
+    return <span className="px-2 py-0.5 rounded-full text-[10px] bg-green-50 text-green-600">成功</span>
+  }
+  if (status === 'failed') {
+    return (
+      <span className="px-2 py-0.5 rounded-full text-[10px] bg-red-50 text-red-600" title={errorMessage || ''}>
+        失败
+      </span>
+    )
+  }
+  return <span className="px-2 py-0.5 rounded-full text-[10px] bg-gray-100 text-gray-500">{status}</span>
+}

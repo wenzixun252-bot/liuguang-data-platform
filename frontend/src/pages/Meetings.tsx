@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Search, ChevronLeft, ChevronRight, X, Clock, MapPin, Users, Paperclip, ExternalLink, Download, Image, FileText, User, Trash2 } from 'lucide-react'
+import { Search, ChevronLeft, ChevronRight, X, Clock, MapPin, Users, Paperclip, ExternalLink, Download, Image, FileText, User, Trash2, Settings } from 'lucide-react'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
 import { ColumnSettingsButton, useColumnSettings, type ColumnDef } from '../components/ColumnSettings'
 import { getUser } from '../lib/auth'
+import RecipeSyncConfig from '../components/RecipeSyncConfig'
 
 const MEETING_COLUMNS: ColumnDef[] = [
   { key: 'title', label: '主题' },
@@ -71,6 +72,7 @@ export default function Meetings() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [refreshKey, setRefreshKey] = useState(0)
   const { isVisible, toggle, columns: colDefs } = useColumnSettings('meetings', MEETING_COLUMNS)
+  const [showSyncConfig, setShowSyncConfig] = useState(false)
 
   const pageSize = 20
 
@@ -124,8 +126,15 @@ export default function Meetings() {
   return (
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold text-gray-800">会议</h1>
+        <h1 className="text-2xl font-bold text-gray-800">会议记录</h1>
         <div className="flex items-center gap-3 flex-wrap">
+          <button
+            onClick={() => setShowSyncConfig(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 transition-colors"
+          >
+            <Settings size={16} />
+            导入配置
+          </button>
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
@@ -261,6 +270,22 @@ export default function Meetings() {
           <div className="p-12 text-center text-gray-400">暂无会议记录</div>
         )}
       </div>
+
+      {showSyncConfig && (
+        <RecipeSyncConfig
+          title="会议记录导入配置"
+          recipeUrl="https://recipes.feishu.cn/recipe?template_id=32"
+          assetType="meeting"
+          recipeKeywords={['会议纪要', '会议记录', 'Meeting', '会议摘要']}
+          steps={[
+            '点击下方按钮打开飞书工作配方页面',
+            '在飞书中启用配方，它会自动把会议记录写入一个多维表格',
+            '回到流光，系统会自动检索到配方创建的表格，确认关联即可',
+          ]}
+          onClose={() => setShowSyncConfig(false)}
+          onSyncComplete={() => setRefreshKey((k) => k + 1)}
+        />
+      )}
 
       {selected && <MeetingDetail meeting={selected} onClose={() => setSelected(null)} onDelete={async (id) => {
         if (!confirm('确定要删除这条数据吗？')) return
