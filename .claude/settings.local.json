@@ -1,18 +1,4 @@
 {
-  "hooks": {
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"D:/CC/liuguang-data-platform/.claude/hooks/restart-services.sh\"",
-            "timeout": 300,
-            "statusMessage": "正在重启流光平台服务..."
-          }
-        ]
-      }
-    ]
-  },
   "permissions": {
     "allow": [
       "Bash(git ls-tree:*)",
@@ -78,7 +64,9 @@
       "Bash(__NEW_LINE_674fbfb9a00a51f7__ echo:*)",
       "WebFetch(domain:github.com)",
       "Bash(wc:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(ipconfig:*)"
     ]
-  }
+  },
+  "hooks": {}
 }

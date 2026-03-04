@@ -72,14 +72,26 @@ def _parse_feishu_event(event: dict) -> CalendarEventOut | None:
         logger.warning("事件 %s 时间解析失败: %s", event_id, e)
         return None
 
-    # 解析参会人
+    # 解析参会人（兼容 attendees API 和内嵌格式）
     attendees = []
-    for att in event.get("attendees", []):
+    raw_attendees = event.get("attendees", [])
+    for att in raw_attendees:
+        # display_name 是参会人接口的标准字段
+        name = att.get("display_name") or att.get("name")
+        # user_id / attendee_id 取 open_id
+        open_id = att.get("user_id") or att.get("attendee_id")
+        # rsvp_status: needs_action / accept / tentative / decline / removed
+        status = att.get("rsvp_status") or att.get("status")
+        # 跳过没有名字也没有 ID 的条目
+        if not name and not open_id:
+            continue
         attendees.append(CalendarAttendee(
-            name=att.get("display_name"),
-            open_id=att.get("user_id"),
-            status=att.get("rsvp_status"),
+            name=name,
+            open_id=open_id,
+            status=status,
         ))
+    if raw_attendees:
+        logger.debug("事件 %s 解析到 %d/%d 个参会人", event_id, len(attendees), len(raw_attendees))
 
     # 解析地点
     location = None
@@ -93,6 +105,12 @@ def _parse_feishu_event(event: dict) -> CalendarEventOut | None:
     if vc_info:
         meeting_url = vc_info.get("meeting_url")
 
+    # 组织者：优先取 organizer.display_name
+    organizer_name = None
+    organizer_info = event.get("organizer")
+    if organizer_info:
+        organizer_name = organizer_info.get("display_name")
+
     return CalendarEventOut(
         event_id=event_id,
         summary=summary,
@@ -100,7 +118,7 @@ def _parse_feishu_event(event: dict) -> CalendarEventOut | None:
         start_time=start_time,
         end_time=end_time,
         location=location,
-        organizer_name=event.get("organizer", {}).get("display_name"),
+        organizer_name=organizer_name,
         attendees=attendees,
         meeting_url=meeting_url,
     )

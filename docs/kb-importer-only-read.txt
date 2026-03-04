@@ -1,0 +1,30 @@
+流光数据平台 — 只读数据库连接说明
+====================================
+
+【连接信息】
+  地址：      10.6.3.4:5432
+  数据库名：  liuguang
+  用户名：    kb_reader
+  密码：      liuguang_readonly_2024
+
+【DSN 连接串】
+  PG_DSN=postgresql://kb_reader:liuguang_readonly_2024@10.6.3.4:5432/liuguang
+
+【配置步骤】
+  1. 打开 C:\Users\admin\kb-importer.env
+  2. 填入：
+     PG_DSN=postgresql://kb_reader:liuguang_readonly_2024@10.6.3.4:5432/liuguang
+  3. PG_OWNER_ID 留空即可（会自动拉取全部数据）
+
+【验证连接】
+  运行以下命令：
+  python -c "from connectors.postgresql_connector import PostgreSQLConnector; c=PostgreSQLConnector(); print(c.validate_config())"
+
+  输出 True 即连接成功。
+
+【启动】
+  python -m streamlit run main.py
+
+【注意事项】
+  - 此账号为只读权限，只能查看数据，无法修改或删除
+  - 以上地址 10.6.3.4 为当前局域网 IP，如 IP 变动请联系管理员确认

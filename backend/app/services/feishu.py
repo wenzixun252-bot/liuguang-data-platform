@@ -1399,8 +1399,76 @@ class FeishuClient:
                 page_token = data.get("data", {}).get("page_token")
                 await asyncio.sleep(0.1)
 
-        logger.info("共获取到 %d 个日历事件", len(all_events))
+        logger.info("共获取到 %d 个日历事件，开始补全参会人信息", len(all_events))
+
+        # 并发获取每个事件的参会人（飞书事件列表 API 不返回参会人）
+        sem = asyncio.Semaphore(5)  # 最多 5 个并发请求，避免触发限流
+
+        async def _fill_attendees(ev: dict) -> None:
+            eid = ev.get("event_id", "")
+            if not eid:
+                return
+            async with sem:
+                try:
+                    attendees = await self._get_event_attendees(
+                        user_access_token, calendar_id, eid,
+                    )
+                    ev["attendees"] = attendees
+                except Exception as e:
+                    logger.warning("获取事件 %s 参会人失败: %s", eid, e)
+
+        await asyncio.gather(*[_fill_attendees(ev) for ev in all_events])
         return all_events
+
+    async def _get_event_attendees(
+        self,
+        user_access_token: str,
+        calendar_id: str,
+        event_id: str,
+    ) -> list[dict]:
+        """获取单个日历事件的参会人列表。
+
+        GET /calendar/v4/calendars/{calendar_id}/events/{event_id}/attendees
+        """
+        all_attendees: list[dict] = []
+        async with self._client() as client:
+            page_token: str | None = None
+            while True:
+                params: dict = {
+                    "page_size": 50,
+                    "user_id_type": "open_id",
+                }
+                if page_token:
+                    params["page_token"] = page_token
+
+                resp = await client.get(
+                    f"{FEISHU_BASE_URL}/calendar/v4/calendars/{calendar_id}/events/{event_id}/attendees",
+                    headers={"Authorization": f"Bearer {user_access_token}"},
+                    params=params,
+                )
+                if resp.status_code != 200:
+                    logger.debug("获取参会人 HTTP错误 event=%s status=%s", event_id, resp.status_code)
+                    break
+                data = resp.json()
+                if data.get("code", -1) != 0:
+                    logger.debug("获取参会人失败 event=%s code=%s msg=%s",
+                                 event_id, data.get("code"), data.get("msg"))
+                    break
+
+                items = data.get("data", {}).get("items", [])
+                all_attendees.extend(items)
+                logger.debug("事件 %s 获取到 %d 个参会人 (本页)", event_id, len(items))
+
+                if not data.get("data", {}).get("has_more"):
+                    break
+                page_token = data.get("data", {}).get("page_token")
+                await asyncio.sleep(0.05)
+
+        if all_attendees:
+            # 打印第一个参会人的原始字段帮助排查
+            logger.info("事件 %s 共 %d 个参会人, 样例字段: %s",
+                        event_id, len(all_attendees), list(all_attendees[0].keys()))
+        return all_attendees
 
     async def send_bot_message(
         self,
