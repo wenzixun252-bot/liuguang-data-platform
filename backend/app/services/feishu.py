@@ -21,6 +21,8 @@ class FeishuClient:
     def __init__(self) -> None:
         self._app_access_token: str | None = None
         self._tenant_access_token: str | None = None
+        # 缓存 {user_access_token -> calendar_id}，避免每次请求都查日历列表
+        self._calendar_id_cache: dict[str, str] = {}
 
     def _client(self) -> httpx.AsyncClient:
         """创建不走系统代理的 httpx 客户端。"""
@@ -1259,6 +1261,192 @@ class FeishuClient:
                 continue
 
         return results
+
+
+    # ── 日历 (Calendar) API ──────────────────────────────────
+
+    async def _get_primary_calendar_id(self, client: httpx.AsyncClient, user_access_token: str) -> str:
+        """获取用户主日历的 calendar_id（带内存缓存）。"""
+        # 命中缓存直接返回
+        cached = self._calendar_id_cache.get(user_access_token)
+        if cached:
+            return cached
+
+        resp = await client.get(
+            f"{FEISHU_BASE_URL}/calendar/v4/calendars",
+            headers={"Authorization": f"Bearer {user_access_token}"},
+            params={"page_size": 50},
+        )
+        if resp.status_code != 200:
+            logger.error("获取日历列表 HTTP错误 status=%s body=%s", resp.status_code, resp.text[:500])
+            raise FeishuAPIError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+        data = resp.json()
+        if data.get("code") != 0:
+            raise FeishuAPIError(f"获取日历列表失败: code={data.get('code')} msg={data.get('msg', '未知错误')}")
+
+        calendars = data.get("data", {}).get("calendar_list", [])
+        logger.info("获取到 %d 个日历", len(calendars))
+        for cal in calendars:
+            logger.debug("日历: id=%s type=%s role=%s summary=%s",
+                         cal.get("calendar_id"), cal.get("type"), cal.get("role"), cal.get("summary", ""))
+
+        # 优先找 type=primary 的日历
+        for cal in calendars:
+            if cal.get("type") == "primary":
+                cal_id = cal["calendar_id"]
+                self._calendar_id_cache[user_access_token] = cal_id
+                return cal_id
+        # 其次找 role=owner 的日历
+        for cal in calendars:
+            if cal.get("role") == "owner":
+                cal_id = cal["calendar_id"]
+                self._calendar_id_cache[user_access_token] = cal_id
+                return cal_id
+        # 兜底：返回第一个日历
+        if calendars:
+            cal_id = calendars[0]["calendar_id"]
+            logger.warning("未找到 primary 日历，使用第一个: %s", cal_id)
+            self._calendar_id_cache[user_access_token] = cal_id
+            return cal_id
+        raise FeishuAPIError("未找到用户日历")
+
+    def invalidate_calendar_cache(self, user_access_token: str) -> None:
+        """当 token 刷新后，清除旧 token 对应的日历缓存。"""
+        self._calendar_id_cache.pop(user_access_token, None)
+
+    async def get_calendar_events(
+        self,
+        user_access_token: str,
+        start_time: datetime,
+        end_time: datetime,
+        max_retries: int = 1,
+    ) -> list[dict]:
+        """获取用户主日历的日程事件（带重试）。
+
+        先获取主日历 ID，再查询该日历的事件列表。
+
+        Returns:
+            事件列表，每个事件包含 event_id, summary, start_time, end_time, attendees 等
+        """
+        start_ts = str(int(start_time.timestamp()))
+        end_ts = str(int(end_time.timestamp()))
+
+        last_error: Exception | None = None
+        for attempt in range(1 + max_retries):
+            try:
+                return await self._fetch_calendar_events(user_access_token, start_ts, end_ts)
+            except FeishuAPIError:
+                raise  # 业务错误不重试，直接抛
+            except Exception as e:
+                last_error = e
+                logger.warning("获取日历事件失败 (尝试 %d/%d): %s", attempt + 1, 1 + max_retries, e)
+                if attempt < max_retries:
+                    await asyncio.sleep(0.5)
+        raise last_error  # type: ignore[misc]
+
+    async def _fetch_calendar_events(
+        self,
+        user_access_token: str,
+        start_ts: str,
+        end_ts: str,
+    ) -> list[dict]:
+        """内部实际获取日历事件的方法。"""
+        all_events: list[dict] = []
+
+        async with self._client() as client:
+            # 先获取主日历 ID（有缓存）
+            calendar_id = await self._get_primary_calendar_id(client, user_access_token)
+            logger.info("使用日历 calendar_id=%s", calendar_id)
+
+            page_token: str | None = None
+            while True:
+                params: dict = {
+                    "start_time": start_ts,
+                    "end_time": end_ts,
+                    "page_size": 50,
+                }
+                if page_token:
+                    params["page_token"] = page_token
+
+                resp = await client.get(
+                    f"{FEISHU_BASE_URL}/calendar/v4/calendars/{calendar_id}/events",
+                    headers={"Authorization": f"Bearer {user_access_token}"},
+                    params=params,
+                )
+                if resp.status_code != 200:
+                    logger.error("日历API HTTP错误 status=%s body=%s", resp.status_code, resp.text[:500])
+                    # 如果是 token 相关错误，清除日历缓存
+                    if resp.status_code == 401:
+                        self._calendar_id_cache.pop(user_access_token, None)
+                    raise FeishuAPIError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+                data = resp.json()
+                code = data.get("code", -1)
+
+                if code != 0:
+                    msg = data.get("msg", "未知错误")
+                    logger.error("获取日历事件失败 (code=%s): %s", code, msg)
+                    # token 无效相关错误码，清除缓存
+                    if str(code) in ("99991671", "99991668", "99991672", "99991677"):
+                        self._calendar_id_cache.pop(user_access_token, None)
+                    raise FeishuAPIError(f"获取日历事件失败 (code={code}): {msg}")
+
+                items = data.get("data", {}).get("items", [])
+                logger.info("获取到 %d 个日历事件 (本页)", len(items))
+                all_events.extend(items)
+
+                if not data.get("data", {}).get("has_more"):
+                    break
+                page_token = data.get("data", {}).get("page_token")
+                await asyncio.sleep(0.1)
+
+        logger.info("共获取到 %d 个日历事件", len(all_events))
+        return all_events
+
+    async def send_bot_message(
+        self,
+        receive_id: str,
+        msg_type: str,
+        content: str,
+        receive_id_type: str = "open_id",
+    ) -> dict:
+        """通过飞书机器人向用户发送消息。
+
+        POST /open-apis/im/v1/messages?receive_id_type=open_id
+        使用 tenant_access_token（应用身份）发送。
+
+        Args:
+            receive_id: 接收者 ID（open_id / chat_id 等）
+            msg_type: 消息类型，如 "text" / "interactive"
+            content: 消息内容 JSON 字符串
+            receive_id_type: ID 类型，默认 "open_id"
+
+        Returns:
+            API 响应 data
+        """
+        token = await self.get_tenant_access_token()
+
+        async with self._client() as client:
+            resp = await client.post(
+                f"{FEISHU_BASE_URL}/im/v1/messages",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json; charset=utf-8",
+                },
+                params={"receive_id_type": receive_id_type},
+                json={
+                    "receive_id": receive_id,
+                    "msg_type": msg_type,
+                    "content": content,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            code = data.get("code", -1)
+            if code != 0:
+                msg = data.get("msg", "未知错误")
+                logger.error("发送飞书消息失败 (code=%s): %s", code, msg)
+                raise FeishuAPIError(f"发送飞书消息失败: {msg}")
+            return data.get("data", {})
 
 
 class FeishuAPIError(Exception):

@@ -1,7 +1,7 @@
 """ETL 定时任务定义。"""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 
@@ -531,3 +531,121 @@ async def persona_generate_job() -> None:
             logger.warning("用户 %s 画像生成任务失败: %s", user.feishu_open_id, e)
 
     logger.info("人物画像自动生成完成，共生成 %d 条", total_generated)
+
+
+async def calendar_reminder_job() -> None:
+    """定时任务：检查即将开始的日程，通过飞书机器人发送提醒。"""
+    import json
+    from app.models.calendar_reminder import CalendarReminderPref
+    from app.services.feishu import feishu_client, FeishuAPIError
+
+    logger.info("日程提醒任务开始")
+
+    async with async_session() as db:
+        # 查找所有启用提醒的用户
+        result = await db.execute(
+            select(CalendarReminderPref, User).join(
+                User, User.feishu_open_id == CalendarReminderPref.owner_id
+            ).where(CalendarReminderPref.enabled == True)
+        )
+        rows = result.all()
+
+    if not rows:
+        logger.info("没有启用日程提醒的用户")
+        return
+
+    reminded_count = 0
+    for pref, user in rows:
+        if not user.feishu_access_token:
+            continue
+
+        try:
+            now = datetime.utcnow()
+            # 查找 N 分钟后的事件
+            window_start = now + timedelta(minutes=max(0, pref.minutes_before - 5))
+            window_end = now + timedelta(minutes=pref.minutes_before + 5)
+
+            events = await feishu_client.get_calendar_events(
+                user.feishu_access_token, window_start, window_end,
+            )
+
+            for event in events:
+                event_id = event.get("event_id", "")
+                if not event_id:
+                    continue
+
+                # 跳过已提醒的事件
+                if pref.last_reminded_event_id == event_id:
+                    continue
+
+                summary = event.get("summary", "无标题会议")
+                start_info = event.get("start_time", {})
+                start_ts = start_info.get("timestamp")
+                if not start_ts:
+                    continue
+
+                start_dt = datetime.fromtimestamp(int(start_ts))
+                time_str = start_dt.strftime("%H:%M")
+
+                location = ""
+                loc_info = event.get("location")
+                if loc_info:
+                    location = loc_info.get("name") or loc_info.get("address") or ""
+
+                attendee_count = len(event.get("attendees", []))
+
+                # 构建飞书消息卡片
+                card = {
+                    "config": {"wide_screen_mode": True},
+                    "header": {
+                        "title": {"tag": "plain_text", "content": f"📅 会议提醒: {summary}"},
+                        "template": "blue",
+                    },
+                    "elements": [
+                        {
+                            "tag": "div",
+                            "text": {
+                                "tag": "lark_md",
+                                "content": f"⏰ **时间**: {time_str}\n📍 **地点**: {location or '未指定'}\n👥 **参会人数**: {attendee_count} 人",
+                            },
+                        },
+                        {
+                            "tag": "div",
+                            "text": {
+                                "tag": "lark_md",
+                                "content": f"💡 距离会议开始还有约 **{pref.minutes_before} 分钟**，建议提前查看会前简报做好准备。",
+                            },
+                        },
+                    ],
+                }
+
+                content = json.dumps(card, ensure_ascii=False)
+                try:
+                    await feishu_client.send_bot_message(
+                        receive_id=user.feishu_open_id,
+                        msg_type="interactive",
+                        content=content,
+                    )
+                    reminded_count += 1
+
+                    # 更新提醒记录
+                    async with async_session() as db:
+                        result = await db.execute(
+                            select(CalendarReminderPref).where(
+                                CalendarReminderPref.id == pref.id,
+                            )
+                        )
+                        p = result.scalar_one_or_none()
+                        if p:
+                            p.last_reminded_event_id = event_id
+                            p.last_reminded_at = datetime.utcnow()
+                            await db.commit()
+
+                    logger.info("已向 %s 发送会议提醒: %s", user.name, summary)
+                except FeishuAPIError as e:
+                    logger.warning("向 %s 发送提醒失败: %s", user.name, e)
+
+        except Exception as e:
+            logger.warning("用户 %s 日程提醒失败: %s", user.feishu_open_id, e)
+
+    logger.info("日程提醒任务完成，共发送 %d 条提醒", reminded_count)

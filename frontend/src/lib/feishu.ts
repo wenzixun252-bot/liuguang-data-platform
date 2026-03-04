@@ -18,7 +18,8 @@ export function getFeishuAuthUrl(): string {
     'wiki:wiki:readonly',  // 知识空间（Wiki）只读，解析 Wiki 内嵌表格
     'docx:document',       // 云文档读写（含创建）
     'task:task',           // 任务读写（含创建）
+    'calendar:calendar:readonly',  // 日历日程只读
     'offline_access',      // 获取 refresh_token
   ]
-  return `https://open.feishu.cn/open-apis/authen/v1/authorize?${params.toString()}&scope=${scopes.join(' ')}`
+  return `https://open.feishu.cn/open-apis/authen/v1/authorize?${params.toString()}&scope=${encodeURIComponent(scopes.join(' '))}`
 }

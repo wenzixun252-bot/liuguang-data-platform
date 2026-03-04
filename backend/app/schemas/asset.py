@@ -7,4 +7,5 @@ class AssetStatsResponse(BaseModel):
     """统一看板统计响应。"""
     total: int
     by_table: dict[str, int]
+    today_new: dict[str, int]
     recent_trend: list[dict]

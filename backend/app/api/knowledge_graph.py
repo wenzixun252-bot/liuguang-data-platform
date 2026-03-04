@@ -1,6 +1,7 @@
 """知识图谱 API 端点。"""
 
 import logging
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -9,7 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.models.document import Document
+from app.models.meeting import Meeting
 from app.models.knowledge_graph import KGEntity, KGRelation
+from app.models.kg_analysis_result import KGAnalysisResult
 from app.models.user import User
 from app.schemas.knowledge_graph import (
     AnalysisResponse,
@@ -30,8 +33,65 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/knowledge-graph", tags=["知识图谱"])
 
-# 缓存最近一次分析结果（按 owner_id）
-_analysis_cache: dict[str, dict] = {}
+
+async def _get_latest_analysis(db: AsyncSession, owner_id: str) -> KGAnalysisResult | None:
+    """查询最新一条分析结果。"""
+    result = await db.execute(
+        select(KGAnalysisResult)
+        .where(KGAnalysisResult.owner_id == owner_id)
+        .order_by(KGAnalysisResult.generated_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def _save_analysis(db: AsyncSession, owner_id: str, analysis_result: dict) -> KGAnalysisResult:
+    """将分析结果写入数据库。"""
+    record = KGAnalysisResult(
+        owner_id=owner_id,
+        communities=analysis_result.get("communities", []),
+        insights=analysis_result.get("insights", []),
+        risks=analysis_result.get("risks", []),
+        generated_at=datetime.utcnow(),
+    )
+    db.add(record)
+    await db.commit()
+    await db.refresh(record)
+    return record
+
+
+@router.post("/build-and-analyze", summary="构建图谱并运行分析")
+@router.post("/auto-build", summary="构建图谱并运行分析（兼容旧路由）", include_in_schema=False)
+async def build_and_analyze_graph(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """构建知识图谱并运行分析，结果持久化到数据库。"""
+    owner_id = current_user.feishu_open_id
+
+    # 检查现有实体数量，决定增量/全量
+    entity_count = await db.execute(
+        select(func.count()).select_from(KGEntity).where(KGEntity.owner_id == owner_id)
+    )
+    total_entities = entity_count.scalar() or 0
+    incremental = total_entities > 0
+
+    # 构建图谱
+    build_result = await build_knowledge_graph(
+        db=db,
+        owner_id=owner_id,
+        incremental=incremental,
+    )
+
+    # 构建完成后自动运行分析
+    analysis_result = await run_full_analysis(db, owner_id)
+    await _save_analysis(db, owner_id, analysis_result)
+
+    return {
+        "build": build_result,
+        "analysis": analysis_result,
+        "mode": "incremental" if incremental else "full",
+    }
 
 
 @router.post("/build", summary="触发图谱构建/增量更新")
@@ -56,35 +116,44 @@ async def analyze_graph(
 ):
     """运行完整分析：社群检测 + 指标计算 + 风险检测 + LLM 总结。"""
     result = await run_full_analysis(db, current_user.feishu_open_id)
-    _analysis_cache[current_user.feishu_open_id] = result
+    await _save_analysis(db, current_user.feishu_open_id, result)
     return AnalysisResponse(**result)
 
 
 @router.get("/communities", response_model=list[CommunityInfo], summary="社群列表")
 async def get_communities(
     current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """获取最近一次分析的社群列表。"""
-    cached = _analysis_cache.get(current_user.feishu_open_id, {})
-    return [CommunityInfo(**c) for c in cached.get("communities", [])]
+    record = await _get_latest_analysis(db, current_user.feishu_open_id)
+    if not record:
+        return []
+    return [CommunityInfo(**c) for c in record.communities]
 
 
 @router.get("/insights", response_model=list[InsightItem], summary="洞察结果")
 async def get_insights(
     current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """获取最近一次分析的洞察结果。"""
-    cached = _analysis_cache.get(current_user.feishu_open_id, {})
-    return [InsightItem(**i) for i in cached.get("insights", [])]
+    record = await _get_latest_analysis(db, current_user.feishu_open_id)
+    if not record:
+        return []
+    return [InsightItem(**i) for i in record.insights]
 
 
 @router.get("/risks", response_model=list[InsightItem], summary="风险预警")
 async def get_risks(
     current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """获取最近一次分析的风险预警。"""
-    cached = _analysis_cache.get(current_user.feishu_open_id, {})
-    return [InsightItem(**r) for r in cached.get("risks", [])]
+    record = await _get_latest_analysis(db, current_user.feishu_open_id)
+    if not record:
+        return []
+    return [InsightItem(**r) for r in record.risks]
 
 
 @router.get("", response_model=KGGraphResponse, summary="获取图谱数据")
@@ -126,9 +195,9 @@ async def get_graph(
         )
         edges = rel_result.scalars().all()
 
-    # 从缓存获取社群信息
-    cached = _analysis_cache.get(current_user.feishu_open_id, {})
-    communities = [CommunityInfo(**c) for c in cached.get("communities", [])]
+    # 从数据库获取社群信息
+    record = await _get_latest_analysis(db, current_user.feishu_open_id)
+    communities = [CommunityInfo(**c) for c in record.communities] if record else []
 
     return KGGraphResponse(nodes=nodes, edges=edges, communities=communities)
 
@@ -213,25 +282,44 @@ async def get_linked_assets(
     if not entity or entity.owner_id != current_user.feishu_open_id:
         raise HTTPException(status_code=404, detail="实体不存在")
 
-    # 用实体名称在 documents 表做模糊匹配
-    result = await db.execute(
+    owner_id = current_user.feishu_open_id
+    assets: list[LinkedAsset] = []
+
+    # 在 documents 表模糊匹配
+    doc_result = await db.execute(
         select(Document.id, Document.title, Document.source_type)
         .where(
             and_(
-                Document.owner_id == current_user.feishu_open_id,
+                Document.owner_id == owner_id,
                 or_(
                     Document.title.ilike(f"%{entity.name}%"),
                     Document.content_text.ilike(f"%{entity.name}%"),
                 ),
             )
         )
-        .limit(20)
+        .limit(10)
     )
-    rows = result.all()
-    return [
-        LinkedAsset(id=r.id, title=r.title or "无标题", source_type=r.source_type)
-        for r in rows
-    ]
+    for r in doc_result.all():
+        assets.append(LinkedAsset(id=r.id, title=r.title or "无标题", source_type=r.source_type, asset_type="document"))
+
+    # 在 meetings 表模糊匹配
+    mtg_result = await db.execute(
+        select(Meeting.id, Meeting.title)
+        .where(
+            and_(
+                Meeting.owner_id == owner_id,
+                or_(
+                    Meeting.title.ilike(f"%{entity.name}%"),
+                    Meeting.content_text.ilike(f"%{entity.name}%"),
+                ),
+            )
+        )
+        .limit(10)
+    )
+    for r in mtg_result.all():
+        assets.append(LinkedAsset(id=r.id, title=r.title or "无标题", source_type="meeting", asset_type="meeting"))
+
+    return assets
 
 
 @router.get("/stats", response_model=KGStatsResponse, summary="图谱统计")
@@ -259,10 +347,15 @@ async def get_stats(
     )
     entity_type_counts = dict(type_counts_result.all())
 
+    # 查询最近分析时间
+    record = await _get_latest_analysis(db, owner_id)
+    last_analysis_at = record.generated_at if record else None
+
     return KGStatsResponse(
         total_entities=total_entities,
         total_relations=total_relations,
         entity_type_counts=entity_type_counts,
+        last_analysis_at=last_analysis_at,
     )
 
 

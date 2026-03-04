@@ -1,4 +1,18 @@
 {
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"D:/CC/liuguang-data-platform/.claude/hooks/restart-services.sh\"",
+            "timeout": 300,
+            "statusMessage": "正在重启流光平台服务..."
+          }
+        ]
+      }
+    ]
+  },
   "permissions": {
     "allow": [
       "Bash(git ls-tree:*)",

@@ -62,6 +62,7 @@ class LinkedAsset(BaseModel):
     id: int
     title: str
     source_type: str
+    asset_type: str = "document"  # "document" 或 "meeting"
 
     model_config = {"from_attributes": True}
 
@@ -78,6 +79,7 @@ class KGStatsResponse(BaseModel):
     total_entities: int
     total_relations: int
     entity_type_counts: dict = {}
+    last_analysis_at: datetime | None = None
 
 
 class KGSearchRequest(BaseModel):

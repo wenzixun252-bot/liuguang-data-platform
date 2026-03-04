@@ -1,7 +1,6 @@
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { getUser, clearAuth, isAdmin } from '../lib/auth'
 import {
-  LayoutDashboard,
   FileText,
   Calendar,
   MessageSquare,
@@ -14,20 +13,21 @@ import {
   X,
   CheckSquare,
   Network,
-  UserSearch,
+  Telescope,
+  CalendarClock,
 } from 'lucide-react'
 import { useState } from 'react'
 
 const NAV_ITEMS = [
-  { path: '/dashboard', label: '数据看板', icon: LayoutDashboard },
+  { path: '/data-insights', label: '数据洞察', icon: Telescope },
   { path: '/structured-tables', label: '表格数据', icon: Table2 },
   { path: '/documents', label: '文档数据', icon: FileText },
   { path: '/meetings', label: '会议记录', icon: Calendar },
   { path: '/messages', label: '会话记录', icon: MessageSquare },
+  { path: '/calendar', label: '日程管家', icon: CalendarClock },
   { path: '/chat', label: '流光助手', icon: MessageCircle },
   { path: '/todos', label: '智能待办', icon: CheckSquare },
-  { path: '/knowledge-graph', label: '知识图谱', icon: Network },
-  { path: '/leadership-insight', label: '员工画像', icon: UserSearch },
+  { path: '/knowledge-graph', label: '数据图谱', icon: Network },
   { path: '/permissions', label: '权限管理', icon: Shield },
 ]
 

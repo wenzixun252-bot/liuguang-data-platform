@@ -7,8 +7,10 @@ from app.models.department import Department, UserDepartment, UserDeptSharing, U
 from app.models.todo_item import TodoItem
 from app.models.report import Report, ReportTemplate
 from app.models.knowledge_graph import KGEntity, KGRelation
+from app.models.kg_analysis_result import KGAnalysisResult
 from app.models.leadership_insight import LeadershipInsight
 from app.models.conversation import Conversation, ConversationMessage
+from app.models.calendar_reminder import CalendarReminderPref
 
 __all__ = [
     "User",
@@ -28,7 +30,9 @@ __all__ = [
     "ReportTemplate",
     "KGEntity",
     "KGRelation",
+    "KGAnalysisResult",
     "LeadershipInsight",
     "Conversation",
     "ConversationMessage",
+    "CalendarReminderPref",
 ]

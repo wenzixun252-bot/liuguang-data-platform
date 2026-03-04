@@ -21,6 +21,7 @@ def init_scheduler() -> None:
         kg_build_job,
         persona_generate_job,
         structured_table_sync_job,
+        calendar_reminder_job,
     )
 
     scheduler.add_job(
@@ -81,6 +82,15 @@ def init_scheduler() -> None:
         "interval",
         minutes=180,
         id="persona_generate_job",
+        replace_existing=True,
+        max_instances=1,
+    )
+    # 日程提醒：每5分钟检查
+    scheduler.add_job(
+        calendar_reminder_job,
+        "interval",
+        minutes=5,
+        id="calendar_reminder_job",
         replace_existing=True,
         max_instances=1,
     )

@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import {
   Search, RefreshCw, X, Loader2, Info, AlertTriangle, Lightbulb,
-  ZoomIn, ZoomOut, Maximize2, BarChart3,
+  ZoomIn, ZoomOut, Maximize2, FileText, ExternalLink, Download, Paperclip,
 } from 'lucide-react'
 import * as d3 from 'd3'
 import api from '../lib/api'
@@ -59,6 +59,59 @@ interface LinkedAsset {
   id: number
   title: string
   source_type: string
+  asset_type: 'document' | 'meeting'
+}
+
+interface AttachmentMeta {
+  file_token: string
+  name: string
+  size: number
+  type: string
+}
+
+interface LinkMeta {
+  field_name: string
+  text: string
+  link: string
+}
+
+interface DocumentDetail {
+  id: number
+  owner_id: string
+  title: string | null
+  source_type: string
+  content_text: string
+  summary: string | null
+  author: string | null
+  category: string | null
+  file_type: string | null
+  tags: Record<string, unknown>
+  doc_url: string | null
+  uploader_name: string | null
+  extra_fields?: { _attachments?: AttachmentMeta[]; _links?: LinkMeta[]; [key: string]: unknown }
+  bitable_url: string | null
+  synced_at: string | null
+  created_at: string
+}
+
+interface MeetingDetailData {
+  id: number
+  title: string | null
+  meeting_time: string | null
+  duration_minutes: number | null
+  location: string | null
+  organizer: string | null
+  participants: { name?: string; open_id?: string }[]
+  agenda: string | null
+  conclusions: string | null
+  action_items: { task?: string; assignee?: string; deadline?: string }[]
+  content_text: string
+  minutes_url: string | null
+  uploader_name: string | null
+  extra_fields?: { _attachments?: AttachmentMeta[]; _links?: LinkMeta[]; [key: string]: unknown }
+  bitable_url: string | null
+  synced_at: string | null
+  created_at: string
 }
 
 interface ProfileData {
@@ -133,6 +186,11 @@ const SEVERITY_CONFIG: Record<string, { bg: string; text: string; border: string
   low: { bg: 'bg-yellow-50', text: 'text-yellow-700', border: 'border-yellow-200' },
 }
 
+const SOURCE_TYPE_LABELS: Record<string, string> = {
+  cloud: '云文档',
+  local: '本地文档',
+}
+
 // ── 组件 ──
 
 export default function KnowledgeGraph() {
@@ -141,7 +199,7 @@ export default function KnowledgeGraph() {
   const [stats, setStats] = useState<KGStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [building, setBuilding] = useState(false)
-  const [analyzing, setAnalyzing] = useState(false)
+  const [lastAnalysisAt, setLastAnalysisAt] = useState<string | null>(null)
   const [selectedNode, setSelectedNode] = useState<KGNode | null>(null)
   const [selectedRelations, setSelectedRelations] = useState<KGEdge[]>([])
   const [relatedNodes, setRelatedNodes] = useState<KGNode[]>([])
@@ -149,12 +207,21 @@ export default function KnowledgeGraph() {
   const [communityFilter, setCommunityFilter] = useState<string>('')
   const [searchQuery, setSearchQuery] = useState('')
   const [colorMode, setColorMode] = useState<'type' | 'community'>('type')
-  const [rightTab, setRightTab] = useState<'detail' | 'insights' | 'risks'>('insights')
+  const [rightTab, setRightTab] = useState<'insights' | 'risks'>('insights')
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null)
   const [linkedAssets, setLinkedAssets] = useState<LinkedAsset[]>([])
   const [profileData, setProfileData] = useState<ProfileData | null>(null)
   const [profileLoading, setProfileLoading] = useState(false)
   const [, setHoveredNodeId] = useState<number | null>(null)
+
+  const [generatingProfile, setGeneratingProfile] = useState(false)
+  const [showReportModal, setShowReportModal] = useState(false)
+  const [showAssetModal, setShowAssetModal] = useState(false)
+  const [assetDetail, setAssetDetail] = useState<DocumentDetail | null>(null)
+  const [meetingDetail, setMeetingDetail] = useState<MeetingDetailData | null>(null)
+  const [assetModalType, setAssetModalType] = useState<'document' | 'meeting'>('document')
+  const [assetLoading, setAssetLoading] = useState(false)
+  const [imagePreview, setImagePreview] = useState<string | null>(null)
 
   const svgRef = useRef<SVGSVGElement>(null)
   const simulationRef = useRef<d3.Simulation<SimNode, SimLink> | null>(null)
@@ -166,17 +233,26 @@ export default function KnowledgeGraph() {
     if (typeFilter) params.entity_type = typeFilter
     if (communityFilter) params.community_id = parseInt(communityFilter)
 
-    Promise.all([
-      api.get('/knowledge-graph', { params }),
-      api.get('/knowledge-graph/stats'),
-    ])
-      .then(([graphRes, statsRes]) => {
+    // 图谱+统计 是核心请求
+    const graphPromise = api.get('/knowledge-graph', { params })
+    const statsPromise = api.get('/knowledge-graph/stats')
+    // 洞察+风险 独立请求，失败不影响主流程
+    const insightsPromise = api.get('/knowledge-graph/insights').catch(() => ({ data: [] }))
+    const risksPromise = api.get('/knowledge-graph/risks').catch(() => ({ data: [] }))
+
+    Promise.all([graphPromise, statsPromise, insightsPromise, risksPromise])
+      .then(([graphRes, statsRes, insightsRes, risksRes]) => {
         setNodes(graphRes.data.nodes)
         setEdges(graphRes.data.edges)
         setStats(statsRes.data)
-        if (graphRes.data.communities?.length && !analysisResult) {
-          setAnalysisResult(prev => prev ?? { communities: graphRes.data.communities, insights: [], risks: [] })
+        if (statsRes.data.last_analysis_at) {
+          setLastAnalysisAt(statsRes.data.last_analysis_at)
         }
+        setAnalysisResult({
+          communities: graphRes.data.communities || [],
+          insights: insightsRes.data || [],
+          risks: risksRes.data || [],
+        })
       })
       .catch(() => toast.error('加载图谱失败'))
       .finally(() => setLoading(false))
@@ -374,37 +450,46 @@ export default function KnowledgeGraph() {
 
   // ── 事件处理 ──
 
-  const handleBuild = async () => {
+  const handleBuildAndAnalyze = async () => {
     setBuilding(true)
     try {
-      const res = await api.post('/knowledge-graph/build', null, { params: { incremental: true } })
-      toast.success(`图谱更新完成：新增 ${res.data.entities_added} 实体，${res.data.relations_added} 关系`)
+      const res = await api.post('/knowledge-graph/build-and-analyze')
+      setAnalysisResult(res.data.analysis)
+      setLastAnalysisAt(new Date().toISOString())
+      toast.success('知识图谱生成完成')
       fetchGraph()
-    } catch {
-      toast.error('图谱构建失败')
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail || err?.message || '未知错误'
+      toast.error(`知识图谱生成失败: ${detail}`)
     } finally {
       setBuilding(false)
     }
   }
 
-  const handleAnalyze = async () => {
-    setAnalyzing(true)
+  const handleOpenAsset = async (asset: LinkedAsset) => {
+    setShowAssetModal(true)
+    setAssetLoading(true)
+    setAssetDetail(null)
+    setMeetingDetail(null)
+    setAssetModalType(asset.asset_type)
     try {
-      const res = await api.post('/knowledge-graph/analyze')
-      setAnalysisResult(res.data)
-      toast.success(`分析完成：${res.data.communities.length} 个社群，${res.data.insights.length} 条洞察，${res.data.risks.length} 条风险`)
-      // 刷新图谱数据（社群 id 已更新）
-      fetchGraph()
+      if (asset.asset_type === 'meeting') {
+        const res = await api.get(`/meetings/${asset.id}`)
+        setMeetingDetail(res.data)
+      } else {
+        const res = await api.get(`/documents/${asset.id}`)
+        setAssetDetail(res.data)
+      }
     } catch {
-      toast.error('图谱分析失败')
+      toast.error('获取详情失败')
+      setShowAssetModal(false)
     } finally {
-      setAnalyzing(false)
+      setAssetLoading(false)
     }
   }
 
   const handleNodeClick = async (node: KGNode) => {
     setSelectedNode(node)
-    setRightTab('detail')
     setProfileData(null)
     setLinkedAssets([])
     try {
@@ -501,6 +586,27 @@ export default function KnowledgeGraph() {
     }, 3000)
   }
 
+  // 生成/更新画像
+  const handleGenerateProfile = async (name: string) => {
+    setGeneratingProfile(true)
+    try {
+      await api.post('/insights/leadership/generate', {
+        target_user_id: name,
+        target_user_name: name,
+      })
+      toast.success('画像生成完成')
+      // 刷新画像
+      if (selectedNode) {
+        const res = await api.get(`/profile/by-entity/${selectedNode.id}`)
+        setProfileData(res.data)
+      }
+    } catch {
+      toast.error('画像生成失败')
+    } finally {
+      setGeneratingProfile(false)
+    }
+  }
+
   // 获取社群选项
   const communityOptions = analysisResult?.communities ?? []
 
@@ -508,7 +614,7 @@ export default function KnowledgeGraph() {
     <div className="space-y-4">
       {/* 顶部工具栏 */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold text-gray-800">知识图谱</h1>
+        <h1 className="text-2xl font-bold text-gray-800">数据图谱</h1>
         <div className="flex items-center gap-2 flex-wrap">
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -545,21 +651,18 @@ export default function KnowledgeGraph() {
               ))}
             </select>
           )}
+          {lastAnalysisAt && (
+            <span className="text-xs text-gray-400">
+              上次更新: {new Date(lastAnalysisAt).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })} {new Date(lastAnalysisAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          )}
           <button
-            onClick={handleBuild}
+            onClick={handleBuildAndAnalyze}
             disabled={building}
             className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm"
           >
             {building ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-            {building ? '构建中...' : '手动构建'}
-          </button>
-          <button
-            onClick={handleAnalyze}
-            disabled={analyzing}
-            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 text-sm"
-          >
-            {analyzing ? <Loader2 size={16} className="animate-spin" /> : <BarChart3 size={16} />}
-            {analyzing ? '分析中...' : '分析'}
+            {building ? '生成中...' : '生成最新知识图谱'}
           </button>
         </div>
       </div>
@@ -619,9 +722,189 @@ export default function KnowledgeGraph() {
         </div>
       )}
 
-      {/* 主体区域：图谱 + 右侧面板 */}
+      {/* 主体区域：左侧详情 + 中间图谱 + 右侧洞察/风险 */}
       <div className="flex gap-4" style={{ height: 'calc(100vh - 280px)', minHeight: '500px' }}>
-        {/* 图谱 */}
+
+        {/* 左侧面板 - 节点详情 */}
+        <div className="w-72 bg-white rounded-xl shadow-sm flex flex-col overflow-hidden shrink-0">
+          <div className="px-4 py-3 border-b border-gray-100">
+            <h3 className="text-sm font-semibold text-gray-700">节点详情</h3>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4">
+            {selectedNode ? (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold text-gray-800">{selectedNode.name}</h3>
+                  <button onClick={() => setSelectedNode(null)} className="p-1 hover:bg-gray-100 rounded">
+                    <X size={16} />
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 rounded-full" style={{ backgroundColor: ENTITY_COLORS[selectedNode.entity_type] }} />
+                  <span className="text-sm text-gray-500">{ENTITY_LABELS[selectedNode.entity_type] || selectedNode.entity_type}</span>
+                  {selectedNode.community_id !== null && (
+                    <span className="text-xs px-2 py-0.5 rounded-full" style={{
+                      backgroundColor: COMMUNITY_COLORS[selectedNode.community_id % COMMUNITY_COLORS.length] + '22',
+                      color: COMMUNITY_COLORS[selectedNode.community_id % COMMUNITY_COLORS.length],
+                    }}>
+                      社群 {selectedNode.community_id}
+                    </span>
+                  )}
+                  <span className="text-sm text-gray-400 ml-auto">提及 {selectedNode.mention_count} 次</span>
+                </div>
+
+                {selectedNode.first_seen_at && (
+                  <p className="text-xs text-gray-400">
+                    首次出现: {new Date(selectedNode.first_seen_at).toLocaleDateString('zh-CN')}
+                  </p>
+                )}
+
+                {/* 关联关系 */}
+                {selectedRelations.length > 0 && (
+                  <div>
+                    <p className="text-sm font-medium text-gray-700 mb-2">关联关系</p>
+                    <div className="space-y-2">
+                      {selectedRelations.map((rel) => {
+                        const otherNodeId = rel.source_entity_id === selectedNode.id ? rel.target_entity_id : rel.source_entity_id
+                        const otherNode = relatedNodes.find(n => n.id === otherNodeId)
+                        const direction = rel.source_entity_id === selectedNode.id ? '→' : '←'
+                        return (
+                          <div
+                            key={rel.id}
+                            className="flex items-center gap-2 text-sm bg-gray-50 rounded-lg px-3 py-2 cursor-pointer hover:bg-gray-100"
+                            onClick={() => { if (otherNode) handleNodeClick(otherNode) }}
+                          >
+                            <span className="text-gray-400">{direction}</span>
+                            <span className="text-gray-600">{RELATION_LABELS[rel.relation_type] || rel.relation_type}</span>
+                            <span className="font-medium text-gray-800">{otherNode?.name || `#${otherNodeId}`}</span>
+                            {rel.weight > 1 && <span className="text-xs text-gray-400 ml-auto">x{rel.weight}</span>}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* 关联资产 */}
+                {linkedAssets.length > 0 && (
+                  <div>
+                    <p className="text-sm font-medium text-gray-700 mb-2">关联资产</p>
+                    <div className="space-y-1">
+                      {linkedAssets.map(asset => (
+                        <div
+                          key={`${asset.asset_type}-${asset.id}`}
+                          onClick={() => handleOpenAsset(asset)}
+                          className="flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded px-2 py-1.5 transition-colors cursor-pointer"
+                        >
+                          <FileText size={14} className="shrink-0" />
+                          <span className="truncate">{asset.title}</span>
+                          <span className="text-xs text-gray-400 ml-auto shrink-0">
+                            {asset.asset_type === 'meeting' ? '会议' : (SOURCE_TYPE_LABELS[asset.source_type] || asset.source_type)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 员工画像（仅 person 类型） */}
+                {selectedNode.entity_type === 'person' && (
+                  <div className="border-t border-gray-200 pt-4">
+                    <p className="text-sm font-medium text-indigo-700 mb-2">员工画像</p>
+                    {profileLoading ? (
+                      <div className="flex items-center gap-2 text-sm text-gray-400">
+                        <Loader2 size={14} className="animate-spin" /> 加载画像中...
+                      </div>
+                    ) : profileData ? (
+                      <div className="space-y-3">
+                        {profileData.collaborators.length > 0 && (
+                          <div>
+                            <p className="text-xs text-gray-500 mb-1">协作者</p>
+                            <div className="flex flex-wrap gap-1">
+                              {profileData.collaborators.slice(0, 8).map(c => (
+                                <span key={c.id} className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full text-xs">{c.name}</span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {profileData.projects.length > 0 && (
+                          <div>
+                            <p className="text-xs text-gray-500 mb-1">参与项目</p>
+                            <div className="flex flex-wrap gap-1">
+                              {profileData.projects.slice(0, 6).map(p => (
+                                <span key={p.id} className="px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full text-xs">{p.name}</span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {profileData.topics.length > 0 && (
+                          <div>
+                            <p className="text-xs text-gray-500 mb-1">关注话题</p>
+                            <div className="flex flex-wrap gap-1">
+                              {profileData.topics.slice(0, 6).map(t => (
+                                <span key={t.id} className="px-2 py-0.5 bg-green-50 text-green-700 rounded-full text-xs">{t.name}</span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {profileData.communities.length > 0 && (
+                          <div>
+                            <p className="text-xs text-gray-500 mb-1">所属社群</p>
+                            <div className="flex flex-wrap gap-1">
+                              {profileData.communities.slice(0, 6).map(c => (
+                                <span key={c.id} className="px-2 py-0.5 bg-pink-50 text-pink-700 rounded-full text-xs">{c.name}</span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {profileData.leadership_insight && (
+                          <div>
+                            <p className="text-xs text-gray-500 mb-1">领导力洞察</p>
+                            <div className="bg-indigo-50 rounded-lg p-2 text-xs text-gray-700 max-h-32 overflow-y-auto">
+                              {profileData.leadership_insight.report_markdown
+                                ? profileData.leadership_insight.report_markdown.slice(0, 300) + '...'
+                                : '已生成洞察报告'}
+                            </div>
+                            {profileData.leadership_insight.report_markdown && (
+                              <button
+                                onClick={() => setShowReportModal(true)}
+                                className="mt-1.5 text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+                              >
+                                查看完整报告
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-gray-400">暂无画像数据</p>
+                    )}
+                    {/* 生成/更新画像按钮 */}
+                    <button
+                      onClick={() => handleGenerateProfile(selectedNode.name)}
+                      disabled={generatingProfile}
+                      className="w-full mt-2 py-2 bg-indigo-50 text-indigo-600 rounded-lg text-sm font-medium hover:bg-indigo-100 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+                    >
+                      {generatingProfile ? (
+                        <><Loader2 size={14} className="animate-spin" /> 生成中...</>
+                      ) : (
+                        profileData?.leadership_insight ? '更新画像' : '生成画像'
+                      )}
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="h-full flex flex-col items-center justify-center text-gray-400 gap-2">
+                <Info size={24} />
+                <p className="text-sm">点击节点查看详情</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 中间 - 图谱 */}
         <div className="flex-1 bg-white rounded-xl shadow-sm overflow-hidden relative">
           {loading ? (
             <div className="h-full flex items-center justify-center text-gray-400">
@@ -630,7 +913,7 @@ export default function KnowledgeGraph() {
           ) : nodes.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-gray-400 gap-2">
               <Info size={32} />
-              <p>暂无图谱数据，点击"构建"开始</p>
+              <p>数据正在自动构建中，请稍候刷新</p>
             </div>
           ) : (
             <>
@@ -651,16 +934,10 @@ export default function KnowledgeGraph() {
           )}
         </div>
 
-        {/* 右侧面板 */}
-        <div className="w-80 bg-white rounded-xl shadow-sm flex flex-col overflow-hidden">
+        {/* 右侧面板 - 洞察/风险 */}
+        <div className="w-72 bg-white rounded-xl shadow-sm flex flex-col overflow-hidden shrink-0">
           {/* Tab 切换 */}
           <div className="flex border-b border-gray-100">
-            <button
-              onClick={() => setRightTab('detail')}
-              className={`flex-1 py-3 text-sm font-medium transition-colors ${rightTab === 'detail' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
-            >
-              详情
-            </button>
             <button
               onClick={() => setRightTab('insights')}
               className={`flex-1 py-3 text-sm font-medium transition-colors relative ${rightTab === 'insights' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
@@ -683,157 +960,6 @@ export default function KnowledgeGraph() {
 
           {/* Tab 内容 */}
           <div className="flex-1 overflow-y-auto p-4">
-            {/* 详情 Tab */}
-            {rightTab === 'detail' && (
-              selectedNode ? (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="font-semibold text-gray-800">{selectedNode.name}</h3>
-                    <button onClick={() => setSelectedNode(null)} className="p-1 hover:bg-gray-100 rounded">
-                      <X size={16} />
-                    </button>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <span className="w-3 h-3 rounded-full" style={{ backgroundColor: ENTITY_COLORS[selectedNode.entity_type] }} />
-                    <span className="text-sm text-gray-500">{ENTITY_LABELS[selectedNode.entity_type] || selectedNode.entity_type}</span>
-                    {selectedNode.community_id !== null && (
-                      <span className="text-xs px-2 py-0.5 rounded-full" style={{
-                        backgroundColor: COMMUNITY_COLORS[selectedNode.community_id % COMMUNITY_COLORS.length] + '22',
-                        color: COMMUNITY_COLORS[selectedNode.community_id % COMMUNITY_COLORS.length],
-                      }}>
-                        社群 {selectedNode.community_id}
-                      </span>
-                    )}
-                    <span className="text-sm text-gray-400 ml-auto">提及 {selectedNode.mention_count} 次</span>
-                  </div>
-
-                  {selectedNode.first_seen_at && (
-                    <p className="text-xs text-gray-400">
-                      首次出现: {new Date(selectedNode.first_seen_at).toLocaleDateString('zh-CN')}
-                    </p>
-                  )}
-
-                  {/* 关联关系 */}
-                  {selectedRelations.length > 0 && (
-                    <div>
-                      <p className="text-sm font-medium text-gray-700 mb-2">关联关系</p>
-                      <div className="space-y-2">
-                        {selectedRelations.map((rel) => {
-                          const otherNodeId = rel.source_entity_id === selectedNode.id ? rel.target_entity_id : rel.source_entity_id
-                          const otherNode = relatedNodes.find(n => n.id === otherNodeId)
-                          const direction = rel.source_entity_id === selectedNode.id ? '→' : '←'
-                          return (
-                            <div
-                              key={rel.id}
-                              className="flex items-center gap-2 text-sm bg-gray-50 rounded-lg px-3 py-2 cursor-pointer hover:bg-gray-100"
-                              onClick={() => { if (otherNode) handleNodeClick(otherNode) }}
-                            >
-                              <span className="text-gray-400">{direction}</span>
-                              <span className="text-gray-600">{RELATION_LABELS[rel.relation_type] || rel.relation_type}</span>
-                              <span className="font-medium text-gray-800">{otherNode?.name || `#${otherNodeId}`}</span>
-                              {rel.weight > 1 && <span className="text-xs text-gray-400 ml-auto">x{rel.weight}</span>}
-                            </div>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* 关联资产 */}
-                  {linkedAssets.length > 0 && (
-                    <div>
-                      <p className="text-sm font-medium text-gray-700 mb-2">关联资产</p>
-                      <div className="space-y-1">
-                        {linkedAssets.map(asset => (
-                          <a
-                            key={asset.id}
-                            href={`/data-import`}
-                            className="block text-sm text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded px-2 py-1 transition-colors"
-                          >
-                            {asset.title}
-                            <span className="text-xs text-gray-400 ml-2">{asset.source_type}</span>
-                          </a>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* 员工画像（仅 person 类型） */}
-                  {selectedNode.entity_type === 'person' && (
-                    <div className="border-t border-gray-200 pt-4">
-                      <p className="text-sm font-medium text-indigo-700 mb-2">员工画像</p>
-                      {profileLoading ? (
-                        <div className="flex items-center gap-2 text-sm text-gray-400">
-                          <Loader2 size={14} className="animate-spin" /> 加载画像中...
-                        </div>
-                      ) : profileData ? (
-                        <div className="space-y-3">
-                          {profileData.collaborators.length > 0 && (
-                            <div>
-                              <p className="text-xs text-gray-500 mb-1">协作者</p>
-                              <div className="flex flex-wrap gap-1">
-                                {profileData.collaborators.slice(0, 8).map(c => (
-                                  <span key={c.id} className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full text-xs">{c.name}</span>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          {profileData.projects.length > 0 && (
-                            <div>
-                              <p className="text-xs text-gray-500 mb-1">参与项目</p>
-                              <div className="flex flex-wrap gap-1">
-                                {profileData.projects.slice(0, 6).map(p => (
-                                  <span key={p.id} className="px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full text-xs">{p.name}</span>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          {profileData.topics.length > 0 && (
-                            <div>
-                              <p className="text-xs text-gray-500 mb-1">关注话题</p>
-                              <div className="flex flex-wrap gap-1">
-                                {profileData.topics.slice(0, 6).map(t => (
-                                  <span key={t.id} className="px-2 py-0.5 bg-green-50 text-green-700 rounded-full text-xs">{t.name}</span>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          {profileData.communities.length > 0 && (
-                            <div>
-                              <p className="text-xs text-gray-500 mb-1">所属社群</p>
-                              <div className="flex flex-wrap gap-1">
-                                {profileData.communities.slice(0, 6).map(c => (
-                                  <span key={c.id} className="px-2 py-0.5 bg-pink-50 text-pink-700 rounded-full text-xs">{c.name}</span>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          {profileData.leadership_insight && (
-                            <div>
-                              <p className="text-xs text-gray-500 mb-1">领导力洞察</p>
-                              <div className="bg-indigo-50 rounded-lg p-2 text-xs text-gray-700 max-h-32 overflow-y-auto">
-                                {profileData.leadership_insight.report_markdown
-                                  ? profileData.leadership_insight.report_markdown.slice(0, 300) + '...'
-                                  : '已生成洞察报告'}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <p className="text-xs text-gray-400">暂无画像数据</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="h-full flex flex-col items-center justify-center text-gray-400 gap-2">
-                  <Info size={24} />
-                  <p className="text-sm">点击节点查看详情</p>
-                </div>
-              )
-            )}
-
             {/* 洞察 Tab */}
             {rightTab === 'insights' && (
               analysisResult && analysisResult.insights.length > 0 ? (
@@ -860,7 +986,7 @@ export default function KnowledgeGraph() {
               ) : (
                 <div className="h-full flex flex-col items-center justify-center text-gray-400 gap-2">
                   <Lightbulb size={24} />
-                  <p className="text-sm">点击"分析"按钮生成洞察</p>
+                  <p className="text-sm">点击「生成最新知识图谱」按钮生成洞察</p>
                 </div>
               )
             )}
@@ -894,13 +1020,319 @@ export default function KnowledgeGraph() {
               ) : (
                 <div className="h-full flex flex-col items-center justify-center text-gray-400 gap-2">
                   <AlertTriangle size={24} />
-                  <p className="text-sm">点击"分析"按钮检测风险</p>
+                  <p className="text-sm">点击「生成最新知识图谱」按钮检测风险</p>
                 </div>
               )
             )}
           </div>
         </div>
       </div>
+
+      {/* 画像完整报告弹窗 */}
+      {showReportModal && profileData?.leadership_insight?.report_markdown && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowReportModal(false)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl mx-4 flex flex-col" style={{ maxHeight: '80vh' }} onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <h3 className="text-lg font-semibold text-gray-800">{selectedNode?.name} - 画像报告</h3>
+              <button onClick={() => setShowReportModal(false)} className="p-1 hover:bg-gray-100 rounded">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              <div className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">
+                {profileData.leadership_insight.report_markdown}
+              </div>
+            </div>
+            <div className="px-6 py-3 border-t border-gray-100 flex justify-end">
+              <button
+                onClick={() => setShowReportModal(false)}
+                className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 text-sm"
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 资产详情弹窗 */}
+      {showAssetModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex justify-end" onClick={() => setShowAssetModal(false)}>
+          <div className="w-full max-w-lg bg-white h-full overflow-y-auto shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-800">{assetModalType === 'meeting' ? '会议详情' : '文档详情'}</h2>
+              <button onClick={() => setShowAssetModal(false)} className="p-1 hover:bg-gray-100 rounded"><X size={20} /></button>
+            </div>
+            {assetLoading ? (
+              <div className="flex items-center justify-center py-20 text-gray-400">
+                <Loader2 size={24} className="animate-spin mr-2" /> 加载中...
+              </div>
+            ) : assetModalType === 'meeting' && meetingDetail ? (
+              /* ── 会议详情 ── */
+              <div className="p-6 space-y-4">
+                <h3 className="text-lg font-semibold text-gray-800">{meetingDetail.title || '无标题'}</h3>
+
+                <div className="flex flex-wrap gap-4 text-sm text-gray-600">
+                  {meetingDetail.meeting_time && (
+                    <span>{new Date(meetingDetail.meeting_time).toLocaleString('zh-CN')}{meetingDetail.duration_minutes ? ` (${meetingDetail.duration_minutes}分钟)` : ''}</span>
+                  )}
+                  {meetingDetail.location && <span>{meetingDetail.location}</span>}
+                </div>
+
+                {meetingDetail.uploader_name && (
+                  <div><p className="text-sm text-gray-500">上传人</p><p className="text-sm text-gray-800 font-medium">{meetingDetail.uploader_name}</p></div>
+                )}
+                {meetingDetail.organizer && (
+                  <div><p className="text-sm text-gray-500">组织者</p><p className="text-sm text-gray-800 font-medium">{meetingDetail.organizer}</p></div>
+                )}
+
+                {(meetingDetail.minutes_url || meetingDetail.bitable_url) && (
+                  <div>
+                    <p className="text-sm text-gray-500 mb-1">相关链接</p>
+                    <div className="flex flex-wrap gap-2">
+                      {meetingDetail.minutes_url && (
+                        <a href={meetingDetail.minutes_url} target="_blank" rel="noopener noreferrer"
+                          className="inline-flex items-center gap-2 px-3 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm hover:bg-blue-100 transition-colors">
+                          <FileText size={14} /> 查看完整纪要
+                        </a>
+                      )}
+                      {meetingDetail.bitable_url && (
+                        <a href={meetingDetail.bitable_url} target="_blank" rel="noopener noreferrer"
+                          className="inline-flex items-center gap-2 px-3 py-2 bg-purple-50 text-purple-700 rounded-lg text-sm hover:bg-purple-100 transition-colors">
+                          <ExternalLink size={14} /> 查看源多维表格
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {meetingDetail.participants.length > 0 && (
+                  <div>
+                    <p className="text-sm text-gray-500 mb-1">参与人</p>
+                    <div className="flex flex-wrap gap-2">
+                      {meetingDetail.participants.map((p, i) => (
+                        <span key={i} className="px-2 py-1 bg-blue-50 text-blue-700 rounded-full text-xs">{p.name || p.open_id || '未知'}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {meetingDetail.agenda && (
+                  <div>
+                    <p className="text-sm text-gray-500 mb-1">议程</p>
+                    <p className="text-sm text-gray-800 bg-gray-50 rounded-lg p-3 whitespace-pre-wrap">{meetingDetail.agenda}</p>
+                  </div>
+                )}
+
+                {meetingDetail.conclusions && (
+                  <div>
+                    <p className="text-sm text-gray-500 mb-1">结论</p>
+                    <p className="text-sm text-gray-800 bg-green-50 rounded-lg p-3 whitespace-pre-wrap">{meetingDetail.conclusions}</p>
+                  </div>
+                )}
+
+                {meetingDetail.action_items.length > 0 && (
+                  <div>
+                    <p className="text-sm text-gray-500 mb-1">待办事项</p>
+                    <ul className="space-y-2">
+                      {meetingDetail.action_items.map((item, i) => (
+                        <li key={i} className="text-sm bg-yellow-50 rounded-lg p-3">
+                          <p className="text-gray-800">{item.task || '未命名任务'}</p>
+                          {item.assignee && <p className="text-gray-500 text-xs mt-1">负责人: {item.assignee}</p>}
+                          {item.deadline && <p className="text-gray-500 text-xs">截止: {item.deadline}</p>}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                <div>
+                  <p className="text-sm text-gray-500 mb-1">全文内容</p>
+                  <div className="text-sm text-gray-800 bg-gray-50 rounded-lg p-4 whitespace-pre-wrap max-h-96 overflow-y-auto">
+                    {meetingDetail.content_text}
+                  </div>
+                </div>
+
+                {/* 附件和超链接 */}
+                {meetingDetail.extra_fields?._attachments && meetingDetail.extra_fields._attachments.length > 0 && (
+                  <div>
+                    <p className="text-sm text-gray-500 mb-2 flex items-center gap-1"><Paperclip size={14} /> 附件</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {meetingDetail.extra_fields._attachments.map((att) => {
+                        const ext = att.name.split('.').pop()?.toLowerCase() || ''
+                        const isImg = ['png','jpg','jpeg','gif','webp','bmp','svg'].includes(ext) || att.type.startsWith('image/')
+                        return isImg ? (
+                          <div key={att.file_token} className="relative group cursor-pointer" onClick={() => setImagePreview(`/api/upload/attachments/${att.file_token}`)}>
+                            <img src={`/api/upload/attachments/${att.file_token}`} alt={att.name} className="w-full h-32 object-cover rounded-lg border border-gray-200" />
+                            <p className="text-xs text-gray-500 mt-1 truncate">{att.name}</p>
+                          </div>
+                        ) : (
+                          <a key={att.file_token} href={`/api/upload/attachments/${att.file_token}`} download
+                            className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                            <Download size={16} className="text-gray-400 shrink-0" />
+                            <span className="text-sm text-gray-700 truncate">{att.name || att.file_token}</span>
+                          </a>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+                {meetingDetail.extra_fields?._links && meetingDetail.extra_fields._links.length > 0 && (
+                  <div>
+                    <p className="text-sm text-gray-500 mb-2 flex items-center gap-1"><ExternalLink size={14} /> 超链接</p>
+                    <div className="space-y-1">
+                      {meetingDetail.extra_fields._links.map((lnk, i) => (
+                        <a key={i} href={lnk.link} target="_blank" rel="noopener noreferrer"
+                          className="flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-800 hover:underline">
+                          <ExternalLink size={14} className="shrink-0" />
+                          {lnk.text || lnk.field_name || lnk.link}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : assetDetail ? (
+              /* ── 文档详情 ── */
+              <div className="p-6 space-y-4">
+                <div>
+                  <p className="text-sm text-gray-500">标题</p>
+                  <p className="text-sm text-gray-800 font-medium">{assetDetail.title || '无标题'}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">来源</p>
+                  <p className="text-sm text-gray-800 font-medium">{SOURCE_TYPE_LABELS[assetDetail.source_type] || assetDetail.source_type}</p>
+                </div>
+                {assetDetail.uploader_name && (
+                  <div><p className="text-sm text-gray-500">上传人</p><p className="text-sm text-gray-800 font-medium">{assetDetail.uploader_name}</p></div>
+                )}
+                {assetDetail.author && (
+                  <div><p className="text-sm text-gray-500">作者</p><p className="text-sm text-gray-800 font-medium">{assetDetail.author}</p></div>
+                )}
+                {assetDetail.category && (
+                  <div><p className="text-sm text-gray-500">分类</p><p className="text-sm text-gray-800 font-medium">{assetDetail.category}</p></div>
+                )}
+                {assetDetail.file_type && (
+                  <div><p className="text-sm text-gray-500">文件类型</p><p className="text-sm text-gray-800 font-medium">{assetDetail.file_type.toUpperCase()}</p></div>
+                )}
+                <div>
+                  <p className="text-sm text-gray-500">时间</p>
+                  <p className="text-sm text-gray-800 font-medium">{new Date(assetDetail.synced_at || assetDetail.created_at).toLocaleString('zh-CN')}</p>
+                </div>
+                {assetDetail.source_type === 'local' && (
+                  <div>
+                    <p className="text-sm text-gray-500 mb-1">文件操作</p>
+                    <button
+                      onClick={async () => {
+                        try {
+                          const resp = await api.get(`/documents/${assetDetail.id}/download`, { responseType: 'blob' })
+                          const disposition = resp.headers['content-disposition'] || ''
+                          const match = disposition.match(/filename="?([^"]+)"?/)
+                          const filename = match ? match[1] : assetDetail.title || 'download'
+                          const url = URL.createObjectURL(resp.data)
+                          const a = document.createElement('a')
+                          a.href = url
+                          a.download = filename
+                          a.click()
+                          URL.revokeObjectURL(url)
+                        } catch { toast.error('下载失败') }
+                      }}
+                      className="inline-flex items-center gap-2 px-3 py-2 bg-indigo-50 text-indigo-700 rounded-lg text-sm hover:bg-indigo-100 transition-colors"
+                    >
+                      <Download size={14} /> 下载文件
+                    </button>
+                  </div>
+                )}
+                {assetDetail.source_type === 'cloud' && (
+                  <div>
+                    <p className="text-sm text-gray-500 mb-1">文档链接</p>
+                    <div className="flex flex-wrap gap-2">
+                      {assetDetail.doc_url && (
+                        <a href={assetDetail.doc_url} target="_blank" rel="noopener noreferrer"
+                          className="inline-flex items-center gap-2 px-3 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm hover:bg-blue-100 transition-colors">
+                          <ExternalLink size={14} /> 在飞书中打开
+                        </a>
+                      )}
+                      {assetDetail.bitable_url && (
+                        <a href={assetDetail.bitable_url} target="_blank" rel="noopener noreferrer"
+                          className="inline-flex items-center gap-2 px-3 py-2 bg-purple-50 text-purple-700 rounded-lg text-sm hover:bg-purple-100 transition-colors">
+                          <ExternalLink size={14} /> 查看源多维表格
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {assetDetail.summary && (
+                  <div>
+                    <p className="text-sm text-gray-500 mb-1">摘要</p>
+                    <p className="text-sm text-gray-800 bg-blue-50 rounded-lg p-3">{assetDetail.summary}</p>
+                  </div>
+                )}
+                <div>
+                  <p className="text-sm text-gray-500 mb-1">内容</p>
+                  <div className="text-sm text-gray-800 bg-gray-50 rounded-lg p-4 whitespace-pre-wrap max-h-96 overflow-y-auto">
+                    {assetDetail.content_text}
+                  </div>
+                </div>
+                {assetDetail.tags && Object.keys(assetDetail.tags).length > 0 && (
+                  <div>
+                    <p className="text-sm text-gray-500 mb-1">标签</p>
+                    <div className="flex flex-wrap gap-2">
+                      {Object.keys(assetDetail.tags).map((tag) => (
+                        <span key={tag} className="px-2 py-1 bg-indigo-50 text-indigo-700 rounded-full text-xs">{tag}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {assetDetail.extra_fields?._attachments && assetDetail.extra_fields._attachments.length > 0 && (
+                  <div>
+                    <p className="text-sm text-gray-500 mb-2 flex items-center gap-1"><Paperclip size={14} /> 附件</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {assetDetail.extra_fields._attachments.map((att) => {
+                        const ext = att.name.split('.').pop()?.toLowerCase() || ''
+                        const isImg = ['png','jpg','jpeg','gif','webp','bmp','svg'].includes(ext) || att.type.startsWith('image/')
+                        return isImg ? (
+                          <div key={att.file_token} className="relative group cursor-pointer" onClick={() => setImagePreview(`/api/upload/attachments/${att.file_token}`)}>
+                            <img src={`/api/upload/attachments/${att.file_token}`} alt={att.name} className="w-full h-32 object-cover rounded-lg border border-gray-200" />
+                            <p className="text-xs text-gray-500 mt-1 truncate">{att.name}</p>
+                          </div>
+                        ) : (
+                          <a key={att.file_token} href={`/api/upload/attachments/${att.file_token}`} download
+                            className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                            <Download size={16} className="text-gray-400 shrink-0" />
+                            <span className="text-sm text-gray-700 truncate">{att.name || att.file_token}</span>
+                          </a>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+                {assetDetail.extra_fields?._links && assetDetail.extra_fields._links.length > 0 && (
+                  <div>
+                    <p className="text-sm text-gray-500 mb-2 flex items-center gap-1"><ExternalLink size={14} /> 超链接</p>
+                    <div className="space-y-1">
+                      {assetDetail.extra_fields._links.map((lnk, i) => (
+                        <a key={i} href={lnk.link} target="_blank" rel="noopener noreferrer"
+                          className="flex items-center gap-2 text-sm text-indigo-600 hover:text-indigo-800 hover:underline">
+                          <ExternalLink size={14} className="shrink-0" />
+                          {lnk.text || lnk.field_name || lnk.link}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      )}
+
+      {/* 图片预览 */}
+      {imagePreview && (
+        <div className="fixed inset-0 bg-black/70 z-[60] flex items-center justify-center" onClick={() => setImagePreview(null)}>
+          <img src={imagePreview} alt="预览" className="max-w-[90vw] max-h-[90vh] rounded-lg shadow-2xl" />
+        </div>
+      )}
     </div>
   )
 }

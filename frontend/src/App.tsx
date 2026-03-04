@@ -4,7 +4,6 @@ import { Toaster } from 'react-hot-toast'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
 import Login from './pages/Login'
-import Dashboard from './pages/Dashboard'
 import Documents from './pages/Documents'
 import Meetings from './pages/Meetings'
 import Messages from './pages/Messages'
@@ -15,8 +14,10 @@ import Todos from './pages/Todos'
 // Reports 已整合到 Chat 页面的「报告生成」Tab
 import ReportDetail from './pages/ReportDetail'
 import KnowledgeGraph from './pages/KnowledgeGraph'
-import LeadershipInsight from './pages/LeadershipInsight'
+// LeadershipInsight 已整合到 KnowledgeGraph（数据图谱）页面
 import StructuredTables from './pages/StructuredTables'
+import DataInsights from './pages/DataInsights'
+import CalendarAssistant from './pages/CalendarAssistant'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -38,7 +39,6 @@ export default function App() {
               </ProtectedRoute>
             }
           >
-            <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/structured-tables" element={<StructuredTables />} />
             <Route path="/documents" element={<Documents />} />
             <Route path="/meetings" element={<Meetings />} />
@@ -48,7 +48,9 @@ export default function App() {
             <Route path="/reports" element={<Navigate to="/chat" replace />} />
             <Route path="/reports/:id" element={<ReportDetail />} />
             <Route path="/knowledge-graph" element={<KnowledgeGraph />} />
-            <Route path="/leadership-insight" element={<LeadershipInsight />} />
+            <Route path="/leadership-insight" element={<Navigate to="/knowledge-graph" replace />} />
+            <Route path="/data-insights" element={<DataInsights />} />
+            <Route path="/calendar" element={<CalendarAssistant />} />
             <Route path="/permissions" element={<DepartmentAdmin />} />
             <Route
               path="/admin/etl"
@@ -60,7 +62,7 @@ export default function App() {
             />
           </Route>
 
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          <Route path="*" element={<Navigate to="/data-insights" replace />} />
         </Routes>
       </BrowserRouter>
       <Toaster
