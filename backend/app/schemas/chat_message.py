@@ -11,18 +11,29 @@ class ChatMessageOut(BaseModel):
     """聊天消息输出模型。"""
     id: int
     owner_id: str
+    source_platform: str | None = None
     source_app_token: str | None = None
     source_table_id: str | None = None
     chat_id: str | None = None
+    chat_type: str | None = None
+    chat_name: str | None = None
     sender: str | None = None
     message_type: str | None = None
     content_text: str
+    summary: str | None = None
     sent_at: datetime | None = None
     reply_to: str | None = None
     mentions: list = []
+    source_url: str | None = None
     uploader_name: str | None = None
+    keywords: list = []
+    involved_people: list = []
+    sentiment: str | None = None
+    quality_score: float | None = None
+    duplicate_of: int | None = None
     extra_fields: dict = {}
     feishu_record_id: str
+    parse_status: str = "done"
     synced_at: datetime | None = None
     created_at: datetime
     updated_at: datetime

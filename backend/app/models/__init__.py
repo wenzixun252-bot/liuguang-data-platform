@@ -12,6 +12,7 @@ from app.models.leadership_insight import LeadershipInsight
 from app.models.conversation import Conversation, ConversationMessage
 from app.models.tag import TagDefinition, ContentTag
 from app.models.content_entity_link import ContentEntityLink
+from app.models.content_chunk import ContentChunk
 from app.models.calendar_reminder import CalendarReminderPref
 from app.models.notification_pref import UserNotificationPref
 from app.models.keyword_sync_rule import KeywordSyncRule
@@ -42,6 +43,7 @@ __all__ = [
     "TagDefinition",
     "ContentTag",
     "ContentEntityLink",
+    "ContentChunk",
     "UserNotificationPref",
     "KeywordSyncRule",
 ]

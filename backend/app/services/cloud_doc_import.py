@@ -88,9 +88,7 @@ class CloudDocImportService:
             feishu_updated = datetime.fromtimestamp(int(modified_time)) if modified_time else None
 
             # 8. Upsert
-            tags_dict = {}
-            if isinstance(parsed.get("tags"), list):
-                tags_dict = {tag: True for tag in parsed["tags"]}
+            keywords_list = parsed.get("tags", []) if isinstance(parsed.get("tags"), list) else []
 
             if existing:
                 # 更新现有记录
@@ -98,8 +96,7 @@ class CloudDocImportService:
                 existing.content_text = content_text
                 existing.summary = parsed.get("summary")
                 existing.author = parsed.get("author")
-                existing.tags = tags_dict
-                existing.category = parsed.get("category")
+                existing.keywords = keywords_list
                 existing.doc_url = doc_url
                 existing.feishu_created_at = feishu_created
                 existing.feishu_updated_at = feishu_updated
@@ -119,8 +116,7 @@ class CloudDocImportService:
                     content_text=content_text,
                     summary=parsed.get("summary"),
                     author=parsed.get("author"),
-                    tags=tags_dict,
-                    category=parsed.get("category"),
+                    keywords=keywords_list,
                     file_type="docx",
                     doc_url=doc_url,
                     uploader_name=uploader_name,
@@ -211,17 +207,14 @@ class CloudDocImportService:
             doc_url = f"https://{domain}/file/{file_token}"
 
             # 7. Upsert
-            tags_dict = {}
-            if isinstance(parsed.get("tags"), list):
-                tags_dict = {tag: True for tag in parsed["tags"]}
+            keywords_list = parsed.get("tags", []) if isinstance(parsed.get("tags"), list) else []
 
             if existing:
                 existing.title = parsed.get("title") or file_name
                 existing.content_text = content_text
                 existing.summary = parsed.get("summary")
                 existing.author = parsed.get("author")
-                existing.tags = tags_dict
-                existing.category = parsed.get("category")
+                existing.keywords = keywords_list
                 existing.file_type = ext
                 existing.file_size = file_size
                 existing.doc_url = doc_url
@@ -241,8 +234,7 @@ class CloudDocImportService:
                     content_text=content_text,
                     summary=parsed.get("summary"),
                     author=parsed.get("author"),
-                    tags=tags_dict,
-                    category=parsed.get("category"),
+                    keywords=keywords_list,
                     file_type=ext,
                     file_size=file_size,
                     doc_url=doc_url,

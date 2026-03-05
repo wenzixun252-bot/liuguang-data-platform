@@ -193,7 +193,7 @@ const SOURCE_TYPE_LABELS: Record<string, string> = {
 
 // ── 组件 ──
 
-export default function KnowledgeGraph() {
+export default function KnowledgeGraph({ embedded = false }: { embedded?: boolean } = {}) {
   const [nodes, setNodes] = useState<KGNode[]>([])
   const [edges, setEdges] = useState<KGEdge[]>([])
   const [stats, setStats] = useState<KGStats | null>(null)
@@ -614,8 +614,8 @@ export default function KnowledgeGraph() {
     <div className="space-y-4">
       {/* 顶部工具栏 */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold text-gray-800">数据图谱</h1>
-        <div className="flex items-center gap-2 flex-wrap">
+        {!embedded && <h1 className="text-2xl font-bold text-gray-800">数据图谱</h1>}
+        <div className={`flex items-center gap-2 flex-wrap${embedded ? ' w-full' : ''}`}>
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
@@ -723,7 +723,7 @@ export default function KnowledgeGraph() {
       )}
 
       {/* 主体区域：左侧详情 + 中间图谱 + 右侧洞察/风险 */}
-      <div className="flex gap-4" style={{ height: 'calc(100vh - 280px)', minHeight: '500px' }}>
+      <div className="flex gap-4" style={{ height: embedded ? '600px' : 'calc(100vh - 280px)', minHeight: '500px' }}>
 
         {/* 左侧面板 - 节点详情 */}
         <div className="w-72 bg-white rounded-xl shadow-sm flex flex-col overflow-hidden shrink-0">

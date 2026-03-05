@@ -40,3 +40,12 @@
 - **2026-03-05 17:27:59** [前端页面] `frontend/src/pages/DataInsights.tsx` — 修改逻辑 (+1/-1行)
 - **2026-03-05 17:28:24** [前端页面] `frontend/src/pages/DataInsights.tsx` — 新增 7 行代码
 - **2026-03-05 17:28:44** [前端页面] `frontend/src/pages/DataInsights.tsx` — 添加依赖引用
+- **2026-03-05 17:58:30** [前端页面] `frontend/src/pages/DataInsights.tsx` — 新建文件 `DataInsights`，包含 KnowledgeGraph, CARD_CONFIG, PRIORITY_STYLES, DataInsights, navigate
+- **2026-03-05 18:01:35** [前端页面] `frontend/src/pages/DataInsights.tsx` — 新增 6 行代码
+- **2026-03-05 18:01:41** [前端页面] `frontend/src/pages/DataInsights.tsx` — 新增 1 行代码
+- **2026-03-05 18:02:34** [前端组件] `frontend/src/components/GlobalSearch.tsx` — 新增 tags
+- **2026-03-05 18:02:43** [前端组件] `frontend/src/components/GlobalSearch.tsx` — 调整UI组件
+- **2026-03-05 18:11:54** [前端组件] `frontend/src/components/GlobalSearch.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-05 19:07:59** [数据模型] `backend/app/models/__init__.py` — 添加依赖引用
+- **2026-03-05 19:08:05** [数据模型] `backend/app/models/__init__.py` — 新增 1 行代码
+- **2026-03-05 19:11:29** [数据库迁移] `backend/alembic/versions/q7g8h9i0j1k2_schema_v2_unified_fields.py` — 新建文件 `q7g8h9i0j1k2_schema_v2_unified_fields`，包含 upgrade, downgrade

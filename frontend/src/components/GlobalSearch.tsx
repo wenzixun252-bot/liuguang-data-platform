@@ -81,12 +81,14 @@ export default function GlobalSearch({
   const [tagFilter, setTagFilter] = useState<number[]>([])
   const [typeFilter, setTypeFilter] = useState('')
 
-  const doSearch = async () => {
-    if (!keyword.trim()) return
+  const doSearch = async (overrideTagIds?: number[]) => {
+    const tags = overrideTagIds ?? tagFilter
+    if (!keyword.trim() && tags.length === 0) return
     setLoading(true)
     try {
-      const params: Record<string, string> = { q: keyword.trim() }
-      if (tagFilter.length) params.tag_ids = tagFilter.join(',')
+      const params: Record<string, string> = {}
+      if (keyword.trim()) params.q = keyword.trim()
+      if (tags.length) params.tag_ids = tags.join(',')
       if (typeFilter) params.content_types = typeFilter
       const { data } = await api.get('/search', { params })
       setResults(data)
@@ -122,7 +124,7 @@ export default function GlobalSearch({
           ))}
         </select>
         <button
-          onClick={doSearch}
+          onClick={() => doSearch()}
           disabled={loading}
           className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-medium disabled:opacity-50 transition-colors"
         >
@@ -130,8 +132,8 @@ export default function GlobalSearch({
         </button>
       </div>
 
-      {/* 标签筛选 */}
-      <TagFilter selectedTagIds={tagFilter} onChange={setTagFilter} />
+      {/* 标签筛选（选择标签后自动搜索） */}
+      <TagFilter selectedTagIds={tagFilter} onChange={(ids) => { setTagFilter(ids); if (ids.length > 0 || keyword.trim()) doSearch(ids) }} />
 
       {/* 搜索结果 */}
       {results && (

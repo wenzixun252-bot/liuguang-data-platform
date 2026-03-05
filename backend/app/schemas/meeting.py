@@ -11,6 +11,7 @@ class MeetingOut(BaseModel):
     """会议输出模型。"""
     id: int
     owner_id: str
+    source_platform: str | None = None
     source_app_token: str | None = None
     source_table_id: str | None = None
     title: str | None = None
@@ -23,10 +24,20 @@ class MeetingOut(BaseModel):
     conclusions: str | None = None
     action_items: list = []
     content_text: str
+    summary: str | None = None
+    transcript: str | None = None
+    recording_url: str | None = None
     minutes_url: str | None = None
+    source_url: str | None = None
     uploader_name: str | None = None
+    keywords: list = []
+    involved_people: list = []
+    sentiment: str | None = None
+    quality_score: float | None = None
+    duplicate_of: int | None = None
     extra_fields: dict = {}
     feishu_record_id: str
+    parse_status: str = "done"
     synced_at: datetime | None = None
     created_at: datetime
     updated_at: datetime

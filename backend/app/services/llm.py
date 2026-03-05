@@ -18,7 +18,7 @@ owner_id: 数据归属人的飞书 open_id
 title: 文档标题
 content_text: 文档正文/核心内容
 author: 作者
-category: 文档分类
+doc_url: 文档链接/URL
 feishu_created_at: 飞书端创建时间
 feishu_updated_at: 飞书端更新时间
 """.strip()
@@ -27,7 +27,7 @@ TARGET_SCHEMA_MEETING = """
 feishu_record_id: 记录唯一标识
 owner_id: 数据归属人的飞书 open_id
 title: 会议主题
-content_text: 会议全文内容
+content_text: 会议全文内容/纪要
 meeting_time: 会议时间
 duration_minutes: 时长(分钟)
 location: 会议地点/链接
@@ -36,6 +36,9 @@ participants: 参与人列表
 agenda: 议程
 conclusions: 结论
 action_items: 行动项/待办
+minutes_url: 会议纪要链接
+recording_url: 录音/录像链接
+transcript: AI转写文本/录音文字
 feishu_created_at: 飞书端创建时间
 feishu_updated_at: 飞书端更新时间
 """.strip()
@@ -44,7 +47,9 @@ TARGET_SCHEMA_CHAT_MESSAGE = """
 feishu_record_id: 记录唯一标识
 owner_id: 数据归属人的飞书 open_id
 content_text: 消息内容
-chat_id: 会话 ID
+chat_id: 会话 ID/群组 ID
+chat_type: 聊天类型(group/private)
+chat_name: 群名称/会话名称
 sender: 发送人
 message_type: 消息类型 (text/image/file 等)
 sent_at: 发送时间

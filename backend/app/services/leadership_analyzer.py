@@ -161,7 +161,7 @@ async def gather_leader_data(
     for d in documents.scalars().all():
         data["documents"].append({
             "title": d.title,
-            "category": d.category,
+            "keywords": d.keywords,
             "summary": d.summary,
             "created": str(d.created_at),
         })

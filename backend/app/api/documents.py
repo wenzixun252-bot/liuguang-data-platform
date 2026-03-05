@@ -38,7 +38,7 @@ async def list_documents(
     page_size: int = Query(20, ge=1, le=100),
     search: str | None = Query(None),
     source_type: str | None = Query(None),
-    category: str | None = Query(None),
+    sentiment: str | None = Query(None),
     uploader_name: str | None = Query(None),
     tag_ids: list[int] = Query(default=[]),
 ) -> DocumentListResponse:
@@ -60,9 +60,9 @@ async def list_documents(
         base = base.where(Document.source_type == source_type)
         count_stmt = count_stmt.where(Document.source_type == source_type)
 
-    if category:
-        base = base.where(Document.category == category)
-        count_stmt = count_stmt.where(Document.category == category)
+    if sentiment:
+        base = base.where(Document.sentiment == sentiment)
+        count_stmt = count_stmt.where(Document.sentiment == sentiment)
 
     if uploader_name:
         like = f"%{uploader_name}%"

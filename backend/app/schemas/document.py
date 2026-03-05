@@ -12,22 +12,27 @@ class DocumentOut(BaseModel):
     id: int
     owner_id: str
     source_type: str
+    source_platform: str | None = None
     source_app_token: str | None = None
     source_table_id: str | None = None
     title: str | None = None
     content_text: str
     summary: str | None = None
     author: str | None = None
-    tags: dict = {}
-    category: str | None = None
     file_type: str | None = None
     file_size: int | None = None
     doc_url: str | None = None
+    source_url: str | None = None
     uploader_name: str | None = None
+    keywords: list = []
+    involved_people: list = []
+    sentiment: str | None = None
+    quality_score: float | None = None
+    duplicate_of: int | None = None
     extra_fields: dict = {}
     feishu_record_id: str | None = None
     parse_status: str = "done"
-    import_count: int = 1  # 同一飞书文档被多少人归档
+    import_count: int = 1
     synced_at: datetime | None = None
     feishu_created_at: datetime | None = None
     feishu_updated_at: datetime | None = None

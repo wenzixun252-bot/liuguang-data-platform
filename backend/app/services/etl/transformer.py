@@ -1,4 +1,4 @@
-"""ETL Transform 模块 — 三表路由 + Schema 映射缓存 + 数据转换。"""
+"""ETL Transform 模块 — 三表路由 + Schema 映射缓存 + 3步增强工作流。"""
 
 import hashlib
 import json
@@ -11,7 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.asset import SchemaMappingCache
+from app.services.etl.enricher import content_enricher
 from app.services.etl.extractor import ExtractionResult
+from app.services.etl.postprocessor import content_postprocessor
+from app.services.etl.preprocessor import content_preprocessor
 from app.utils.feishu_webhook import send_alert
 
 logger = logging.getLogger(__name__)
@@ -33,14 +36,23 @@ class TransformedDocument:
     content_text: str = ""
     summary: str | None = None
     author: str | None = None
-    tags: dict = field(default_factory=dict)
-    category: str | None = None
     doc_url: str | None = None
+    source_url: str | None = None
+    source_platform: str | None = None
     uploader_name: str | None = None
     extra_fields: dict = field(default_factory=dict)
     attachments: list = field(default_factory=list)
     feishu_created_at: datetime | None = None
     feishu_updated_at: datetime | None = None
+    # -- LLM 提取字段 --
+    keywords: list = field(default_factory=list)
+    involved_people: list = field(default_factory=list)
+    sentiment: str | None = None
+    # -- 后处理字段 --
+    quality_score: float | None = None
+    duplicate_of: int | None = None
+    content_hash: str | None = None
+    chunks: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -60,12 +72,26 @@ class TransformedMeeting:
     conclusions: str | None = None
     action_items: list = field(default_factory=list)
     content_text: str = ""
+    summary: str | None = None
+    transcript: str | None = None
+    recording_url: str | None = None
     minutes_url: str | None = None
+    source_url: str | None = None
+    source_platform: str | None = None
     uploader_name: str | None = None
     extra_fields: dict = field(default_factory=dict)
     attachments: list = field(default_factory=list)
     feishu_created_at: datetime | None = None
     feishu_updated_at: datetime | None = None
+    # -- LLM 提取字段 --
+    keywords: list = field(default_factory=list)
+    involved_people: list = field(default_factory=list)
+    sentiment: str | None = None
+    # -- 后处理字段 --
+    quality_score: float | None = None
+    duplicate_of: int | None = None
+    content_hash: str | None = None
+    chunks: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -76,22 +102,36 @@ class TransformedChatMessage:
     source_app_token: str
     source_table_id: str
     chat_id: str | None = None
+    chat_type: str | None = None
+    chat_name: str | None = None
     sender: str | None = None
     message_type: str | None = None
     content_text: str = ""
+    summary: str | None = None
     sent_at: datetime | None = None
     reply_to: str | None = None
     mentions: list = field(default_factory=list)
+    source_url: str | None = None
+    source_platform: str | None = None
     uploader_name: str | None = None
     extra_fields: dict = field(default_factory=dict)
     attachments: list = field(default_factory=list)
+    # -- LLM 提取字段 --
+    keywords: list = field(default_factory=list)
+    involved_people: list = field(default_factory=list)
+    sentiment: str | None = None
+    # -- 后处理字段 --
+    quality_score: float | None = None
+    duplicate_of: int | None = None
+    content_hash: str | None = None
+    chunks: list[str] = field(default_factory=list)
 
 
 @dataclass
 class TransformResult:
     """转换结果。"""
-    records: list = field(default_factory=list)  # TransformedDocument | TransformedMeeting | TransformedChatMessage
-    target_table: str = "documents"  # 'documents' | 'meetings' | 'chat_messages'
+    records: list = field(default_factory=list)
+    target_table: str = "documents"
     discarded_count: int = 0
     app_token: str = ""
     table_id: str = ""
@@ -105,7 +145,6 @@ DOCUMENT_KEYWORDS: dict[str, list[str]] = {
     "owner_id": ["所有者", "创建者", "作者", "负责人", "owner", "creator", "文件所有者"],
     "feishu_record_id": ["标识", "record_id", "id", "文件标识"],
     "author": ["作者", "作成者", "author", "writer"],
-    "category": ["分类", "类别", "category", "类型"],
     "doc_url": ["文档链接", "文件链接", "链接", "URL", "url", "doc_url", "文档地址"],
     "feishu_created_at": ["创建时间", "created", "创建日期", "文件创建时间"],
     "feishu_updated_at": ["修改时间", "更新时间", "updated", "最近修改", "文件最近修改时间"],
@@ -125,6 +164,8 @@ MEETING_KEYWORDS: dict[str, list[str]] = {
     "conclusions": ["结论", "决议", "conclusion"],
     "action_items": ["待办", "行动项", "action_items", "todo"],
     "minutes_url": ["完整会议纪要", "会议纪要链接", "纪要链接", "会议纪要", "minutes_url", "纪要", "会议链接"],
+    "recording_url": ["录音", "录音链接", "recording", "音频", "录像"],
+    "transcript": ["转写", "转写文本", "transcript", "录音文字", "语音转文字"],
     "feishu_created_at": ["创建时间", "created"],
     "feishu_updated_at": ["修改时间", "更新时间", "updated"],
 }
@@ -134,6 +175,8 @@ CHAT_MESSAGE_KEYWORDS: dict[str, list[str]] = {
     "owner_id": ["所有者", "创建者", "owner", "creator", "配方 Owner"],
     "feishu_record_id": ["消息ID", "标识", "record_id", "id", "msg_id"],
     "chat_id": ["所在群", "会话", "群组", "chat_id", "group", "群名"],
+    "chat_type": ["聊天类型", "会话类型", "chat_type", "类型"],
+    "chat_name": ["群名", "群名称", "群组名", "chat_name", "group_name"],
     "sender": ["发送人", "发送者", "sender", "from"],
     "message_type": ["消息类型", "类型", "type", "message_type"],
     "sent_at": ["发送时间", "时间", "sent_at", "send_time"],
@@ -157,7 +200,7 @@ ASSET_TYPE_TO_KEYWORDS = {
 
 
 class DataTransformer:
-    """Schema 映射缓存 + 数据清洗转换，支持三表路由。"""
+    """Schema 映射缓存 + 3步增强工作流，支持三表路由。"""
 
     async def transform(
         self,
@@ -166,7 +209,7 @@ class DataTransformer:
         db: AsyncSession,
         owner_id: str | None = None,
     ) -> TransformResult:
-        """对抽取结果执行 Schema 映射 + 数据转换。"""
+        """对抽取结果执行 Schema 映射 + 3步增强工作流。"""
         target_table = ASSET_TYPE_TO_TABLE.get(asset_type, "documents")
 
         if not extraction.records:
@@ -197,7 +240,7 @@ class DataTransformer:
                 target_table=target_table,
             )
 
-        # 2. 逐条转换
+        # 2. 逐条转换 + 3步增强
         transformed: list = []
         discarded = 0
 
@@ -209,6 +252,50 @@ class DataTransformer:
             if record is None:
                 discarded += 1
                 continue
+
+            # ── Step 1: 规则预处理 ──
+            record.content_text = content_preprocessor.process(record.content_text)
+            if not record.content_text:
+                discarded += 1
+                continue
+
+            # ── Step 2: LLM 智能提取 ──
+            enrich_result = await content_enricher.enrich(
+                record.content_text,
+                asset_type,
+                title=getattr(record, "title", None),
+            )
+            record.summary = enrich_result.summary
+            record.keywords = enrich_result.keywords
+            record.involved_people = enrich_result.involved_people
+            record.sentiment = enrich_result.sentiment
+
+            # 尝试关联用户 ID
+            if enrich_result.involved_people:
+                record.involved_people = await content_enricher.resolve_people_ids(
+                    enrich_result.involved_people, db,
+                )
+
+            # ── Step 3: 程序后处理 ──
+            record.quality_score = content_postprocessor.compute_quality_score(
+                record.content_text,
+                title=getattr(record, "title", None),
+                summary=record.summary,
+                keywords=record.keywords,
+                involved_people=record.involved_people,
+            )
+            record.content_hash = content_postprocessor.compute_content_hash(record.content_text)
+            record.chunks = content_postprocessor.split_chunks(record.content_text)
+
+            # 设置 source_platform
+            record.source_platform = "feishu"
+
+            # 设置 source_url
+            if hasattr(record, "doc_url") and record.doc_url:
+                record.source_url = record.doc_url
+            elif hasattr(record, "minutes_url") and record.minutes_url:
+                record.source_url = record.minutes_url
+
             transformed.append(record)
 
         if discarded > 0:
@@ -294,7 +381,6 @@ class DataTransformer:
             logger.info("Schema 映射缓存命中: %s/%s (md5=%s)", app_token, table_id, schema_md5)
             return cached.mapping_result
 
-        # 先用规则映射（精确匹配优先，确保关键字段正确）
         rule_mapping = self._rule_based_mapping(schema_fields, asset_type)
         logger.info("规则映射结果: %s", rule_mapping)
 
@@ -303,7 +389,6 @@ class DataTransformer:
                 from app.services.llm import llm_client
                 logger.info("Schema 映射缓存未命中，调用 LLM 补充: %s/%s", app_token, table_id)
                 llm_mapping = await llm_client.schema_mapping(schema_fields, target_table=asset_type)
-                # LLM 映射补充规则映射未覆盖的字段（规则映射优先）
                 mapping = {**llm_mapping, **rule_mapping}
                 logger.info("合并映射结果 (规则优先): %s", mapping)
             except Exception as e:
@@ -339,7 +424,6 @@ class DataTransformer:
         fields = raw_record.get("fields", {})
         record_id = raw_record.get("record_id", "")
 
-        # 按映射规则提取标准字段
         mapped_values: dict = {}
         mapped_source_fields: set = set()
 
@@ -349,8 +433,6 @@ class DataTransformer:
                 mapped_source_fields.add(source_field)
 
         feishu_record_id = str(mapped_values.get("feishu_record_id", record_id or ""))
-        # owner_id 始终使用同步操作者（default_owner_id），不从源数据提取
-        # 源数据中的 "owner" 信息保留到 extra_fields._original_owner 供参考
         owner_id = default_owner_id or ""
         raw_owner = mapped_values.get("owner_id", "")
         original_owner_info = None
@@ -370,17 +452,14 @@ class DataTransformer:
             )
             return None
 
-        # 未映射字段 → extra_fields
         extra_fields: dict = {}
         for source_field, value in fields.items():
             if source_field not in mapped_source_fields:
                 extra_fields[source_field] = value
 
-        # 源数据中的原始 owner 信息保留到 extra_fields
         if original_owner_info:
             extra_fields["_original_owner"] = original_owner_info
 
-        # 识别附件字段（type=17, list of {file_token, name, size, type}）
         attachments: list[dict] = []
         for _field_name, value in fields.items():
             if isinstance(value, list):
@@ -393,7 +472,6 @@ class DataTransformer:
                             "type": item.get("type", ""),
                         })
 
-        # 识别超链接字段（type=15, dict 含 link key，或纯 URL 字符串）
         links: list[dict] = []
         for field_name, value in fields.items():
             if isinstance(value, dict) and "link" in value:
@@ -429,6 +507,8 @@ class DataTransformer:
                 conclusions=self._extract_text(mapped_values.get("conclusions")),
                 action_items=self._extract_list(mapped_values.get("action_items")),
                 content_text=content_text,
+                transcript=self._extract_text(mapped_values.get("transcript")),
+                recording_url=self._extract_url(mapped_values.get("recording_url")),
                 minutes_url=self._extract_url(mapped_values.get("minutes_url")),
                 extra_fields=extra_fields,
                 attachments=attachments,
@@ -442,6 +522,8 @@ class DataTransformer:
                 source_app_token=app_token,
                 source_table_id=table_id,
                 chat_id=self._extract_text(mapped_values.get("chat_id")),
+                chat_type=self._extract_text(mapped_values.get("chat_type")) or None,
+                chat_name=self._extract_text(mapped_values.get("chat_name")) or None,
                 sender=self._extract_text(mapped_values.get("sender")),
                 message_type=self._extract_text(mapped_values.get("message_type")),
                 content_text=content_text,
@@ -452,7 +534,6 @@ class DataTransformer:
                 attachments=attachments,
             )
         else:
-            # document (default)
             return TransformedDocument(
                 feishu_record_id=feishu_record_id,
                 owner_id=owner_id,
@@ -461,9 +542,7 @@ class DataTransformer:
                 title=title,
                 content_text=content_text,
                 author=self._extract_text(mapped_values.get("author")),
-                category=self._extract_text(mapped_values.get("category")),
                 doc_url=self._extract_url(mapped_values.get("doc_url")),
-                tags=extra_fields if not extra_fields else {},
                 extra_fields=extra_fields,
                 attachments=attachments,
                 feishu_created_at=self._parse_time(mapped_values.get("feishu_created_at")),
@@ -484,7 +563,6 @@ class DataTransformer:
 
     @staticmethod
     def _extract_owner_name(value) -> str:
-        """从飞书 person 字段中提取用户名称。"""
         if isinstance(value, list) and value:
             first = value[0]
             if isinstance(first, dict):
@@ -495,7 +573,6 @@ class DataTransformer:
 
     @staticmethod
     def _extract_url(value) -> str:
-        """从超链接字段中提取 URL。飞书超链接格式: {text, link} 或纯 URL 字符串。"""
         if value is None:
             return ""
         if isinstance(value, dict):
@@ -556,7 +633,6 @@ class DataTransformer:
         if isinstance(value, str):
             try:
                 dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
-                # 数据库列是 TIMESTAMP WITHOUT TIME ZONE，需要 naive datetime
                 return dt.replace(tzinfo=None)
             except ValueError:
                 return None

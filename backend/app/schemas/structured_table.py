@@ -13,10 +13,17 @@ class StructuredTableOut(BaseModel):
     description: str | None = None
     summary: str | None = None
     source_type: str
+    source_platform: str | None = None
     source_url: str | None = None
     file_name: str | None = None
     row_count: int = 0
     column_count: int = 0
+    keywords: list = []
+    involved_people: list = []
+    sentiment: str | None = None
+    quality_score: float | None = None
+    duplicate_of: int | None = None
+    parse_status: str = "done"
     synced_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
@@ -31,14 +38,24 @@ class StructuredTableDetail(BaseModel):
     name: str
     description: str | None = None
     summary: str | None = None
+    content_text: str | None = None
     source_type: str
+    source_platform: str | None = None
     source_app_token: str | None = None
     source_table_id: str | None = None
     source_url: str | None = None
+    feishu_record_id: str | None = None
     file_name: str | None = None
     schema_info: list | None = None
     row_count: int = 0
     column_count: int = 0
+    keywords: list = []
+    involved_people: list = []
+    sentiment: str | None = None
+    quality_score: float | None = None
+    duplicate_of: int | None = None
+    extra_fields: dict = {}
+    parse_status: str = "done"
     synced_at: datetime | None = None
     created_at: datetime
     updated_at: datetime

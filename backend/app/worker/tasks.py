@@ -466,9 +466,8 @@ async def process_pending_documents_job() -> None:
                 doc_obj.content_text = content_text
                 doc_obj.summary = parsed.get("summary")
                 doc_obj.author = parsed.get("author")
-                doc_obj.category = parsed.get("category")
                 if isinstance(parsed.get("tags"), list):
-                    doc_obj.tags = {t: True for t in parsed["tags"]}
+                    doc_obj.keywords = parsed["tags"]
                 if embedding:
                     doc_obj.content_vector = embedding
                 # 更新飞书时间

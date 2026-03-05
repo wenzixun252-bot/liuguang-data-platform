@@ -52,7 +52,7 @@ class SearchResponse(BaseModel):
 
 @router.get("", response_model=SearchResponse, summary="全局关键词搜索")
 async def global_search(
-    q: str = Query(..., min_length=1, max_length=200, description="搜索关键词"),
+    q: str | None = Query(None, max_length=200, description="搜索关键词"),
     tag_ids: str | None = Query(None, description="标签ID，逗号分隔"),
     content_types: str | None = Query(None, description="内容类型，逗号分隔"),
     current_user: Annotated[User, Depends(get_current_user)] = None,
@@ -60,7 +60,7 @@ async def global_search(
 ) -> SearchResponse:
     """全局搜索：同时查询知识图谱实体 + 文档/会议/聊天记录，支持标签过滤。"""
     owner_id = current_user.feishu_open_id
-    keyword = q.strip()
+    keyword = (q or "").strip()
     entities: list[SearchResultItem] = []
     data_items: list[SearchResultItem] = []
 
@@ -73,31 +73,32 @@ async def global_search(
     if content_types:
         parsed_types = [t.strip() for t in content_types.split(",") if t.strip()]
 
-    # 1. 搜索知识图谱实体
-    kg_result = await db.execute(
-        select(KGEntity)
-        .where(and_(
-            KGEntity.owner_id == owner_id,
-            KGEntity.name.ilike(f"%{keyword}%"),
-        ))
-        .order_by(KGEntity.mention_count.desc())
-        .limit(10)
-    )
-    for e in kg_result.scalars().all():
-        entities.append(SearchResultItem(
-            id=e.id,
-            title=e.name,
-            content_preview=f"{e.entity_type} · 出现 {e.mention_count} 次",
-            source_type="kg_entity",
-            entity_type=e.entity_type,
-            mention_count=e.mention_count,
-        ))
+    # 1. 搜索知识图谱实体（仅关键词搜索时）
+    if keyword:
+        kg_result = await db.execute(
+            select(KGEntity)
+            .where(and_(
+                KGEntity.owner_id == owner_id,
+                KGEntity.name.ilike(f"%{keyword}%"),
+            ))
+            .order_by(KGEntity.mention_count.desc())
+            .limit(10)
+        )
+        for e in kg_result.scalars().all():
+            entities.append(SearchResultItem(
+                id=e.id,
+                title=e.name,
+                content_preview=f"{e.entity_type} · 出现 {e.mention_count} 次",
+                source_type="kg_entity",
+                entity_type=e.entity_type,
+                mention_count=e.mention_count,
+            ))
 
     # 2. 统一内容搜索（带标签过滤和权限）
     visible_ids = await get_visible_owner_ids(current_user, db)
     results = await unified_search(
         db=db,
-        keyword=keyword,
+        keyword=keyword or None,
         tag_ids=parsed_tag_ids,
         content_types=parsed_types,
         visible_ids=visible_ids,

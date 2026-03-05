@@ -1,17 +1,13 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, lazy, Suspense } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Settings, FileText, Calendar, MessageSquare, Table2, X, TrendingUp,
+  FileText, Calendar, MessageSquare, Table2, X, TrendingUp,
   CheckSquare, Clock, AlertCircle, Loader2,
 } from 'lucide-react'
-import { useWidgetConfig } from '../hooks/useWidgetConfig'
-
-import DataGraphWidget from '../components/insights/DataGraphWidget'
-import TrendWidget from '../components/insights/TrendWidget'
-import WidgetConfigModal from '../components/insights/WidgetConfigModal'
-import type { WidgetId } from '../hooks/useWidgetConfig'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
+
+const KnowledgeGraph = lazy(() => import('./KnowledgeGraph'))
 
 interface AssetStats {
   total: number
@@ -80,8 +76,6 @@ const PRIORITY_STYLES: Record<string, string> = {
 export default function DataInsights() {
   const navigate = useNavigate()
 
-  const { configs, enabledConfigs, toggleWidget, moveWidget, resetToDefault } = useWidgetConfig()
-  const [showConfig, setShowConfig] = useState(false)
   const [stats, setStats] = useState<AssetStats | null>(null)
   const [statsLoading, setStatsLoading] = useState(true)
   // 弹窗：全量数据 or 今日新增
@@ -92,7 +86,6 @@ export default function DataInsights() {
     items: DetailItem[]
   } | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
-  const [widgetRefreshKey] = useState(0)
   // 待办
   const [todos, setTodos] = useState<TodoItem[]>([])
   const [todosLoading, setTodosLoading] = useState(true)
@@ -149,30 +142,11 @@ export default function DataInsights() {
     }
   }
 
-  const renderWidget = (id: WidgetId) => {
-    const onClose = () => toggleWidget(id)
-    switch (id) {
-      case 'data-graph':
-        return <DataGraphWidget key={`dg-${widgetRefreshKey}`} onClose={onClose} />
-      case 'trend':
-        return <TrendWidget onClose={onClose} />
-      default:
-        return null
-    }
-  }
-
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-800">数据洞察中心</h1>
-        <button
-          onClick={() => setShowConfig(true)}
-          className="flex items-center gap-2 px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-        >
-          <Settings size={16} />
-          配置面板
-        </button>
       </div>
 
       <>
@@ -282,6 +256,13 @@ export default function DataInsights() {
                       完成
                     </button>
                   )}
+                  <button
+                    type="button"
+                    onClick={() => updateTodoStatus(todo.id, 'cancelled')}
+                    className="px-2 py-1 text-xs bg-gray-50 text-gray-500 rounded hover:bg-gray-100"
+                  >
+                    取消
+                  </button>
                 </div>
               </div>
             ))}
@@ -289,37 +270,14 @@ export default function DataInsights() {
         </div>
       )}
 
-      {/* Widgets grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {enabledConfigs.map((config) => (
-          <div key={config.id}>
-            {renderWidget(config.id)}
-          </div>
-        ))}
-      </div>
-
-      {enabledConfigs.length === 0 && (
-        <div className="text-center py-16 text-gray-400">
-          <p className="mb-3">没有启用的组件</p>
-          <button
-            onClick={() => setShowConfig(true)}
-            className="text-indigo-600 hover:text-indigo-800 text-sm"
-          >
-            点击配置面板添加组件
-          </button>
+      {/* 数据图谱（完整知识图谱） */}
+      <Suspense fallback={
+        <div className="flex items-center justify-center py-20 text-gray-400">
+          <Loader2 size={24} className="animate-spin mr-2" /> 加载数据图谱...
         </div>
-      )}
-
-      {/* Config modal */}
-      {showConfig && (
-        <WidgetConfigModal
-          configs={configs}
-          onToggle={toggleWidget}
-          onMove={moveWidget}
-          onReset={resetToDefault}
-          onClose={() => setShowConfig(false)}
-        />
-      )}
+      }>
+        <KnowledgeGraph embedded />
+      </Suspense>
 
       {/* 数据明细弹窗（全量 or 今日新增） */}
       {detailModal && (
