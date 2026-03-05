@@ -9,8 +9,10 @@ from sqlalchemy import select, and_, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
+from app.models.content_entity_link import ContentEntityLink
 from app.models.document import Document
 from app.models.meeting import Meeting
+from app.models.chat_message import ChatMessage
 from app.models.knowledge_graph import KGEntity, KGRelation
 from app.models.kg_analysis_result import KGAnalysisResult
 from app.models.user import User
@@ -357,6 +359,74 @@ async def get_stats(
         entity_type_counts=entity_type_counts,
         last_analysis_at=last_analysis_at,
     )
+
+
+@router.get("/content/{content_type}/{content_id}/entities", summary="内容关联的实体")
+async def get_content_entities(
+    content_type: str,
+    content_id: int,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """通过内容-实体锚定表查询某条内容关联的所有实体。"""
+    result = await db.execute(
+        select(KGEntity, ContentEntityLink.relation_type, ContentEntityLink.context_snippet)
+        .join(ContentEntityLink, ContentEntityLink.entity_id == KGEntity.id)
+        .where(
+            and_(
+                ContentEntityLink.content_type == content_type,
+                ContentEntityLink.content_id == content_id,
+                KGEntity.owner_id == current_user.feishu_open_id,
+            )
+        )
+    )
+    items = []
+    for entity, rel_type, snippet in result.all():
+        items.append({
+            "entity": KGEntityOut.model_validate(entity),
+            "relation_type": rel_type,
+            "context_snippet": snippet,
+        })
+    return items
+
+
+@router.get("/entity/{entity_id}/content", summary="实体关联的内容")
+async def get_entity_content(
+    entity_id: int,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """通过内容-实体锚定表查询某实体关联的所有内容。"""
+    entity = await db.get(KGEntity, entity_id)
+    if not entity or entity.owner_id != current_user.feishu_open_id:
+        raise HTTPException(status_code=404, detail="实体不存在")
+
+    result = await db.execute(
+        select(ContentEntityLink).where(ContentEntityLink.entity_id == entity_id)
+    )
+    links = result.scalars().all()
+
+    items = []
+    for link in links:
+        title = ""
+        if link.content_type == "document":
+            doc = await db.get(Document, link.content_id)
+            title = doc.title if doc else "无标题"
+        elif link.content_type == "meeting":
+            mtg = await db.get(Meeting, link.content_id)
+            title = mtg.title if mtg else "无标题"
+        elif link.content_type == "chat_message":
+            msg = await db.get(ChatMessage, link.content_id)
+            title = (msg.sender or "聊天记录") if msg else "聊天记录"
+
+        items.append({
+            "content_type": link.content_type,
+            "content_id": link.content_id,
+            "title": title,
+            "relation_type": link.relation_type,
+            "context_snippet": link.context_snippet,
+        })
+    return items
 
 
 @router.post("/search", response_model=list[KGEntityOut], summary="实体搜索")

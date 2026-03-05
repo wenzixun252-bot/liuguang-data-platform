@@ -16,6 +16,7 @@ from app.config import settings
 from app.models.conversation import Conversation, ConversationMessage
 from app.models.user import User
 from app.schemas.chat import ChatRequest, ChatResponse
+from app.services.graph_rag import graph_rag_enhancer
 from app.services.rag import SearchResult, hybrid_searcher
 
 logger = logging.getLogger(__name__)
@@ -127,12 +128,21 @@ async def chat_stream(
     """SSE 流式问答接口。"""
     visible_ids = await get_visible_owner_ids(current_user, db)
 
+    # Graph-RAG 增强：从问题提取实体，找到关联内容
+    graph_source_ids = await graph_rag_enhancer.enhance_search(
+        body.question, current_user.feishu_open_id, db,
+    )
+    # 合并 Graph-RAG 结果到 source_ids
+    merged_source_ids = body.source_ids
+    if graph_source_ids:
+        merged_source_ids = list(set((merged_source_ids or []) + graph_source_ids))
+
     results = await hybrid_searcher.search(
         query_text=body.question,
         visible_ids=visible_ids,
         db=db,
         source_tables=body.source_tables,
-        source_ids=body.source_ids,
+        source_ids=merged_source_ids if merged_source_ids else None,
     )
 
     context = _build_context(results, body.attachment_context)
@@ -195,12 +205,20 @@ async def chat_ask(
     """普通 JSON 问答接口。"""
     visible_ids = await get_visible_owner_ids(current_user, db)
 
+    # Graph-RAG 增强
+    graph_source_ids = await graph_rag_enhancer.enhance_search(
+        body.question, current_user.feishu_open_id, db,
+    )
+    merged_source_ids = body.source_ids
+    if graph_source_ids:
+        merged_source_ids = list(set((merged_source_ids or []) + graph_source_ids))
+
     results = await hybrid_searcher.search(
         query_text=body.question,
         visible_ids=visible_ids,
         db=db,
         source_tables=body.source_tables,
-        source_ids=body.source_ids,
+        source_ids=merged_source_ids if merged_source_ids else None,
     )
 
     context = _build_context(results, body.attachment_context)

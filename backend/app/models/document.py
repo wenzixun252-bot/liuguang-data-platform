@@ -18,11 +18,16 @@ class Document(Base):
             "source_type IN ('cloud', 'local')",
             name="ck_documents_source_type",
         ),
+        CheckConstraint(
+            "parse_status IN ('pending', 'processing', 'done', 'failed')",
+            name="ck_documents_parse_status",
+        ),
         Index("idx_doc_owner", "owner_id"),
         Index("idx_doc_source_type", "source_type"),
         Index(
             "idx_doc_feishu_rid",
             "feishu_record_id",
+            "owner_id",
             unique=True,
             postgresql_where="feishu_record_id IS NOT NULL",
         ),
@@ -51,6 +56,7 @@ class Document(Base):
     extra_fields: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
     feishu_created_at: Mapped[datetime | None] = mapped_column()
     feishu_updated_at: Mapped[datetime | None] = mapped_column()
+    parse_status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="done")
     synced_at: Mapped[datetime | None] = mapped_column()
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now(), onupdate=func.now())

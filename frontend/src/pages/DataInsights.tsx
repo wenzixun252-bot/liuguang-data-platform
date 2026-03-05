@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Settings, FileText, Calendar, MessageSquare, Table2, X, TrendingUp,
   CheckSquare, Clock, AlertCircle, Loader2,
 } from 'lucide-react'
 import { useWidgetConfig } from '../hooks/useWidgetConfig'
+
 import DataGraphWidget from '../components/insights/DataGraphWidget'
 import TrendWidget from '../components/insights/TrendWidget'
 import WidgetConfigModal from '../components/insights/WidgetConfigModal'
@@ -76,6 +78,8 @@ const PRIORITY_STYLES: Record<string, string> = {
 }
 
 export default function DataInsights() {
+  const navigate = useNavigate()
+
   const { configs, enabledConfigs, toggleWidget, moveWidget, resetToDefault } = useWidgetConfig()
   const [showConfig, setShowConfig] = useState(false)
   const [stats, setStats] = useState<AssetStats | null>(null)
@@ -171,6 +175,7 @@ export default function DataInsights() {
         </button>
       </div>
 
+      <>
       {/* 数据卡片区 */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {statsLoading ? (
@@ -221,6 +226,13 @@ export default function DataInsights() {
             <CheckSquare size={18} className="text-indigo-600" />
             <h2 className="text-base font-semibold text-gray-800">待办事项</h2>
             <span className="text-xs text-gray-400 ml-1">{todos.length} 项待处理</span>
+            <button
+              type="button"
+              onClick={() => navigate('/chat?tab=todos')}
+              className="ml-auto text-xs text-indigo-600 hover:text-indigo-800"
+            >
+              查看全部
+            </button>
           </div>
           <div className="space-y-2">
             {todos.map((todo) => (
@@ -366,6 +378,7 @@ export default function DataInsights() {
           </div>
         </div>
       )}
+      </>
     </div>
   )
 }

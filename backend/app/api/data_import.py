@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_current_user, get_db, get_user_feishu_token, refresh_user_feishu_token
 from app.models.asset import ETLDataSource, ETLSyncState, CloudFolderSource
 from app.models.document import Document
 from app.models.user import User
@@ -32,6 +32,7 @@ class BitableTableInfo(BaseModel):
 class BitableAppInfo(BaseModel):
     app_token: str
     app_name: str
+    type: str = "bitable"  # "bitable" | "spreadsheet"
     tables: list[BitableTableInfo]
 
 
@@ -189,95 +190,157 @@ async def delete_my_source(
     return {"message": "已删除"}
 
 
-async def _get_user_token(user: User, db: AsyncSession) -> str | None:
-    """获取用户的飞书 access_token，如已过期则尝试用 refresh_token 刷新。"""
-    if not user.feishu_access_token:
-        return None
-
-    # 先尝试用现有 token，如果失败再刷新
-    return user.feishu_access_token
+# 兼容别名，统一使用 deps 中的共享函数
+_get_user_token = get_user_feishu_token
+_refresh_and_retry = refresh_user_feishu_token
 
 
-async def _refresh_and_retry(user: User, db: AsyncSession) -> str | None:
-    """用 refresh_token 刷新 access_token 并更新数据库。"""
-    if not user.feishu_refresh_token:
-        return None
-    try:
-        token_data = await feishu_client.refresh_user_access_token(user.feishu_refresh_token)
-        user.feishu_access_token = token_data["access_token"]
-        user.feishu_refresh_token = token_data.get("refresh_token", user.feishu_refresh_token)
-        await db.commit()
-        return user.feishu_access_token
-    except FeishuAPIError as e:
-        logger.warning("刷新 user_access_token 失败: %s", e)
-        return None
-
-
-@router.get("/feishu-discover", response_model=list[BitableAppInfo], summary="发现可用的飞书多维表格")
+@router.get("/feishu-discover", response_model=list[BitableAppInfo], summary="发现可用的飞书多维表格和表格")
 async def discover_feishu_bitables(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    q: str = Query(default="", description="搜索关键词，空则返回全部可访问表格"),
 ) -> list[BitableAppInfo]:
-    """列出当前用户有权限访问的飞书多维表格（不加载子表，提升速度）。
+    """发现用户有权限访问的所有多维表格 + 飞书表格（云盘 + 知识空间 + 他人分享）。
 
-    使用用户的 user_access_token 调用飞书 API，能看到用户自己有权限的文件。
-    若 token 过期会自动尝试刷新；若刷新也失败则提示重新登录。
+    - 无搜索词：list API（自己云空间）+ 知识空间 + 搜索 API（发现共享的表格）
+    - 有搜索词：搜索 API 只搜 bitable/sheet，按文件名匹配度排序
     """
     user_token = await _get_user_token(current_user, db)
     if not user_token:
         raise HTTPException(401, "飞书授权已失效，请重新登录")
 
-    # 第一次尝试
+    results: list[BitableAppInfo] = []
+    seen_tokens: set[str] = set()
+
+    # 允许的类型：bitable、sheet 以及 wiki（wiki 内嵌的多维表格/飞书表格搜索时返回 wiki 类型）
+    TABLE_TYPES = {"bitable", "sheet", "wiki"}
+    doc_type_map = {"bitable": "bitable", "sheet": "spreadsheet", "wiki": "wiki"}
+
+    def _add(token: str, name: str, type_: str) -> None:
+        if token and token not in seen_tokens:
+            seen_tokens.add(token)
+            results.append(BitableAppInfo(
+                app_token=token, app_name=name or "未命名", type=type_, tables=[],
+            ))
+
+    def _add_from_search(files: list[dict]) -> None:
+        """从搜索结果中只添加表格类型。"""
+        for f in files:
+            t = f.get("token", "")
+            raw_type = f.get("type", "")
+            if raw_type not in TABLE_TYPES:
+                continue
+            _add(t, f.get("name", ""), doc_type_map.get(raw_type, raw_type))
+
+    keyword = q.strip()
+
+    async def _collect_all(token: str, name_filter: str = "") -> None:
+        """收集所有可访问的表格。name_filter 非空时只保留文件名包含该关键词的。"""
+        kw = name_filter.lower()
+
+        def _should_add(name: str) -> bool:
+            return not kw or kw in name.lower()
+
+        # 1. 自己云空间的多维表格
+        try:
+            bitables = await feishu_client.list_drive_bitables(user_access_token=token)
+            for f in bitables:
+                name = f.get("name", "")
+                if _should_add(name):
+                    _add(f.get("token", ""), name, "bitable")
+        except Exception as e:
+            logger.warning("列出云空间多维表格失败: %s", e)
+
+        # 2. 自己云空间的飞书表格
+        try:
+            sheets = await feishu_client.list_drive_spreadsheets(user_access_token=token)
+            for f in sheets:
+                name = f.get("name", "")
+                if _should_add(name):
+                    _add(f.get("token", ""), name, "spreadsheet")
+        except Exception as e:
+            logger.warning("列出云空间飞书表格失败: %s", e)
+
+        # 3. 知识空间中的多维表格和飞书表格
+        try:
+            wiki_nodes = await feishu_client.list_wiki_nodes_by_type(
+                {"bitable", "sheet"}, user_access_token=token,
+            )
+            for node in wiki_nodes:
+                obj_type = node.get("obj_type", "")
+                t = node.get("obj_token", "")
+                space_name = node.get("space_name", "")
+                title = node.get("title", "未命名")
+                name = f"[{space_name}] {title}" if space_name else title
+                if _should_add(name):
+                    _add(t, name, doc_type_map.get(obj_type, "bitable"))
+        except Exception as e:
+            logger.warning("列出知识空间表格失败: %s", e)
+
+        # 4. 搜索 API 补充（发现他人分享的表格）
+        try:
+            search_kw = keyword if keyword else " "
+            files = await feishu_client.search_accessible_docs(
+                keyword=search_kw, user_access_token=token,
+                doc_types=["bitable", "sheet", "wiki"],
+                max_count=200,
+            )
+            for f in files:
+                raw_type = f.get("type", "")
+                if raw_type not in TABLE_TYPES:
+                    continue
+                name = f.get("name", "")
+                if _should_add(name):
+                    _add(f.get("token", ""), name, doc_type_map.get(raw_type, raw_type))
+        except Exception as e:
+            logger.warning("搜索补充表格失败: %s", e)
+
+    async def _action(token: str) -> None:
+        await _collect_all(token, name_filter=keyword)
+
     try:
-        bitable_files = await feishu_client.list_drive_bitables(user_access_token=user_token)
+        await _action(user_token)
     except FeishuAPIError:
-        # token 可能过期，尝试刷新
         user_token = await _refresh_and_retry(current_user, db)
         if not user_token:
             raise HTTPException(401, "飞书授权已过期，请重新登录")
         try:
-            bitable_files = await feishu_client.list_drive_bitables(user_access_token=user_token)
+            await _action(user_token)
         except Exception as e:
             logger.error("刷新后仍失败: %s", e)
-            raise HTTPException(500, f"获取飞书多维表格列表失败: {e}")
+            raise HTTPException(500, f"获取飞书表格列表失败: {e}")
     except Exception as e:
-        logger.error("发现飞书多维表格失败: %s", e)
-        raise HTTPException(500, f"获取飞书多维表格列表失败: {e}")
-
-    results: list[BitableAppInfo] = []
-    seen_tokens: set[str] = set()
-    for f in bitable_files:
-        t = f.get("token", "")
-        if t and t not in seen_tokens:
-            seen_tokens.add(t)
-            results.append(BitableAppInfo(
-                app_token=t,
-                app_name=f.get("name", "未命名"),
-                tables=[],
-            ))
-
-    # 同时搜索知识空间（Wiki）中的多维表格
-    try:
-        wiki_nodes = await feishu_client.list_wiki_nodes_by_type(
-            {"bitable"},
-            user_access_token=user_token,
-        )
-        for node in wiki_nodes:
-            t = node.get("obj_token", "")
-            if t and t not in seen_tokens:
-                seen_tokens.add(t)
-                space_name = node.get("space_name", "")
-                title = node.get("title", "未命名")
-                name = f"[{space_name}] {title}" if space_name else title
-                results.append(BitableAppInfo(
-                    app_token=t,
-                    app_name=name,
-                    tables=[],
-                ))
-    except Exception as e:
-        logger.warning("获取知识空间多维表格失败: %s", e)
+        logger.error("发现飞书表格失败: %s", e)
+        raise HTTPException(500, f"获取飞书表格列表失败: {e}")
 
     return results
+
+
+@router.get("/feishu-discover/wiki-resolve/{node_token}", summary="解析 wiki 节点的实际类型")
+async def resolve_wiki_node(
+    node_token: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """解析知识空间 wiki 节点的实际类型，返回 obj_token 和 obj_type。"""
+    user_token = await _get_user_token(current_user, db)
+    if not user_token:
+        raise HTTPException(401, "飞书授权已失效，请重新登录")
+    try:
+        node = await feishu_client.get_wiki_node_info(node_token, user_access_token=user_token)
+    except FeishuAPIError:
+        user_token = await _refresh_and_retry(current_user, db)
+        if not user_token:
+            raise HTTPException(401, "飞书授权已过期，请重新登录")
+        node = await feishu_client.get_wiki_node_info(node_token, user_access_token=user_token)
+
+    obj_type = node.get("obj_type", "unknown")
+    obj_token = node.get("obj_token", node_token)
+    # 映射 sheet → spreadsheet 保持前端一致
+    if obj_type == "sheet":
+        obj_type = "spreadsheet"
+    return {"obj_type": obj_type, "obj_token": obj_token, "title": node.get("title", "")}
 
 
 @router.get(
@@ -529,20 +592,32 @@ class CloudFolderOut(BaseModel):
 async def discover_feishu_docs(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    q: str = Query(default="", description="搜索关键词，空则返回近期所有可访问文档"),
 ) -> list[CloudDocInfo]:
-    """列出当前用户有权限访问的飞书云文档和文件。"""
+    """搜索当前用户有权限访问的飞书云文档（云盘 + 知识空间 + 他人分享）。"""
     user_token = await _get_user_token(current_user, db)
     if not user_token:
         raise HTTPException(401, "飞书授权已失效，请重新登录")
 
+    async def _fetch_docs(token: str) -> list[dict]:
+        if q.strip():
+            return await feishu_client.search_accessible_docs(
+                keyword=q,
+                user_access_token=token,
+                doc_types=["doc", "docx", "file", "wiki"],
+                max_count=100,
+            )
+        else:
+            return await feishu_client.list_drive_documents(user_access_token=token)
+
     try:
-        files = await feishu_client.list_drive_documents(user_access_token=user_token)
+        files = await _fetch_docs(user_token)
     except FeishuAPIError:
         user_token = await _refresh_and_retry(current_user, db)
         if not user_token:
             raise HTTPException(401, "飞书授权已过期，请重新登录")
         try:
-            files = await feishu_client.list_drive_documents(user_access_token=user_token)
+            files = await _fetch_docs(user_token)
         except Exception as e:
             logger.error("刷新后仍失败: %s", e)
             raise HTTPException(500, f"获取飞书云文档列表失败: {e}")

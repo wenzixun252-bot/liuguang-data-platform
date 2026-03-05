@@ -353,6 +353,135 @@ class FeishuClient:
 
         return all_files
 
+    async def search_accessible_docs(
+        self,
+        keyword: str,
+        user_access_token: str,
+        doc_types: list[str] | None = None,
+        max_count: int = 200,
+    ) -> list[dict]:
+        """搜索用户有权限访问的全部文档（含他人分享），按关键词匹配文档名/内容。
+
+        使用 POST /open-apis/suite/docs-api/search/object，
+        该 API 会搜索用户所有可访问空间（自己的 + 他人分享的 + 知识空间）。
+
+        返回: [{token, name, type, owner_id, url, ...}]  统一与 list_drive_documents 格式一致
+        """
+        if doc_types is None:
+            doc_types = ["doc", "docx"]
+
+        all_docs: list[dict] = []
+        offset = 0
+        page_size = min(50, max_count)
+
+        async with self._client() as client:
+            while len(all_docs) < max_count:
+                body: dict = {
+                    "search_key": keyword,
+                    "count": page_size,
+                    "offset": offset,
+                    "docs_types": doc_types,
+                }
+                resp = await client.post(
+                    f"{FEISHU_BASE_URL}/suite/docs-api/search/object",
+                    headers={"Authorization": f"Bearer {user_access_token}"},
+                    json=body,
+                )
+                if resp.status_code == 401:
+                    raise FeishuAPIError("用户 Token 已过期 (401 Unauthorized)")
+                resp.raise_for_status()
+                data = resp.json()
+
+                if data.get("code") != 0:
+                    raise FeishuAPIError(
+                        f"搜索文档失败: {data.get('msg', '未知错误')} (code={data.get('code')})"
+                    )
+
+                entities = data.get("data", {}).get("docs_entities") or []
+                if entities:
+                    logger.info("搜索原始返回示例 keys=%s, sample=%s", list(entities[0].keys()), entities[0])
+                for entity in entities:
+                    # docs_token 是该 API 的实际 token 字段
+                    tok = entity.get("docs_token") or entity.get("token") or ""
+                    # 飞书搜索 API 返回的类型字段是 docs_type（带 s）
+                    raw_type = entity.get("docs_type") or entity.get("doc_type") or "docx"
+                    all_docs.append({
+                        "token": tok,
+                        "name": entity.get("title", ""),
+                        "type": raw_type,
+                        "owner_id": entity.get("owner_id", ""),
+                        "owner_name": entity.get("owner_name", ""),
+                        "url": entity.get("url", ""),
+                        "create_time": entity.get("create_time"),
+                        "_source": "search",
+                    })
+
+                has_more = data.get("data", {}).get("has_more", False)
+                if not has_more or not entities:
+                    break
+
+                offset += len(entities)
+                await asyncio.sleep(0.3)
+
+        logger.info("飞书搜索「%s」返回 %d 个文档", keyword, len(all_docs))
+        return all_docs
+
+    async def batch_get_doc_meta(
+        self,
+        docs: list[dict],
+        user_access_token: str,
+    ) -> dict[str, dict]:
+        """批量获取文档元数据（create_time, url, owner_name 等）。
+
+        使用 POST /open-apis/drive/v1/metas/batch_query
+        docs: [{token, type}] — 每个元素需要 token 和 type 字段
+        返回: {token: {url, create_time, owner_name}} 的字典
+        """
+        result: dict[str, dict] = {}
+        # API 每次最多 200 个
+        batch_size = 200
+        async with self._client() as client:
+            for i in range(0, len(docs), batch_size):
+                batch = docs[i:i + batch_size]
+                request_docs = []
+                for d in batch:
+                    raw_type = d.get("type", "docx")
+                    request_docs.append({
+                        "docs_token": d["token"],
+                        "docs_type": raw_type,
+                    })
+                resp = await client.post(
+                    f"{FEISHU_BASE_URL}/drive/v1/metas/batch_query",
+                    headers={"Authorization": f"Bearer {user_access_token}"},
+                    json={"request_docs": request_docs},
+                )
+                if resp.status_code != 200:
+                    logger.warning("batch_get_doc_meta HTTP %s", resp.status_code)
+                    continue
+                data = resp.json()
+                if data.get("code") != 0:
+                    logger.warning("batch_get_doc_meta error: %s", data.get("msg"))
+                    continue
+
+                metas = data.get("data", {}).get("metas") or []
+                failed = data.get("data", {}).get("failed_list") or []
+                if failed:
+                    logger.debug("batch_get_doc_meta %d failed", len(failed))
+
+                for m in metas:
+                    tok = m.get("docs_token", "")
+                    result[tok] = {
+                        "url": m.get("url", ""),
+                        "create_time": m.get("create_time"),
+                        "latest_modify_time": m.get("latest_modify_time"),
+                        "owner_name": m.get("owner_display_name", ""),
+                    }
+                if i + batch_size < len(docs):
+                    await asyncio.sleep(0.3)
+
+        logger.info("batch_get_doc_meta: 查询 %d, 成功 %d", len(docs), len(result))
+        return result
+
     async def list_folder_files(
         self,
         folder_token: str,

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, get_visible_owner_ids
 from app.models.chat_message import ChatMessage
+from app.models.tag import ContentTag
 from app.models.user import User
 from app.schemas.chat_message import ChatMessageListResponse, ChatMessageOut
 
@@ -30,6 +31,7 @@ async def list_chat_messages(
     search: str | None = Query(None),
     chat_id: str | None = Query(None),
     sender: str | None = Query(None),
+    tag_ids: list[int] = Query(default=[]),
 ) -> ChatMessageListResponse:
     visible_ids = await get_visible_owner_ids(current_user, db)
 
@@ -53,6 +55,14 @@ async def list_chat_messages(
         like = f"%{sender}%"
         base = base.where(ChatMessage.sender.ilike(like))
         count_stmt = count_stmt.where(ChatMessage.sender.ilike(like))
+
+    if tag_ids:
+        subq = select(ContentTag.content_id).where(
+            ContentTag.content_type == "chat_message",
+            ContentTag.tag_id.in_(tag_ids),
+        )
+        base = base.where(ChatMessage.id.in_(subq))
+        count_stmt = count_stmt.where(ChatMessage.id.in_(subq))
 
     total = (await db.execute(count_stmt)).scalar() or 0
     items_stmt = base.order_by(ChatMessage.sent_at.desc().nullslast()).offset((page - 1) * page_size).limit(page_size)

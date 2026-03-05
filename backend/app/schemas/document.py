@@ -26,6 +26,8 @@ class DocumentOut(BaseModel):
     uploader_name: str | None = None
     extra_fields: dict = {}
     feishu_record_id: str | None = None
+    parse_status: str = "done"
+    import_count: int = 1  # 同一飞书文档被多少人归档
     synced_at: datetime | None = None
     feishu_created_at: datetime | None = None
     feishu_updated_at: datetime | None = None

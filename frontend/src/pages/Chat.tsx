@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Sparkles } from 'lucide-react'
+import { useState, useEffect, useCallback, lazy, Suspense } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { Bot } from 'lucide-react'
 import { getToken } from '../lib/auth'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
@@ -10,6 +11,11 @@ import type { Message } from '../components/ChatMessages'
 import ChatInput from '../components/ChatInput'
 import type { DataSelection } from '../components/DataPicker'
 import ReportPanel from '../components/ReportPanel'
+import KGSidebar from '../components/KGSidebar'
+
+const KnowledgeGraph = lazy(() => import('./KnowledgeGraph'))
+const CalendarAssistant = lazy(() => import('./CalendarAssistant'))
+const Todos = lazy(() => import('./Todos'))
 
 // ── Prompt 模板 ─────────────────────────────────────────
 const PROMPT_TEMPLATES = [
@@ -19,9 +25,11 @@ const PROMPT_TEMPLATES = [
   { label: '会议回顾', question: '回顾最近的会议，列出关键决策和待办事项' },
 ]
 
-type SceneTab = 'chat' | 'report'
+type SceneTab = 'chat' | 'report' | 'graph' | 'calendar' | 'todos'
 
 export default function Chat() {
+  const [searchParams, setSearchParams] = useSearchParams()
+
   // 会话相关
   const [conversations, setConversations] = useState<ConversationItem[]>([])
   const [activeConvId, setActiveConvId] = useState<number | null>(null)
@@ -31,8 +39,24 @@ export default function Chat() {
   const [messages, setMessages] = useState<Message[]>([])
   const [streaming, setStreaming] = useState(false)
 
-  // 场景 Tab
-  const [scene, setScene] = useState<SceneTab>('chat')
+  // 场景 Tab（从 URL 参数初始化）
+  const urlTab = searchParams.get('tab')
+  const [scene, setScene] = useState<SceneTab>(
+    urlTab === 'graph' || urlTab === 'report' || urlTab === 'calendar' || urlTab === 'todos' ? urlTab : 'chat'
+  )
+
+  const handleSceneChange = (tab: SceneTab) => {
+    setScene(tab)
+    if (tab === 'chat') {
+      setSearchParams({})
+    } else {
+      setSearchParams({ tab })
+    }
+  }
+
+  // KG Sidebar
+  const [sourceRefs, setSourceRefs] = useState<string[]>([])
+  const [showKGSidebar, setShowKGSidebar] = useState(true)
 
   // 关联数据选择
   const [dataSelection, setDataSelection] = useState<DataSelection>({
@@ -187,6 +211,7 @@ export default function Chat() {
               })
             } else if (parsed.type === 'sources') {
               sources = parsed.sources
+              setSourceRefs(sources)
               setMessages((prev) => {
                 const updated = [...prev]
                 updated[updated.length - 1] = {
@@ -237,50 +262,69 @@ export default function Chat() {
 
   return (
     <div className="flex h-[calc(100vh-7rem)]">
-      {/* 左侧: 会话列表 */}
-      <ChatSidebar
-        conversations={conversations}
-        activeId={activeConvId}
-        loading={convLoading}
-        onSelect={loadConversation}
-        onNew={handleNewConversation}
-        onDeleted={handleConvDeleted}
-      />
+      {/* 左侧: 会话列表（日程管家 tab 不显示） */}
+      {scene !== 'calendar' && scene !== 'todos' && (
+        <ChatSidebar
+          conversations={conversations}
+          activeId={activeConvId}
+          loading={convLoading}
+          onSelect={loadConversation}
+          onNew={handleNewConversation}
+          onDeleted={handleConvDeleted}
+        />
+      )}
 
       {/* 主区域 */}
       <div className="flex-1 flex flex-col min-w-0 px-4">
         {/* 顶部: Tab 切换 */}
         <div className="flex items-center gap-4 mb-3">
           <div className="flex items-center gap-2">
-            <Sparkles className="text-indigo-500" size={20} />
-            <h1 className="text-xl font-bold text-gray-800">流光助手</h1>
+            <Bot className="text-indigo-500" size={20} />
+            <h1 className="text-xl font-bold text-gray-800">智能助手</h1>
           </div>
           <div className="flex bg-gray-100 rounded-lg p-0.5">
-            <button
-              className={`px-3 py-1 text-sm rounded-md transition-colors ${
-                scene === 'chat'
-                  ? 'bg-white text-indigo-600 shadow-sm'
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-              onClick={() => setScene('chat')}
-            >
-              智能问答
-            </button>
-            <button
-              className={`px-3 py-1 text-sm rounded-md transition-colors ${
-                scene === 'report'
-                  ? 'bg-white text-indigo-600 shadow-sm'
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-              onClick={() => setScene('report')}
-            >
-              报告生成
-            </button>
+            {([
+              { key: 'chat', label: '智能问答' },
+              { key: 'calendar', label: '日程管家' },
+              { key: 'todos', label: '智能待办' },
+              { key: 'report', label: '报告生成' },
+              { key: 'graph', label: '数据图谱' },
+            ] as const).map(tab => (
+              <button
+                key={tab.key}
+                className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                  scene === tab.key
+                    ? 'bg-white text-indigo-600 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+                onClick={() => handleSceneChange(tab.key)}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
         </div>
 
         {/* 主内容 */}
-        {scene === 'chat' ? (
+        {scene === 'graph' ? (
+          <div className="flex-1 min-h-0">
+            <Suspense fallback={<div className="flex items-center justify-center h-full text-gray-400">加载中...</div>}>
+              <KnowledgeGraph />
+            </Suspense>
+          </div>
+        ) : scene === 'calendar' ? (
+          <div className="flex-1 min-h-0 -mx-4">
+            <Suspense fallback={<div className="flex items-center justify-center h-full text-gray-400">加载中...</div>}>
+              <CalendarAssistant />
+            </Suspense>
+          </div>
+        ) : scene === 'todos' ? (
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            <Suspense fallback={<div className="flex items-center justify-center h-full text-gray-400">加载中...</div>}>
+              <Todos />
+            </Suspense>
+          </div>
+        ) : scene === 'chat' ? (
           <div className="flex-1 flex flex-col min-h-0">
             <ChatMessages
               messages={messages}
@@ -302,6 +346,14 @@ export default function Chat() {
           </div>
         )}
       </div>
+
+      {/* 右侧: 知识图谱关联 */}
+      {showKGSidebar && scene === 'chat' && sourceRefs.length > 0 && (
+        <KGSidebar
+          sourceRefs={sourceRefs}
+          onClose={() => setShowKGSidebar(false)}
+        />
+      )}
     </div>
   )
 }

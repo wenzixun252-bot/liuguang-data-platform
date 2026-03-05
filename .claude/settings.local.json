@@ -65,8 +65,22 @@
       "WebFetch(domain:github.com)",
       "Bash(wc:*)",
       "Bash(grep:*)",
-      "Bash(ipconfig:*)"
+      "Bash(ipconfig:*)",
+      "mcp__ide__getDiagnostics",
+      "Bash(bash d:/CC/liuguang-data-platform/.claude/log-change.sh)"
     ]
   },
-  "hooks": {}
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash d:/CC/liuguang-data-platform/.claude/log-change.sh"
+          }
+        ]
+      }
+    ]
+  }
 }

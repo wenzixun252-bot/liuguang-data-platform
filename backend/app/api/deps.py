@@ -70,6 +70,30 @@ def require_role(allowed_roles: list[str]):
     return _check_role
 
 
+async def get_user_feishu_token(user: User, db: AsyncSession) -> str:
+    """获取用户的飞书 user_access_token，过期则自动刷新。获取失败抛 401。"""
+    if not user.feishu_access_token:
+        raise HTTPException(status_code=401, detail="飞书授权已失效，请重新登录")
+    return user.feishu_access_token
+
+
+async def refresh_user_feishu_token(user: User, db: AsyncSession) -> str:
+    """用 refresh_token 刷新飞书 user_access_token，刷新失败抛 401。"""
+    from app.services.feishu import FeishuAPIError, feishu_client
+
+    if not user.feishu_refresh_token:
+        raise HTTPException(status_code=401, detail="飞书授权已过期，请重新登录")
+    try:
+        token_data = await feishu_client.refresh_user_access_token(user.feishu_refresh_token)
+        user.feishu_access_token = token_data["access_token"]
+        user.feishu_refresh_token = token_data.get("refresh_token", user.feishu_refresh_token)
+        await db.commit()
+        return user.feishu_access_token
+    except FeishuAPIError as e:
+        logger.warning("刷新 user_access_token 失败: %s", e)
+        raise HTTPException(status_code=401, detail="飞书授权已过期，请重新登录")
+
+
 def is_super_admin(user: User) -> bool:
     """判断是否为系统超管（不可降级）。"""
     return user.feishu_open_id == settings.super_admin_open_id

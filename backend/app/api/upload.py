@@ -6,13 +6,14 @@ import mimetypes
 import os
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.models.document import Document
+from app.models.tag import ContentTag
 from app.models.user import User
 from app.schemas.document import DocumentOut
 from app.services.file_upload import FileUploadError, file_upload_service
@@ -25,10 +26,13 @@ router = APIRouter(prefix="/api/upload", tags=["文件上传"])
 @router.post("/file", response_model=DocumentOut, summary="上传文件并解析入库")
 async def upload_file(
     file: UploadFile = File(...),
+    tag_ids: str | None = Form(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DocumentOut:
-    """上传文件，自动提取文本、LLM 解析结构化字段、生成 Embedding，写入 documents 表。"""
+    """上传文件，自动提取文本、LLM 解析结构化字段、生成 Embedding，写入 documents 表。
+    tag_ids: 逗号分隔的标签 ID（可选），如 "1,3,7"。
+    """
     try:
         doc = await file_upload_service.process_upload(
             file=file,
@@ -36,6 +40,20 @@ async def upload_file(
             db=db,
             uploader_name=current_user.name,
         )
+
+        # 写入用户指定的标签
+        if tag_ids:
+            for tid_str in tag_ids.split(","):
+                tid_str = tid_str.strip()
+                if tid_str.isdigit():
+                    db.add(ContentTag(
+                        tag_id=int(tid_str),
+                        content_type="document",
+                        content_id=doc.id,
+                        tagged_by="user_manual",
+                    ))
+            await db.commit()
+
         return DocumentOut.model_validate(doc)
     except FileUploadError as e:
         raise HTTPException(status_code=400, detail=str(e))

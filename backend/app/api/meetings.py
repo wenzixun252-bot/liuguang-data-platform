@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, get_visible_owner_ids
 from app.models.meeting import Meeting
+from app.models.tag import ContentTag
 from app.models.user import User
 from app.schemas.meeting import MeetingListResponse, MeetingOut
 
@@ -32,6 +33,7 @@ async def list_meetings(
     start_date: datetime | None = Query(None),
     end_date: datetime | None = Query(None),
     organizer: str | None = Query(None),
+    tag_ids: list[int] = Query(default=[]),
 ) -> MeetingListResponse:
     visible_ids = await get_visible_owner_ids(current_user, db)
 
@@ -59,6 +61,14 @@ async def list_meetings(
         like = f"%{organizer}%"
         base = base.where(Meeting.organizer.ilike(like))
         count_stmt = count_stmt.where(Meeting.organizer.ilike(like))
+
+    if tag_ids:
+        subq = select(ContentTag.content_id).where(
+            ContentTag.content_type == "meeting",
+            ContentTag.tag_id.in_(tag_ids),
+        )
+        base = base.where(Meeting.id.in_(subq))
+        count_stmt = count_stmt.where(Meeting.id.in_(subq))
 
     total = (await db.execute(count_stmt)).scalar() or 0
     items_stmt = base.order_by(Meeting.meeting_time.desc().nullslast()).offset((page - 1) * page_size).limit(page_size)

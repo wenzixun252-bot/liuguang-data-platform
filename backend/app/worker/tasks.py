@@ -343,6 +343,206 @@ async def cloud_folder_sync_job() -> None:
     logger.info("云文件夹同步任务完成")
 
 
+async def keyword_sync_job() -> None:
+    """定时任务：执行所有用户的关键词同步规则，搜索云盘+知识空间中匹配的文档并导入。"""
+    from app.models.keyword_sync_rule import KeywordSyncRule
+    from app.services.keyword_sync import sync_all_keyword_rules
+
+    logger.info("关键词同步任务开始")
+
+    # 获取所有有启用规则的用户
+    async with async_session() as db:
+        result = await db.execute(
+            select(KeywordSyncRule.owner_id)
+            .where(KeywordSyncRule.is_enabled == True)  # noqa: E712
+            .distinct()
+        )
+        owner_ids = [row[0] for row in result.all()]
+
+    if not owner_ids:
+        logger.info("没有启用的关键词规则，跳过")
+        return
+
+    total_imported = 0
+    for owner_id in owner_ids:
+        try:
+            async with async_session() as db:
+                user_token = await _resolve_user_token(owner_id, db)
+                if not user_token:
+                    user_token = await _try_refresh_token(owner_id, db)
+                if not user_token:
+                    logger.warning("用户 %s 无可用 token，跳过关键词同步", owner_id)
+                    continue
+
+                user_result = await db.execute(
+                    select(User).where(User.feishu_open_id == owner_id)
+                )
+                user = user_result.scalar_one_or_none()
+                uploader_name = user.name if user else None
+
+                results = await sync_all_keyword_rules(
+                    owner_id, db, user_token, uploader_name,
+                )
+                for r in results:
+                    total_imported += r.imported
+
+        except Exception as e:
+            logger.warning("用户 %s 关键词同步失败: %s", owner_id, e)
+
+    logger.info("关键词同步任务完成，共导入 %d 篇文档", total_imported)
+
+
+async def process_pending_documents_job() -> None:
+    """定时任务：处理 parse_status='pending' 的文档，获取内容并进行 LLM 解析 + 向量生成。
+
+    每次最多处理 20 篇，避免一次跑太久。
+    """
+    from app.models.document import Document
+    from app.services.cloud_doc_import import cloud_doc_import_service
+
+    logger.info("开始处理待解析文档")
+
+    async with async_session() as db:
+        result = await db.execute(
+            select(Document)
+            .where(Document.parse_status == "pending")
+            .order_by(Document.created_at.asc())
+            .limit(20)
+        )
+        docs = result.scalars().all()
+
+    if not docs:
+        logger.info("没有待解析的文档，跳过")
+        return
+
+    logger.info("发现 %d 篇待解析文档", len(docs))
+
+    for doc in docs:
+        try:
+            async with async_session() as db:
+                doc_obj = await db.get(Document, doc.id)
+                if not doc_obj or doc_obj.parse_status != "pending":
+                    continue
+
+                # 标记为 processing
+                doc_obj.parse_status = "processing"
+                await db.commit()
+
+                # 获取文档所有者的 token
+                user_token = await _resolve_user_token(doc_obj.owner_id, db)
+                if not user_token:
+                    user_token = await _try_refresh_token(doc_obj.owner_id, db)
+
+                if not user_token or not doc_obj.feishu_record_id:
+                    doc_obj.parse_status = "failed"
+                    await db.commit()
+                    logger.warning("文档 %d 无可用 token 或 record_id，标记失败", doc_obj.id)
+                    continue
+
+                # 调用 Block API 获取内容
+                try:
+                    doc_content = await cloud_doc_import_service._fetch_doc_content(
+                        doc_obj.feishu_record_id, user_token,
+                    )
+                except Exception as e:
+                    logger.warning("获取文档内容失败 [%s]: %s", doc_obj.feishu_record_id, e)
+                    doc_obj.parse_status = "failed"
+                    await db.commit()
+                    continue
+
+                title = doc_content.get("title") or doc_obj.title or "未命名"
+                content_text = doc_content.get("content_text", "")
+                if not content_text.strip():
+                    content_text = f"[空文档] {title}"
+
+                # LLM 解析
+                parsed = await cloud_doc_import_service._llm_parse(content_text, "docx")
+
+                # 生成向量
+                embedding = await cloud_doc_import_service._generate_embedding(title, content_text)
+
+                # 更新文档
+                doc_obj.title = parsed.get("title") or title
+                doc_obj.content_text = content_text
+                doc_obj.summary = parsed.get("summary")
+                doc_obj.author = parsed.get("author")
+                doc_obj.category = parsed.get("category")
+                if isinstance(parsed.get("tags"), list):
+                    doc_obj.tags = {t: True for t in parsed["tags"]}
+                if embedding:
+                    doc_obj.content_vector = embedding
+                # 更新飞书时间
+                created_time = doc_content.get("created_time")
+                modified_time = doc_content.get("modified_time")
+                if created_time:
+                    doc_obj.feishu_created_at = datetime.fromtimestamp(int(created_time))
+                if modified_time:
+                    doc_obj.feishu_updated_at = datetime.fromtimestamp(int(modified_time))
+                doc_obj.parse_status = "done"
+                doc_obj.synced_at = datetime.utcnow()
+                await db.commit()
+
+                logger.info("文档 %d 解析完成: %s", doc_obj.id, doc_obj.title)
+
+        except Exception as e:
+            logger.error("处理文档 %d 失败: %s", doc.id, e, exc_info=True)
+            try:
+                async with async_session() as db:
+                    doc_obj = await db.get(Document, doc.id)
+                    if doc_obj:
+                        doc_obj.parse_status = "failed"
+                        await db.commit()
+            except Exception:
+                pass
+
+    logger.info("待解析文档处理完成")
+
+
+async def keyword_sync_single_user(owner_id: str) -> dict:
+    """手动触发单个用户的关键词同步。返回统计信息。"""
+    from app.services.keyword_sync import sync_all_keyword_rules
+
+    async with async_session() as db:
+        user_token = await _resolve_user_token(owner_id, db)
+        if not user_token:
+            user_token = await _try_refresh_token(owner_id, db)
+        if not user_token:
+            return {"error": "无可用的飞书 Token，请重新登录"}
+
+        user_result = await db.execute(
+            select(User).where(User.feishu_open_id == owner_id)
+        )
+        user = user_result.scalar_one_or_none()
+        uploader_name = user.name if user else None
+
+        results = await sync_all_keyword_rules(
+            owner_id, db, user_token, uploader_name,
+        )
+
+    total_matched = sum(r.matched for r in results)
+    total_imported = sum(r.imported for r in results)
+    total_skipped = sum(r.skipped for r in results)
+    total_failed = sum(r.failed for r in results)
+
+    return {
+        "rules_count": len(results),
+        "total_matched": total_matched,
+        "total_imported": total_imported,
+        "total_skipped": total_skipped,
+        "total_failed": total_failed,
+        "details": [
+            {
+                "keyword": r.keyword,
+                "matched": r.matched,
+                "imported": r.imported,
+                "skipped": r.skipped,
+                "failed": r.failed,
+            }
+            for r in results
+        ],
+    }
+
+
 async def todo_extract_job() -> None:
     """定时任务：为所有活跃用户自动提取待办（去重）。"""
     from app.models.user import User

@@ -9,7 +9,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models.asset import ETLSyncState
+from app.models.asset import ETLDataSource, ETLSyncState
 from app.services.etl.transformer import (
     TransformResult,
     TransformedChatMessage,
@@ -37,6 +37,18 @@ class AssetLoader:
         records = transform_result.records
         if not records:
             return 0
+
+        # 0. 查询数据源的默认标签 ID
+        default_tag_ids: list[int] = []
+        ds_result = await db.execute(
+            select(ETLDataSource).where(
+                ETLDataSource.app_token == transform_result.app_token,
+                ETLDataSource.table_id == transform_result.table_id,
+            )
+        )
+        ds = ds_result.scalar_one_or_none()
+        if ds and ds.default_tag_ids:
+            default_tag_ids = ds.default_tag_ids
 
         # 0. 处理附件：下载 → 存盘 → 提取文本 → 追加到 content_text
         for record in records:
@@ -91,6 +103,17 @@ class AssetLoader:
                     continue
 
                 loaded_count += 1
+
+                # 写入继承标签
+                if default_tag_ids:
+                    content_type = {
+                        TransformedDocument: "document",
+                        TransformedMeeting: "meeting",
+                        TransformedChatMessage: "chat_message",
+                    }.get(type(record), "document")
+                    await self._inherit_tags(
+                        db, record.feishu_record_id, content_type, default_tag_ids
+                    )
             except Exception as e:
                 logger.error(
                     "Upsert 失败 (record_id=%s): %s",
@@ -281,6 +304,42 @@ class AssetLoader:
                 "extra_fields": _dict_to_json(r.extra_fields),
             },
         )
+
+    @staticmethod
+    async def _inherit_tags(
+        db: AsyncSession,
+        feishu_record_id: str,
+        content_type: str,
+        tag_ids: list[int],
+    ) -> None:
+        """将数据源的默认标签继承到同步的记录上。"""
+        table_name = {
+            "document": "documents",
+            "meeting": "meetings",
+            "chat_message": "chat_messages",
+        }.get(content_type)
+        if not table_name:
+            return
+
+        # 查询 upsert 后的记录 id
+        result = await db.execute(
+            text(f"SELECT id FROM {table_name} WHERE feishu_record_id = :rid"),
+            {"rid": feishu_record_id},
+        )
+        row = result.fetchone()
+        if not row:
+            return
+
+        content_id = row[0]
+        for tag_id in tag_ids:
+            await db.execute(
+                text(
+                    "INSERT INTO content_tags (tag_id, content_type, content_id, tagged_by) "
+                    "VALUES (:tag_id, :content_type, :content_id, 'source_inherit') "
+                    "ON CONFLICT (tag_id, content_type, content_id) DO NOTHING"
+                ),
+                {"tag_id": tag_id, "content_type": content_type, "content_id": content_id},
+            )
 
     @staticmethod
     async def _process_attachments(record, user_access_token: str | None) -> None:

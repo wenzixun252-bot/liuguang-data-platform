@@ -16,6 +16,8 @@ def init_scheduler() -> None:
     from app.worker.tasks import (
         etl_sync_job,
         cloud_folder_sync_job,
+        keyword_sync_job,
+        process_pending_documents_job,
         todo_extract_job,
         todo_sync_status_job,
         kg_build_job,
@@ -37,6 +39,15 @@ def init_scheduler() -> None:
         "interval",
         minutes=settings.etl_cron_minutes,
         id="cloud_folder_sync_job",
+        replace_existing=True,
+        max_instances=1,
+    )
+    # 关键词同步：每60分钟
+    scheduler.add_job(
+        keyword_sync_job,
+        "interval",
+        minutes=60,
+        id="keyword_sync_job",
         replace_existing=True,
         max_instances=1,
     )
@@ -91,6 +102,15 @@ def init_scheduler() -> None:
         "interval",
         minutes=5,
         id="calendar_reminder_job",
+        replace_existing=True,
+        max_instances=1,
+    )
+    # 待解析文档后台处理：每30分钟
+    scheduler.add_job(
+        process_pending_documents_job,
+        "interval",
+        minutes=30,
+        id="process_pending_documents_job",
         replace_existing=True,
         max_instances=1,
     )

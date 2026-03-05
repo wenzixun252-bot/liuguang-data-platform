@@ -16,6 +16,7 @@ from app.schemas.etl import (
     DataSourceCreate,
     DataSourceOut,
     DataSourceToggle,
+    DataSourceUpdateTags,
     DataSourceWithSyncOut,
     ETLTriggerResponse,
     SyncStateOut,
@@ -67,6 +68,7 @@ async def create_source(
         table_id=body.table_id,
         table_name=body.table_name,
         asset_type=body.asset_type,
+        default_tag_ids=body.default_tag_ids,
     )
     db.add(ds)
     await db.commit()
@@ -85,6 +87,22 @@ async def toggle_source(
     if not ds:
         raise HTTPException(404, "数据源不存在")
     ds.is_enabled = body.is_enabled
+    await db.commit()
+    await db.refresh(ds)
+    return DataSourceOut.model_validate(ds)
+
+
+@router.patch("/sources/{source_id}/tags", response_model=DataSourceOut, summary="更新数据源默认标签")
+async def update_source_tags(
+    source_id: int,
+    body: DataSourceUpdateTags,
+    _admin: Annotated[User, Depends(require_role(["admin"]))],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> DataSourceOut:
+    ds = await db.get(ETLDataSource, source_id)
+    if not ds:
+        raise HTTPException(404, "数据源不存在")
+    ds.default_tag_ids = body.default_tag_ids
     await db.commit()
     await db.refresh(ds)
     return DataSourceOut.model_validate(ds)
@@ -164,6 +182,7 @@ async def list_sources_with_status(
             asset_type=s.asset_type,
             owner_id=s.owner_id,
             owner_name=users_map.get(s.owner_id, None) if s.owner_id else None,
+            default_tag_ids=s.default_tag_ids or [],
             is_enabled=s.is_enabled,
             created_at=s.created_at,
             updated_at=s.updated_at,

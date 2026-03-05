@@ -287,8 +287,85 @@ class CloudDocImportService:
             return await self.import_cloud_file(
                 token, name, owner_id, db, user_access_token, uploader_name, force=force,
             )
+        elif file_type == "wiki":
+            # wiki 节点需要先解析实际类型
+            try:
+                node = await feishu_client.get_wiki_node_info(token, user_access_token=user_access_token)
+                obj_type = node.get("obj_type", "")
+                obj_token = node.get("obj_token", token)
+                if obj_type in ("docx", "doc"):
+                    return await self.import_cloud_doc(
+                        obj_token, owner_id, db, user_access_token, uploader_name, force=force,
+                    )
+                elif obj_type == "file":
+                    return await self.import_cloud_file(
+                        obj_token, name, owner_id, db, user_access_token, uploader_name, force=force,
+                    )
+                else:
+                    logger.warning("wiki 节点实际类型不支持导入: %s (%s → %s)", name, token, obj_type)
+                    return None, "failed"
+            except Exception as e:
+                logger.warning("wiki 节点解析失败: %s (%s): %s", name, token, e)
+                return None, "failed"
         else:
             logger.warning("不支持的飞书文件类型: %s (%s)", name, file_type)
+            return None, "failed"
+
+    async def fast_import_item(
+        self,
+        file_info: dict,
+        owner_id: str,
+        db: AsyncSession,
+        uploader_name: str | None = None,
+        tag_ids: list[int] | None = None,
+    ) -> tuple[Document | None, str]:
+        """快速导入 — 仅保存文档元数据，不调用飞书内容 API 和 LLM。
+
+        新导入的文档 parse_status 设为 "pending"，后台任务会异步处理内容解析和向量生成。
+        """
+        token = file_info.get("token", "")
+        name = file_info.get("name", "未命名")
+        doc_type = file_info.get("type", "docx")
+        url = file_info.get("url", "")
+
+        if not token:
+            return None, "failed"
+
+        try:
+            existing = await self._find_existing(db, token, owner_id)
+            if existing:
+                if tag_ids:
+                    await self._apply_tags(existing.id, tag_ids, db)
+                return existing, "skipped"
+
+            if not url:
+                domain = settings.feishu_base_domain or "feishu.cn"
+                url = f"https://{domain}/docx/{token}"
+
+            doc = Document(
+                owner_id=owner_id,
+                source_type="cloud",
+                feishu_record_id=token,
+                title=name,
+                content_text="",
+                file_type=doc_type,
+                doc_url=url,
+                uploader_name=uploader_name,
+                parse_status="pending",
+                synced_at=datetime.utcnow(),
+            )
+            db.add(doc)
+            await db.commit()
+            await db.refresh(doc)
+
+            if tag_ids:
+                await self._apply_tags(doc.id, tag_ids, db)
+
+            logger.info("快速导入文档元数据: token=%s, title=%s", token, name)
+            return doc, "imported"
+
+        except Exception as e:
+            logger.error("快速导入失败 [%s]: %s", token, e)
             return None, "failed"
 
     async def batch_import(
@@ -298,8 +375,13 @@ class CloudDocImportService:
         db: AsyncSession,
         user_access_token: str,
         uploader_name: str | None = None,
+        tag_ids: list[int] | None = None,
     ) -> ImportResult:
-        """批量导入多个云文档/文件，QPS 控制。"""
+        """批量导入多个云文档/文件，QPS 控制。
+
+        Args:
+            tag_ids: 导入成功后自动打上的标签 ID 列表（来自关键词规则的 default_tag_ids）
+        """
         result = ImportResult()
 
         for info in file_infos:
@@ -310,10 +392,16 @@ class CloudDocImportService:
                 result.imported += 1
                 if doc:
                     result.documents.append(doc)
+                    # 应用默认标签
+                    if tag_ids:
+                        await self._apply_tags(doc.id, tag_ids, db)
             elif status == "skipped":
                 result.skipped += 1
                 if doc:
                     result.documents.append(doc)
+                    # 跳过的文档也补打标签（可能是新加的标签）
+                    if tag_ids:
+                        await self._apply_tags(doc.id, tag_ids, db)
             else:
                 result.failed += 1
 
@@ -343,6 +431,35 @@ class CloudDocImportService:
         )
 
     # ── 内部辅助方法 ───────────────────────────────────────
+
+    @staticmethod
+    async def _apply_tags(doc_id: int, tag_ids: list[int], db: AsyncSession) -> None:
+        """给文档打上指定标签（幂等，重复打不会报错）。"""
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+        from app.models.tag import ContentTag
+
+        for tag_id in tag_ids:
+            try:
+                stmt = pg_insert(ContentTag).values(
+                    tag_id=tag_id,
+                    content_type="document",
+                    content_id=doc_id,
+                    tagged_by="source_inherit",
+                    confidence=1.0,
+                ).on_conflict_do_nothing(
+                    index_elements=["tag_id", "content_type", "content_id"]
+                )
+                await db.execute(stmt)
+            except Exception as e:
+                logger.warning("给文档 %d 打标签 %d 失败: %s", doc_id, tag_id, e)
+        await db.commit()
+
+    @staticmethod
+    async def _fetch_doc_content(document_id: str, user_access_token: str) -> dict:
+        """调用飞书 Block API 获取云文档内容（title + content_text + created/modified_time）。"""
+        return await feishu_client.get_document_content(
+            document_id, user_access_token=user_access_token,
+        )
 
     @staticmethod
     async def _find_existing(db: AsyncSession, feishu_record_id: str, owner_id: str) -> Document | None:

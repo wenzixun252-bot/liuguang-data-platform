@@ -11,6 +11,8 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.tag import ContentTag
+
 logger = logging.getLogger(__name__)
 
 from app.api.deps import get_current_user, get_db, get_visible_owner_ids
@@ -38,6 +40,7 @@ async def list_documents(
     source_type: str | None = Query(None),
     category: str | None = Query(None),
     uploader_name: str | None = Query(None),
+    tag_ids: list[int] = Query(default=[]),
 ) -> DocumentListResponse:
     visible_ids = await get_visible_owner_ids(current_user, db)
 
@@ -66,12 +69,38 @@ async def list_documents(
         base = base.where(Document.uploader_name.ilike(like))
         count_stmt = count_stmt.where(Document.uploader_name.ilike(like))
 
+    if tag_ids:
+        subq = select(ContentTag.content_id).where(
+            ContentTag.content_type == "document",
+            ContentTag.tag_id.in_(tag_ids),
+        )
+        base = base.where(Document.id.in_(subq))
+        count_stmt = count_stmt.where(Document.id.in_(subq))
+
     total = (await db.execute(count_stmt)).scalar() or 0
     items_stmt = base.order_by(Document.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
     rows = (await db.execute(items_stmt)).scalars().all()
 
+    # 统计每个 feishu_record_id 被多少人归档（一次批量查询）
+    frid_list = [r.feishu_record_id for r in rows if r.feishu_record_id]
+    import_count_map: dict[str, int] = {}
+    if frid_list:
+        count_rows = (await db.execute(
+            select(Document.feishu_record_id, func.count(Document.owner_id.distinct()).label("cnt"))
+            .where(Document.feishu_record_id.in_(frid_list))
+            .group_by(Document.feishu_record_id)
+        )).all()
+        import_count_map = {row.feishu_record_id: row.cnt for row in count_rows}
+
+    items = []
+    for r in rows:
+        doc_out = DocumentOut.model_validate(r)
+        if r.feishu_record_id and r.feishu_record_id in import_count_map:
+            doc_out = doc_out.model_copy(update={"import_count": import_count_map[r.feishu_record_id]})
+        items.append(doc_out)
+
     return DocumentListResponse(
-        items=[DocumentOut.model_validate(r) for r in rows],
+        items=items,
         total=total,
         page=page,
         page_size=page_size,

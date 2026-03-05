@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
+import { TagSelector } from '../components/TagManager'
 
 interface DataSourceWithSync {
   id: number
@@ -14,6 +15,7 @@ interface DataSourceWithSync {
   asset_type: string
   owner_id: string | null
   owner_name: string | null
+  default_tag_ids: number[]
   is_enabled: boolean
   created_at: string
   updated_at: string
@@ -285,6 +287,7 @@ export default function ETLAdmin() {
                   <th className="text-left py-3 px-4 text-gray-500 font-medium">表名称</th>
                   <th className="text-left py-3 px-4 text-gray-500 font-medium">类型</th>
                   <th className="text-left py-3 px-4 text-gray-500 font-medium hidden md:table-cell">添加人</th>
+                  <th className="text-left py-3 px-4 text-gray-500 font-medium hidden lg:table-cell">默认标签</th>
                   <th className="text-left py-3 px-4 text-gray-500 font-medium">启用</th>
                   <th className="text-left py-3 px-4 text-gray-500 font-medium">同步状态</th>
                   <th className="text-left py-3 px-4 text-gray-500 font-medium hidden md:table-cell">记录数</th>
@@ -311,6 +314,17 @@ export default function ETLAdmin() {
                         </span>
                       </td>
                       <td className="py-3 px-4 text-gray-500 hidden md:table-cell">{s.owner_name || '-'}</td>
+                      <td className="py-3 px-4 hidden lg:table-cell">
+                        <TagSelector
+                          selected={s.default_tag_ids || []}
+                          onChange={async (ids) => {
+                            try {
+                              await api.patch(`/etl/sources/${s.id}/tags`, { default_tag_ids: ids })
+                              fetchData()
+                            } catch { toast.error('更新标签失败') }
+                          }}
+                        />
+                      </td>
                       <td className="py-3 px-4">
                         {s.is_enabled ? (
                           <span className="text-green-600 text-xs bg-green-50 px-2 py-1 rounded-full">已启用</span>

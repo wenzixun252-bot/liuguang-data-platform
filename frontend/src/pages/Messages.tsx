@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Search, ChevronLeft, ChevronRight, X, Paperclip, ExternalLink, Download, Image, User, Trash2, Settings } from 'lucide-react'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
 import { ColumnSettingsButton, useColumnSettings, type ColumnDef } from '../components/ColumnSettings'
 import { getUser } from '../lib/auth'
 import RecipeSyncConfig from '../components/RecipeSyncConfig'
+import { TagChips, TagFilter, BatchTagBar, useContentTags, InlineTagEditor } from '../components/TagManager'
 
 const MSG_COLUMNS: ColumnDef[] = [
   { key: 'sender', label: '发送人' },
+  { key: 'tags', label: '标签' },
   { key: 'content', label: '内容' },
   { key: 'uploader_name', label: '上传人' },
   { key: 'message_type', label: '类型', defaultVisible: false },
@@ -55,6 +58,7 @@ interface ChatMessageListResponse {
 }
 
 export default function Messages() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [data, setData] = useState<ChatMessageListResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(1)
@@ -66,6 +70,8 @@ export default function Messages() {
   const [refreshKey, setRefreshKey] = useState(0)
   const { isVisible, toggle, columns: colDefs } = useColumnSettings('messages', MSG_COLUMNS)
   const [showSyncConfig, setShowSyncConfig] = useState(false)
+  const [tagFilter, setTagFilter] = useState<number[]>([])
+  const [tagRefreshKey, setTagRefreshKey] = useState(0)
 
   const pageSize = 20
 
@@ -75,20 +81,34 @@ export default function Messages() {
     if (search) params.search = search
     if (chatIdFilter) params.chat_id = chatIdFilter
     if (senderFilter) params.sender = senderFilter
+    if (tagFilter.length > 0) params.tag_ids = tagFilter
 
     api.get('/chat-messages/list', { params })
       .then((res) => setData(res.data))
       .catch(() => toast.error('加载聊天记录失败'))
       .finally(() => setLoading(false))
-  }, [page, search, chatIdFilter, senderFilter, refreshKey])
+  }, [page, search, chatIdFilter, senderFilter, tagFilter, refreshKey])
 
   useEffect(() => {
     setSelectedIds(new Set())
-  }, [page, search, chatIdFilter, senderFilter])
+  }, [page, search, chatIdFilter, senderFilter, tagFilter])
+
+  // 从搜索结果跳转过来时自动打开详情
+  useEffect(() => {
+    const highlightId = searchParams.get('highlight')
+    if (highlightId && data?.items) {
+      const item = data.items.find(i => i.id === Number(highlightId))
+      if (item) {
+        setSelected(item)
+        setSearchParams({}, { replace: true })
+      }
+    }
+  }, [data, searchParams, setSearchParams])
 
   const totalPages = data ? Math.ceil(data.total / pageSize) : 0
   const currentIds = data?.items.map((i) => i.id) || []
   const allSelected = currentIds.length > 0 && currentIds.every((id) => selectedIds.has(id))
+  const { tagsMap, reloadTags } = useContentTags('chat_message', currentIds, tagRefreshKey)
 
   const toggleSelectAll = () => {
     if (allSelected) setSelectedIds(new Set())
@@ -155,10 +175,18 @@ export default function Messages() {
         </div>
       </div>
 
+      {/* 标签筛选 */}
+      <TagFilter selectedTagIds={tagFilter} onChange={(ids) => { setTagFilter(ids); setPage(1) }} />
+
       {/* Batch action bar */}
       {selectedIds.size > 0 && (
-        <div className="flex items-center gap-3 px-4 py-2 bg-indigo-50 border border-indigo-200 rounded-lg">
+        <div className="flex items-center gap-3 px-4 py-2 bg-indigo-50 border border-indigo-200 rounded-lg flex-wrap">
           <span className="text-sm text-indigo-700 font-medium">已选择 {selectedIds.size} 项</span>
+          <BatchTagBar
+            selectedIds={selectedIds}
+            contentType="chat_message"
+            onDone={() => setRefreshKey((k) => k + 1)}
+          />
           <button
             onClick={handleBatchDelete}
             className="flex items-center gap-1 px-3 py-1.5 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 text-sm"
@@ -188,6 +216,7 @@ export default function Messages() {
                       <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="rounded" />
                     </th>
                     {isVisible('sender') && <th className="text-left py-3 px-4 text-gray-500 font-medium">发送人</th>}
+                    {isVisible('tags') && <th className="text-left py-3 px-4 text-gray-500 font-medium">标签</th>}
                     {isVisible('content') && <th className="text-left py-3 px-4 text-gray-500 font-medium">内容</th>}
                     {isVisible('uploader_name') && <th className="text-left py-3 px-4 text-gray-500 font-medium">上传人</th>}
                     {isVisible('message_type') && <th className="text-left py-3 px-4 text-gray-500 font-medium">类型</th>}
@@ -209,6 +238,16 @@ export default function Messages() {
                           <input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => toggleSelect(item.id)} className="rounded" />
                         </td>
                         {isVisible('sender') && <td className="py-3 px-4 text-gray-800 font-medium whitespace-nowrap">{item.sender || '-'}</td>}
+                        {isVisible('tags') && (
+                          <td className="py-3 px-4 max-w-[200px]">
+                            <InlineTagEditor
+                              contentType="chat_message"
+                              contentId={item.id}
+                              tags={tagsMap[item.id] || []}
+                              onChanged={() => { reloadTags(); setTagRefreshKey(k => k + 1) }}
+                            />
+                          </td>
+                        )}
                         {isVisible('content') && <td className="py-3 px-4 text-gray-500 max-w-xs truncate">{item.content_text?.slice(0, 80)}</td>}
                         {isVisible('uploader_name') && <td className="py-3 px-4 text-gray-500">{item.uploader_name || '-'}</td>}
                         {isVisible('message_type') && <td className="py-3 px-4 text-gray-500">{item.message_type || '-'}</td>}
@@ -299,6 +338,12 @@ function MessageDetail({ msg, onClose, onDelete }: { msg: ChatMessageItem; onClo
         <div className="p-6 space-y-4">
           {msg.sender && <Field label="发送人" value={msg.sender} />}
           {msg.uploader_name && <Field label="上传人" value={msg.uploader_name} icon={<User size={14} />} />}
+
+          {/* 标签 */}
+          <div>
+            <p className="text-sm text-gray-500 mb-1">标签</p>
+            <TagChips contentType="chat_message" contentId={msg.id} editable />
+          </div>
           {msg.message_type && <Field label="消息类型" value={msg.message_type} />}
           {msg.chat_id && <Field label="会话 ID" value={msg.chat_id} />}
           {msg.sent_at && <Field label="发送时间" value={new Date(msg.sent_at).toLocaleString('zh-CN')} />}

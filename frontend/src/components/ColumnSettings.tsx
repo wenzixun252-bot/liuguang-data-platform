@@ -15,11 +15,19 @@ export function useColumnSettings(storageKey: string, columns: ColumnDef[]) {
   const lsKey = `columns:${storageKey}`
 
   const [visible, setVisible] = useState<Set<string>>(() => {
+    const defaults = new Set(columns.filter((c) => c.defaultVisible !== false).map((c) => c.key))
     try {
       const saved = localStorage.getItem(lsKey)
-      if (saved) return new Set(JSON.parse(saved) as string[])
+      if (saved) {
+        const savedSet = new Set(JSON.parse(saved) as string[])
+        // 把新增的默认可见列也加进去（用户之前保存时还没有这些列）
+        for (const key of defaults) {
+          if (!savedSet.has(key)) savedSet.add(key)
+        }
+        return savedSet
+      }
     } catch { /* ignore */ }
-    return new Set(columns.filter((c) => c.defaultVisible !== false).map((c) => c.key))
+    return defaults
   })
 
   const toggle = (key: string) => {

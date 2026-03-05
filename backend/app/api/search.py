@@ -1,4 +1,4 @@
-"""全局聚合搜索 API — 结合知识图谱 + 数据表关键词搜索。"""
+"""全局聚合搜索 API — 结合知识图谱 + 统一内容搜索 + 标签过滤。"""
 
 import logging
 from typing import Annotated
@@ -8,17 +8,24 @@ from pydantic import BaseModel
 from sqlalchemy import select, and_, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_current_user, get_db, get_visible_owner_ids
 from app.models.document import Document
 from app.models.meeting import Meeting
 from app.models.chat_message import ChatMessage
-from app.models.knowledge_graph import KGEntity, KGRelation
+from app.models.knowledge_graph import KGEntity
 from app.models.structured_table import StructuredTable, StructuredTableRow
 from app.models.user import User
+from app.services.unified_content import unified_search, get_tags_for_content
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/search", tags=["全局搜索"])
+
+
+class TagInfo(BaseModel):
+    tag_id: int
+    name: str
+    color: str
 
 
 class SearchResultItem(BaseModel):
@@ -26,10 +33,11 @@ class SearchResultItem(BaseModel):
     id: int
     title: str
     content_preview: str
-    source_type: str  # document / meeting / chat_message / kg_entity
+    source_type: str  # document / meeting / chat_message / kg_entity / structured_table
     created_at: str | None = None
-    entity_type: str | None = None  # 知识图谱专用
+    entity_type: str | None = None
     mention_count: int | None = None
+    tags: list[TagInfo] = []
 
     model_config = {"from_attributes": True}
 
@@ -45,14 +53,25 @@ class SearchResponse(BaseModel):
 @router.get("", response_model=SearchResponse, summary="全局关键词搜索")
 async def global_search(
     q: str = Query(..., min_length=1, max_length=200, description="搜索关键词"),
+    tag_ids: str | None = Query(None, description="标签ID，逗号分隔"),
+    content_types: str | None = Query(None, description="内容类型，逗号分隔"),
     current_user: Annotated[User, Depends(get_current_user)] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> SearchResponse:
-    """全局搜索：同时查询知识图谱实体 + 文档/会议/聊天记录。"""
+    """全局搜索：同时查询知识图谱实体 + 文档/会议/聊天记录，支持标签过滤。"""
     owner_id = current_user.feishu_open_id
     keyword = q.strip()
     entities: list[SearchResultItem] = []
     data_items: list[SearchResultItem] = []
+
+    # 解析参数
+    parsed_tag_ids = None
+    if tag_ids:
+        parsed_tag_ids = [int(t.strip()) for t in tag_ids.split(",") if t.strip().isdigit()]
+
+    parsed_types = None
+    if content_types:
+        parsed_types = [t.strip() for t in content_types.split(",") if t.strip()]
 
     # 1. 搜索知识图谱实体
     kg_result = await db.execute(
@@ -74,91 +93,31 @@ async def global_search(
             mention_count=e.mention_count,
         ))
 
-    # 2. 搜索文档
-    doc_result = await db.execute(
-        select(Document)
-        .where(and_(
-            Document.owner_id == owner_id,
-            or_(
-                Document.title.ilike(f"%{keyword}%"),
-                Document.content_text.ilike(f"%{keyword}%"),
-            ),
-        ))
-        .order_by(Document.created_at.desc())
-        .limit(5)
+    # 2. 统一内容搜索（带标签过滤和权限）
+    visible_ids = await get_visible_owner_ids(current_user, db)
+    results = await unified_search(
+        db=db,
+        keyword=keyword,
+        tag_ids=parsed_tag_ids,
+        content_types=parsed_types,
+        visible_ids=visible_ids,
+        page=1,
+        page_size=20,
     )
-    for d in doc_result.scalars().all():
-        data_items.append(SearchResultItem(
-            id=d.id,
-            title=d.title or "无标题",
-            content_preview=(d.content_text or "")[:100],
-            source_type="document",
-            created_at=d.created_at.isoformat() if d.created_at else None,
-        ))
 
-    # 3. 搜索会议
-    meeting_result = await db.execute(
-        select(Meeting)
-        .where(and_(
-            Meeting.owner_id == owner_id,
-            or_(
-                Meeting.title.ilike(f"%{keyword}%"),
-                Meeting.content_text.ilike(f"%{keyword}%"),
-            ),
-        ))
-        .order_by(Meeting.created_at.desc())
-        .limit(5)
-    )
-    for m in meeting_result.scalars().all():
-        data_items.append(SearchResultItem(
-            id=m.id,
-            title=m.title or "无标题",
-            content_preview=(m.content_text or "")[:100],
-            source_type="meeting",
-            created_at=m.created_at.isoformat() if m.created_at else None,
-        ))
+    # 3. 批量获取标签
+    tag_map = await get_tags_for_content(db, results)
 
-    # 4. 搜索聊天记录
-    chat_result = await db.execute(
-        select(ChatMessage)
-        .where(and_(
-            ChatMessage.owner_id == owner_id,
-            ChatMessage.content_text.ilike(f"%{keyword}%"),
-        ))
-        .order_by(ChatMessage.created_at.desc())
-        .limit(5)
-    )
-    for c in chat_result.scalars().all():
+    for item in results:
+        key = f"{item['content_type']}:{item['id']}"
+        item_tags = [TagInfo(**t) for t in tag_map.get(key, [])]
         data_items.append(SearchResultItem(
-            id=c.id,
-            title=getattr(c, 'sender', None) or "聊天记录",
-            content_preview=(c.content_text or "")[:100],
-            source_type="chat_message",
-            created_at=c.created_at.isoformat() if c.created_at else None,
-        ))
-
-    # 5. 搜索结构化数据表行
-    st_result = await db.execute(
-        select(StructuredTableRow, StructuredTable.name)
-        .join(StructuredTable, StructuredTableRow.table_id == StructuredTable.id)
-        .where(and_(
-            StructuredTable.owner_id == owner_id,
-            StructuredTableRow.row_text.ilike(f"%{keyword}%"),
-        ))
-        .order_by(StructuredTableRow.id.desc())
-        .limit(5)
-    )
-    for row_obj, table_name in st_result.all():
-        preview_parts = []
-        for k, v in (row_obj.row_data or {}).items():
-            if v:
-                preview_parts.append(f"{k}: {v}")
-        data_items.append(SearchResultItem(
-            id=row_obj.id,
-            title=table_name or "数据表",
-            content_preview=" | ".join(preview_parts)[:100],
-            source_type="structured_table",
-            created_at=row_obj.created_at.isoformat() if row_obj.created_at else None,
+            id=item["id"],
+            title=item["title"] or "无标题",
+            content_preview=(item["content_text"] or "")[:100],
+            source_type=item["content_type"],
+            created_at=item.get("created_at"),
+            tags=item_tags,
         ))
 
     return SearchResponse(

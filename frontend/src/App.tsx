@@ -8,16 +8,11 @@ import Documents from './pages/Documents'
 import Meetings from './pages/Meetings'
 import Messages from './pages/Messages'
 import Chat from './pages/Chat'
-import ETLAdmin from './pages/ETLAdmin'
-import DepartmentAdmin from './pages/DepartmentAdmin'
-import Todos from './pages/Todos'
-// Reports 已整合到 Chat 页面的「报告生成」Tab
 import ReportDetail from './pages/ReportDetail'
-import KnowledgeGraph from './pages/KnowledgeGraph'
-// LeadershipInsight 已整合到 KnowledgeGraph（数据图谱）页面
 import StructuredTables from './pages/StructuredTables'
 import DataInsights from './pages/DataInsights'
-import CalendarAssistant from './pages/CalendarAssistant'
+import SearchPage from './pages/SearchPage'
+import Settings from './pages/Settings'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -39,27 +34,23 @@ export default function App() {
               </ProtectedRoute>
             }
           >
+            <Route path="/data-insights" element={<DataInsights />} />
             <Route path="/structured-tables" element={<StructuredTables />} />
             <Route path="/documents" element={<Documents />} />
             <Route path="/meetings" element={<Meetings />} />
             <Route path="/messages" element={<Messages />} />
+            <Route path="/calendar" element={<Navigate to="/chat?tab=calendar" replace />} />
             <Route path="/chat" element={<Chat />} />
-            <Route path="/todos" element={<Todos />} />
+            <Route path="/search" element={<SearchPage />} />
+            <Route path="/settings" element={<Settings />} />
             <Route path="/reports" element={<Navigate to="/chat" replace />} />
             <Route path="/reports/:id" element={<ReportDetail />} />
-            <Route path="/knowledge-graph" element={<KnowledgeGraph />} />
-            <Route path="/leadership-insight" element={<Navigate to="/knowledge-graph" replace />} />
-            <Route path="/data-insights" element={<DataInsights />} />
-            <Route path="/calendar" element={<CalendarAssistant />} />
-            <Route path="/permissions" element={<DepartmentAdmin />} />
-            <Route
-              path="/admin/etl"
-              element={
-                <ProtectedRoute requiredRole="admin">
-                  <ETLAdmin />
-                </ProtectedRoute>
-              }
-            />
+            {/* 整合后的重定向路由 */}
+            <Route path="/todos" element={<Navigate to="/chat?tab=todos" replace />} />
+            <Route path="/knowledge-graph" element={<Navigate to="/chat?tab=graph" replace />} />
+            <Route path="/leadership-insight" element={<Navigate to="/chat?tab=graph" replace />} />
+            <Route path="/permissions" element={<Navigate to="/settings?tab=permissions" replace />} />
+            <Route path="/admin/etl" element={<Navigate to="/settings?tab=etl" replace />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/data-insights" replace />} />

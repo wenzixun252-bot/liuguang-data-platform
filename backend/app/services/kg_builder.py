@@ -11,6 +11,7 @@ from app.config import settings
 from app.models.chat_message import ChatMessage
 from app.models.document import Document
 from app.models.meeting import Meeting
+from app.models.content_entity_link import ContentEntityLink
 from app.models.knowledge_graph import KGEntity, KGRelation
 from app.services.llm import llm_client
 
@@ -66,10 +67,21 @@ async def build_knowledge_graph(
     all_entities: list[dict] = []
     all_relations: list[dict] = []
 
+    # 跟踪实体名 -> 来源内容，用于创建锚定链接
+    entity_content_map: dict[str, list[dict]] = {}
+
     for text_chunk in texts:
         extracted = await _llm_extract_kg(text_chunk["content"])
         for e in extracted.get("entities", []):
             e["_source_time"] = text_chunk.get("time")
+            # 记录实体来源
+            ename = e.get("name", "").strip()
+            if ename and text_chunk.get("content_type"):
+                entity_content_map.setdefault(ename, []).append({
+                    "content_type": text_chunk["content_type"],
+                    "content_id": text_chunk["content_id"],
+                    "snippet": text_chunk["content"][:200],
+                })
         all_entities.extend(extracted.get("entities", []))
         all_relations.extend(extracted.get("relations", []))
 
@@ -77,11 +89,15 @@ async def build_knowledge_graph(
     entities_added = await _merge_entities(db, owner_id, all_entities)
     relations_added = await _merge_relations(db, owner_id, all_relations)
 
+    # 创建内容-实体锚定链接
+    links_added = await _create_entity_links(db, owner_id, entity_content_map)
+
     await db.commit()
 
     return {
         "entities_added": entities_added,
         "relations_added": relations_added,
+        "links_added": links_added,
         "texts_processed": len(texts),
     }
 
@@ -119,6 +135,8 @@ async def _gather_texts(
         texts.append({
             "content": f"文档标题: {doc.title}\n内容: {doc.content_text[:2000]}",
             "time": str(doc.created_at),
+            "content_type": "document",
+            "content_id": doc.id,
         })
 
     # 会议
@@ -131,6 +149,8 @@ async def _gather_texts(
         texts.append({
             "content": f"会议: {m.title}\n参会人: {json.dumps(m.participants, ensure_ascii=False)}\n内容: {m.content_text[:2000]}",
             "time": str(m.meeting_time or m.created_at),
+            "content_type": "meeting",
+            "content_id": m.id,
         })
 
     # 聊天消息（合并处理）
@@ -139,17 +159,22 @@ async def _gather_texts(
             and_(ChatMessage.owner_id == owner_id, ChatMessage.updated_at > time_filter)
         ).order_by(ChatMessage.sent_at.desc()).limit(200)
     )
+    chat_msgs_list = msgs.scalars().all()
     chat_texts = []
-    for m in msgs.scalars().all():
+    chat_msg_ids: list[int] = []
+    for m in chat_msgs_list:
         chat_texts.append(f"[{m.sender}] {m.content_text}")
+        chat_msg_ids.append(m.id)
 
     if chat_texts:
-        # 每50条消息作为一个chunk
+        # 每50条消息作为一个chunk，记录第一条的 id 作为代表
         for i in range(0, len(chat_texts), 50):
             batch = chat_texts[i:i + 50]
             texts.append({
                 "content": "聊天记录:\n" + "\n".join(batch),
                 "time": str(datetime.utcnow()),
+                "content_type": "chat_message",
+                "content_id": chat_msg_ids[i] if i < len(chat_msg_ids) else 0,
             })
 
     return texts
@@ -175,6 +200,50 @@ async def _llm_extract_kg(content: str) -> dict:
     except Exception as e:
         logger.warning("LLM提取知识图谱失败: %s", e)
         return {"entities": [], "relations": []}
+
+
+async def _create_entity_links(
+    db: AsyncSession,
+    owner_id: str,
+    entity_content_map: dict[str, list[dict]],
+) -> int:
+    """根据提取的实体创建内容-实体锚定链接。"""
+    added = 0
+    for entity_name, sources in entity_content_map.items():
+        # 查找对应实体
+        result = await db.execute(
+            select(KGEntity).where(
+                and_(KGEntity.owner_id == owner_id, KGEntity.name == entity_name)
+            )
+        )
+        entity = result.scalar_one_or_none()
+        if not entity:
+            continue
+
+        for src in sources:
+            # 检查是否已存在
+            existing = await db.execute(
+                select(ContentEntityLink).where(
+                    and_(
+                        ContentEntityLink.entity_id == entity.id,
+                        ContentEntityLink.content_type == src["content_type"],
+                        ContentEntityLink.content_id == src["content_id"],
+                    )
+                )
+            )
+            if existing.scalar_one_or_none():
+                continue
+
+            db.add(ContentEntityLink(
+                entity_id=entity.id,
+                content_type=src["content_type"],
+                content_id=src["content_id"],
+                relation_type="mentioned_in",
+                context_snippet=src.get("snippet"),
+            ))
+            added += 1
+
+    return added
 
 
 async def _merge_entities(

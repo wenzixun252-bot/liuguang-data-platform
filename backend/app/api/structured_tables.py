@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.models.structured_table import StructuredTable, StructuredTableRow
+from app.models.tag import ContentTag
 from app.models.user import User
 from app.schemas.structured_table import (
     BatchDeleteRequest,
@@ -392,6 +393,7 @@ async def list_tables(
     page_size: int = Query(20, ge=1, le=100),
     search: str = Query("", max_length=200),
     source_type: str = Query("", max_length=32),
+    tag_ids: list[int] = Query(default=[]),
     current_user: Annotated[User, Depends(get_current_user)] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ):
@@ -402,6 +404,12 @@ async def list_tables(
         conditions.append(StructuredTable.name.ilike(f"%{search}%"))
     if source_type:
         conditions.append(StructuredTable.source_type == source_type)
+    if tag_ids:
+        subq = select(ContentTag.content_id).where(
+            ContentTag.content_type == "structured_table",
+            ContentTag.tag_id.in_(tag_ids),
+        )
+        conditions.append(StructuredTable.id.in_(subq))
 
     # 总数
     count_q = select(func.count()).select_from(StructuredTable).where(and_(*conditions))

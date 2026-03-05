@@ -1,0 +1,42 @@
+# Claude Code 变更日志
+
+自动记录每次文件修改。
+
+- **2026-03-05 16:04:54** [其他] `CHANGELOG-claude.md` — 新建文件 `CHANGELOG-claude` (4行)
+- **2026-03-05 16:35:24** [其他] `test.txt` — 修改逻辑 (+1/-1行)
+- **2026-03-05 16:35:56** [开发工具配置] `.claude/settings.local.json` — 修改逻辑 (+1/-2行)
+- **2026-03-05 16:48:24** [前端页面] `frontend/src/pages/Chat.tsx` — 新增 CalendarAssistant
+- **2026-03-05 16:48:29** [前端页面] `frontend/src/pages/Chat.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-05 16:48:36** [前端页面] `frontend/src/pages/Chat.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-05 16:48:50** [前端页面] `frontend/src/pages/Chat.tsx` — 调整UI组件
+- **2026-03-05 16:49:00** [前端页面] `frontend/src/pages/Chat.tsx` — 调整UI组件
+- **2026-03-05 16:49:06** [前端组件] `frontend/src/components/Layout.tsx` — 修改逻辑 (+2/-2行)
+- **2026-03-05 16:49:13** [前端组件] `frontend/src/components/Layout.tsx` — 修改逻辑 (+1/-2行)
+- **2026-03-05 16:49:20** [前端] `frontend/src/App.tsx` — 调整UI组件
+- **2026-03-05 16:49:26** [前端] `frontend/src/App.tsx` — 删除 1 行代码
+- **2026-03-05 16:49:44** [前端组件] `frontend/src/components/Layout.tsx` — 修改逻辑 (+1/-2行)
+- **2026-03-05 16:49:54** [前端页面] `frontend/src/pages/Chat.tsx` — 调整UI组件
+- **2026-03-05 16:50:14** [前端页面] `frontend/src/pages/Chat.tsx` — 调整UI组件
+- **2026-03-05 16:50:39** [前端组件] `frontend/src/components/GlobalSearch.tsx` — 添加依赖引用
+- **2026-03-05 16:50:48** [前端组件] `frontend/src/components/GlobalSearch.tsx` — 新增 navigate, routes, handleItemClick, route
+- **2026-03-05 16:50:56** [前端组件] `frontend/src/components/GlobalSearch.tsx` — 修改逻辑 (+3/-2行)
+- **2026-03-05 16:51:13** [前端组件] `frontend/src/components/GlobalSearch.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-05 16:51:20** [前端组件] `frontend/src/components/HeaderSearch.tsx` — 调整UI组件
+- **2026-03-05 16:55:19** [其他] `CLAUDE.md` — 新建文件 `CLAUDE` (210行)
+- **2026-03-05 17:01:05** [前端页面] `frontend/src/pages/StructuredTables.tsx` — 添加依赖引用
+- **2026-03-05 17:01:11** [前端页面] `frontend/src/pages/StructuredTables.tsx` — 新增 1 行代码
+- **2026-03-05 17:01:19** [前端页面] `frontend/src/pages/StructuredTables.tsx` — 新增 highlightId
+- **2026-03-05 17:25:46** [前端页面] `frontend/src/pages/Chat.tsx` — 新增 Todos
+- **2026-03-05 17:25:52** [前端页面] `frontend/src/pages/Chat.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-05 17:25:59** [前端页面] `frontend/src/pages/Chat.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-05 17:26:07** [前端页面] `frontend/src/pages/Chat.tsx` — 新增 1 行代码
+- **2026-03-05 17:26:14** [前端页面] `frontend/src/pages/Chat.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-05 17:26:27** [前端页面] `frontend/src/pages/Chat.tsx` — 调整UI组件
+- **2026-03-05 17:26:33** [前端] `frontend/src/App.tsx` — 调整UI组件
+- **2026-03-05 17:27:07** [前端页面] `frontend/src/pages/DataInsights.tsx` — 添加依赖引用
+- **2026-03-05 17:27:13** [前端页面] `frontend/src/pages/DataInsights.tsx` — 移除 Todos
+- **2026-03-05 17:27:20** [前端页面] `frontend/src/pages/DataInsights.tsx` — 新增 navigate；移除 handleTabChange, urlTab
+- **2026-03-05 17:27:36** [前端页面] `frontend/src/pages/DataInsights.tsx` — 调整UI组件
+- **2026-03-05 17:27:59** [前端页面] `frontend/src/pages/DataInsights.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-05 17:28:24** [前端页面] `frontend/src/pages/DataInsights.tsx` — 新增 7 行代码
+- **2026-03-05 17:28:44** [前端页面] `frontend/src/pages/DataInsights.tsx` — 添加依赖引用

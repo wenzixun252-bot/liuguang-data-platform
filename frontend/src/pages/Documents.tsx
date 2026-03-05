@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Search, ChevronLeft, ChevronRight, X, Paperclip, ExternalLink, Download, Image, User, Trash2, Upload, Cloud, FileUp } from 'lucide-react'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
 import { ColumnSettingsButton, useColumnSettings, type ColumnDef } from '../components/ColumnSettings'
 import { getUser } from '../lib/auth'
 import CloudDocSync from '../components/CloudDocSync'
+import { TagChips, TagFilter, BatchTagBar, useContentTags, InlineTagEditor } from '../components/TagManager'
 
 const DOC_COLUMNS: ColumnDef[] = [
   { key: 'title', label: '标题' },
+  { key: 'tags', label: '标签' },
   { key: 'summary', label: '摘要' },
   { key: 'source_type', label: '来源' },
   { key: 'uploader_name', label: '上传人' },
@@ -48,6 +51,8 @@ interface DocumentItem {
   extra_fields?: { _attachments?: AttachmentMeta[]; _links?: LinkMeta[]; [key: string]: unknown }
   feishu_record_id: string | null
   bitable_url: string | null
+  parse_status: string | null
+  import_count: number
   synced_at: string | null
   created_at: string
 }
@@ -65,6 +70,7 @@ const SOURCE_LABELS: Record<string, string> = {
 }
 
 export default function Documents() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [data, setData] = useState<DocumentListResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(1)
@@ -78,6 +84,8 @@ export default function Documents() {
   const { isVisible, toggle, columns: colDefs } = useColumnSettings('documents', DOC_COLUMNS)
   const [showLocalUpload, setShowLocalUpload] = useState(false)
   const [showFeishuSync, setShowFeishuSync] = useState(false)
+  const [tagFilter, setTagFilter] = useState<number[]>([])
+  const [tagRefreshKey, setTagRefreshKey] = useState(0)
 
   const pageSize = 20
 
@@ -88,21 +96,35 @@ export default function Documents() {
     if (sourceFilter) params.source_type = sourceFilter
     if (categoryFilter) params.category = categoryFilter
     if (uploaderFilter) params.uploader_name = uploaderFilter
+    if (tagFilter.length > 0) params.tag_ids = tagFilter
 
     api.get('/documents/list', { params })
       .then((res) => setData(res.data))
       .catch(() => toast.error('加载文档列表失败'))
       .finally(() => setLoading(false))
-  }, [page, search, sourceFilter, categoryFilter, uploaderFilter, refreshKey])
+  }, [page, search, sourceFilter, categoryFilter, uploaderFilter, tagFilter, refreshKey])
 
   // 翻页/筛选变化时清空选择
   useEffect(() => {
     setSelectedIds(new Set())
-  }, [page, search, sourceFilter, categoryFilter, uploaderFilter])
+  }, [page, search, sourceFilter, categoryFilter, uploaderFilter, tagFilter])
+
+  // 从搜索结果跳转过来时自动打开详情
+  useEffect(() => {
+    const highlightId = searchParams.get('highlight')
+    if (highlightId && data?.items) {
+      const item = data.items.find(i => i.id === Number(highlightId))
+      if (item) {
+        setSelected(item)
+        setSearchParams({}, { replace: true })
+      }
+    }
+  }, [data, searchParams, setSearchParams])
 
   const totalPages = data ? Math.ceil(data.total / pageSize) : 0
   const currentIds = data?.items.map((i) => i.id) || []
   const allSelected = currentIds.length > 0 && currentIds.every((id) => selectedIds.has(id))
+  const { tagsMap, reloadTags } = useContentTags('document', currentIds, tagRefreshKey)
 
   const toggleSelectAll = () => {
     if (allSelected) {
@@ -183,10 +205,18 @@ export default function Documents() {
         </div>
       </div>
 
+      {/* 标签筛选 */}
+      <TagFilter selectedTagIds={tagFilter} onChange={(ids) => { setTagFilter(ids); setPage(1) }} />
+
       {/* Batch action bar */}
       {selectedIds.size > 0 && (
-        <div className="flex items-center gap-3 px-4 py-2 bg-indigo-50 border border-indigo-200 rounded-lg">
+        <div className="flex items-center gap-3 px-4 py-2 bg-indigo-50 border border-indigo-200 rounded-lg flex-wrap">
           <span className="text-sm text-indigo-700 font-medium">已选择 {selectedIds.size} 项</span>
+          <BatchTagBar
+            selectedIds={selectedIds}
+            contentType="document"
+            onDone={() => setRefreshKey((k) => k + 1)}
+          />
           <button
             onClick={handleBatchDelete}
             className="flex items-center gap-1 px-3 py-1.5 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 text-sm"
@@ -222,6 +252,7 @@ export default function Documents() {
                       />
                     </th>
                     {isVisible('title') && <th className="text-left py-3 px-4 text-gray-500 font-medium">标题</th>}
+                    {isVisible('tags') && <th className="text-left py-3 px-4 text-gray-500 font-medium">标签</th>}
                     {isVisible('summary') && <th className="text-left py-3 px-4 text-gray-500 font-medium">摘要</th>}
                     {isVisible('source_type') && <th className="text-left py-3 px-4 text-gray-500 font-medium">来源</th>}
                     {isVisible('uploader_name') && <th className="text-left py-3 px-4 text-gray-500 font-medium">上传人</th>}
@@ -246,7 +277,41 @@ export default function Documents() {
                           className="rounded"
                         />
                       </td>
-                      {isVisible('title') && <td className="py-3 px-4 text-gray-800 font-medium max-w-[200px] truncate">{item.title || '无标题'}</td>}
+                      {isVisible('title') && (
+                        <td className="py-3 px-4 max-w-[240px]">
+                          <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                            <span className="text-gray-800 font-medium truncate">{item.title || '无标题'}</span>
+                            {item.parse_status === 'pending' && (
+                              <span className="shrink-0 px-1.5 py-0.5 rounded text-xs bg-amber-50 text-amber-600 border border-amber-200">
+                                分析中
+                              </span>
+                            )}
+                            {item.parse_status === 'failed' && (
+                              <span className="shrink-0 px-1.5 py-0.5 rounded text-xs bg-red-50 text-red-500 border border-red-200">
+                                解析失败
+                              </span>
+                            )}
+                            {(item.import_count ?? 1) > 1 && (
+                              <span
+                                className="shrink-0 px-1.5 py-0.5 rounded text-xs bg-indigo-50 text-indigo-600 border border-indigo-200"
+                                title={`${item.import_count} 人已归档此文档`}
+                              >
+                                {item.import_count} 人归档
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      )}
+                      {isVisible('tags') && (
+                        <td className="py-3 px-4 max-w-[200px]">
+                          <InlineTagEditor
+                            contentType="document"
+                            contentId={item.id}
+                            tags={tagsMap[item.id] || []}
+                            onChanged={() => { reloadTags(); setTagRefreshKey(k => k + 1) }}
+                          />
+                        </td>
+                      )}
                       {isVisible('summary') && <td className="py-3 px-4 text-gray-500 max-w-[250px] truncate">{item.summary || item.content_text?.slice(0, 60) || '-'}</td>}
                       {isVisible('source_type') && (
                         <td className="py-3 px-4">
@@ -408,6 +473,12 @@ function DocumentDetail({ doc, onClose, onDelete }: { doc: DocumentItem; onClose
           {doc.file_type && <Field label="文件类型" value={doc.file_type.toUpperCase()} />}
           <Field label="时间" value={new Date(doc.synced_at || doc.created_at).toLocaleString('zh-CN')} />
 
+          {/* 标签 */}
+          <div>
+            <p className="text-sm text-gray-500 mb-1">标签</p>
+            <TagChips contentType="document" contentId={doc.id} editable />
+          </div>
+
           {/* 文档链接/下载 */}
           {doc.source_type === 'local' && (
             <div>
@@ -478,16 +549,6 @@ function DocumentDetail({ doc, onClose, onDelete }: { doc: DocumentItem; onClose
               {doc.content_text}
             </div>
           </div>
-          {doc.tags && Object.keys(doc.tags).length > 0 && (
-            <div>
-              <p className="text-sm text-gray-500 mb-1">标签</p>
-              <div className="flex flex-wrap gap-2">
-                {Object.keys(doc.tags).map((tag) => (
-                  <span key={tag} className="px-2 py-1 bg-indigo-50 text-indigo-700 rounded-full text-xs">{tag}</span>
-                ))}
-              </div>
-            </div>
-          )}
           <AttachmentsAndLinks extraFields={doc.extra_fields} />
         </div>
       </div>

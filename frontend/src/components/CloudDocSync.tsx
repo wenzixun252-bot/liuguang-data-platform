@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import {
   Search, RefreshCw, Trash2, Plus, FileUp, FileText, FolderOpen,
   Check, Loader2, ChevronDown, X,
@@ -93,11 +93,25 @@ export default function CloudDocSync({ onClose, onImportComplete }: CloudDocSync
     handleDiscover()
   }, [])
 
-  const handleDiscover = async () => {
+  // 防抖自动搜索：docSearch 变化 500ms 后重新调 API
+  const isFirstDocSearch = useRef(true)
+  useEffect(() => {
+    if (isFirstDocSearch.current) {
+      isFirstDocSearch.current = false
+      return
+    }
+    const timer = setTimeout(() => {
+      handleDiscover(docSearch)
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [docSearch])
+
+  const handleDiscover = async (searchKeyword?: string) => {
     setLoading(true)
     setSelectedTokens(new Set())
     try {
-      const res = await api.get('/import/feishu-docs')
+      const q = searchKeyword !== undefined ? searchKeyword : docSearch
+      const res = await api.get('/import/feishu-docs', { params: q ? { q } : {} })
       setDocs(res.data)
     } catch (e: any) {
       toast.error(e.response?.data?.detail || '获取云文档列表失败')
@@ -202,7 +216,7 @@ export default function CloudDocSync({ onClose, onImportComplete }: CloudDocSync
     }
   }
 
-  const filteredDocs = docs.filter(d => !docSearch || d.name.toLowerCase().includes(docSearch.toLowerCase()))
+  const filteredDocs = docs  // 搜索已在后端完成，直接展示所有结果
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={onClose}>
@@ -222,7 +236,7 @@ export default function CloudDocSync({ onClose, onImportComplete }: CloudDocSync
               </h4>
               <div className="flex gap-2">
                 <button
-                  onClick={handleDiscover}
+                  onClick={() => handleDiscover()}
                   disabled={loading}
                   className="flex items-center gap-1 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs hover:bg-indigo-700 disabled:opacity-50"
                 >
@@ -242,80 +256,79 @@ export default function CloudDocSync({ onClose, onImportComplete }: CloudDocSync
               </div>
             </div>
 
-            {loading ? (
-              <div className="py-8 text-center text-gray-400">
-                <Loader2 size={20} className="animate-spin mx-auto mb-2" />
-                正在查询飞书云文档...
+            <div className="flex items-center gap-3">
+              <div className="relative flex-1">
+                <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="输入关键词自动搜索..."
+                  className="w-full pl-8 pr-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                  value={docSearch}
+                  onChange={(e) => setDocSearch(e.target.value)}
+                />
+                {loading && <Loader2 size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 animate-spin" />}
               </div>
-            ) : docs.length > 0 ? (
-              <>
-                <div className="flex items-center gap-3">
-                  <div className="relative flex-1">
-                    <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                    <input
-                      type="text"
-                      placeholder="搜索文档名称..."
-                      className="w-full pl-8 pr-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                      value={docSearch}
-                      onChange={(e) => setDocSearch(e.target.value)}
-                    />
-                  </div>
-                  <button onClick={toggleSelectAll} className="text-xs text-indigo-600 hover:text-indigo-700 whitespace-nowrap">
-                    {selectedTokens.size > 0 ? '取消全选' : '全选'}
-                  </button>
-                </div>
+              {filteredDocs.length > 0 && (
+                <button onClick={toggleSelectAll} className="text-xs text-indigo-600 hover:text-indigo-700 whitespace-nowrap">
+                  {selectedTokens.size > 0 ? '取消全选' : '全选'}
+                </button>
+              )}
+            </div>
 
-                <div className="border border-gray-200 rounded-lg divide-y divide-gray-100 max-h-60 overflow-y-auto">
-                  {filteredDocs.map((doc) => {
-                    const isSelected = selectedTokens.has(doc.token)
-                    return (
-                      <div
-                        key={doc.token}
-                        className={`flex items-center gap-3 px-4 py-2.5 ${
-                          doc.already_imported ? 'opacity-60' : 'hover:bg-indigo-50 cursor-pointer'
-                        }`}
-                        onClick={() => !doc.already_imported && toggleDoc(doc.token)}
-                      >
-                        <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${
-                          doc.already_imported ? 'bg-gray-200 border-gray-300' :
-                          isSelected ? 'bg-indigo-600 border-indigo-600' : 'border-gray-300'
-                        }`}>
-                          {(doc.already_imported || isSelected) && <Check size={12} className="text-white" />}
-                        </div>
-                        {doc.doc_type === 'file' ? (
-                          <FileUp size={14} className="text-gray-400 flex-shrink-0" />
-                        ) : (
-                          <FileText size={14} className="text-indigo-400 flex-shrink-0" />
-                        )}
-                        <span className="text-sm text-gray-700 flex-1 truncate">{doc.name}</span>
-                        <span className={`px-1.5 py-0.5 rounded-full text-[10px] flex-shrink-0 ${
-                          doc.doc_type === 'docx' ? 'bg-indigo-50 text-indigo-600' :
-                          doc.doc_type === 'file' ? 'bg-amber-50 text-amber-600' :
-                          'bg-gray-100 text-gray-600'
-                        }`}>
-                          {DOC_TYPE_LABELS[doc.doc_type] || doc.doc_type}
-                        </span>
-                        {doc.already_imported && (
-                          <div className="flex items-center gap-2 flex-shrink-0">
-                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-50 text-green-600">已导入</span>
-                            <button
-                              onClick={(e) => { e.stopPropagation(); handleReimport(doc.token) }}
-                              className="text-[10px] text-indigo-500 hover:text-indigo-700"
-                            >
-                              重新导入
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
+            <div className="border border-gray-200 rounded-lg divide-y divide-gray-100 max-h-60 overflow-y-auto">
+              {loading ? (
+                <div className="py-6 text-center text-gray-400 flex items-center justify-center gap-2">
+                  <Loader2 size={16} className="animate-spin" />
+                  正在查询飞书云文档...
                 </div>
-              </>
-            ) : (
-              <div className="py-6 text-center text-gray-400 text-sm">
-                点击「刷新列表」发现可访问的飞书云文档
-              </div>
-            )}
+              ) : filteredDocs.length > 0 ? (
+                filteredDocs.map((doc) => {
+                  const isSelected = selectedTokens.has(doc.token)
+                  return (
+                    <div
+                      key={doc.token}
+                      className={`flex items-center gap-3 px-4 py-2.5 ${
+                        doc.already_imported ? 'opacity-60' : 'hover:bg-indigo-50 cursor-pointer'
+                      }`}
+                      onClick={() => !doc.already_imported && toggleDoc(doc.token)}
+                    >
+                      <div className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${
+                        doc.already_imported ? 'bg-gray-200 border-gray-300' :
+                        isSelected ? 'bg-indigo-600 border-indigo-600' : 'border-gray-300'
+                      }`}>
+                        {(doc.already_imported || isSelected) && <Check size={12} className="text-white" />}
+                      </div>
+                      {doc.doc_type === 'file' ? (
+                        <FileUp size={14} className="text-gray-400 flex-shrink-0" />
+                      ) : (
+                        <FileText size={14} className="text-indigo-400 flex-shrink-0" />
+                      )}
+                      <span className="text-sm text-gray-700 flex-1 truncate">{doc.name}</span>
+                      <span className={`px-1.5 py-0.5 rounded-full text-[10px] flex-shrink-0 ${
+                        doc.doc_type === 'docx' ? 'bg-indigo-50 text-indigo-600' :
+                        doc.doc_type === 'file' ? 'bg-amber-50 text-amber-600' :
+                        'bg-gray-100 text-gray-600'
+                      }`}>
+                        {DOC_TYPE_LABELS[doc.doc_type] || doc.doc_type}
+                      </span>
+                      {doc.already_imported && (
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-50 text-green-600">已导入</span>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleReimport(doc.token) }}
+                            className="text-[10px] text-indigo-500 hover:text-indigo-700"
+                          >
+                            重新导入
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })
+              ) : (
+                <div className="py-4 text-center text-gray-400 text-sm">无匹配结果</div>
+              )}
+            </div>
           </div>
 
           {/* 区域 B: 文件夹自动同步（折叠） */}
