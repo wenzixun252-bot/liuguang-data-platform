@@ -18,7 +18,7 @@ owner_id: 数据归属人的飞书 open_id
 title: 文档标题
 content_text: 文档正文/核心内容
 author: 作者
-doc_url: 文档链接/URL
+source_url: 文档链接/URL
 feishu_created_at: 飞书端创建时间
 feishu_updated_at: 飞书端更新时间
 """.strip()
@@ -36,7 +36,7 @@ participants: 参与人列表
 agenda: 议程
 conclusions: 结论
 action_items: 行动项/待办
-minutes_url: 会议纪要链接
+source_url: 会议纪要链接
 recording_url: 录音/录像链接
 transcript: AI转写文本/录音文字
 feishu_created_at: 飞书端创建时间

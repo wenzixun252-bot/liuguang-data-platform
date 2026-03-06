@@ -30,6 +30,7 @@ interface StructuredTableDetail extends StructuredTableItem {
   source_app_token: string | null
   source_table_id: string | null
   schema_info: { field_id: string; field_name: string; field_type: string | number }[] | null
+  keywords: string[]
 }
 
 interface RowItem {
@@ -561,6 +562,17 @@ function TableDetailPanel({
         {detail.summary && (
           <div className="px-6 py-3 bg-blue-50 border-b border-blue-100">
             <p className="text-sm text-blue-800">{detail.summary}</p>
+          </div>
+        )}
+
+        {/* 关键词 */}
+        {detail.keywords && detail.keywords.length > 0 && (
+          <div className="px-6 py-3 border-b border-gray-100">
+            <div className="flex flex-wrap gap-1.5">
+              {detail.keywords.map((kw, i) => (
+                <span key={i} className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full text-xs">{kw}</span>
+              ))}
+            </div>
           </div>
         )}
 

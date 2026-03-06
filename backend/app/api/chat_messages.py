@@ -30,6 +30,7 @@ async def list_chat_messages(
     page_size: int = Query(20, ge=1, le=100),
     search: str | None = Query(None),
     chat_id: str | None = Query(None),
+    chat_name: str | None = Query(None),
     sender: str | None = Query(None),
     tag_ids: list[int] = Query(default=[]),
 ) -> ChatMessageListResponse:
@@ -50,6 +51,11 @@ async def list_chat_messages(
     if chat_id:
         base = base.where(ChatMessage.chat_id == chat_id)
         count_stmt = count_stmt.where(ChatMessage.chat_id == chat_id)
+
+    if chat_name:
+        like = f"%{chat_name}%"
+        base = base.where(ChatMessage.chat_name.ilike(like))
+        count_stmt = count_stmt.where(ChatMessage.chat_name.ilike(like))
 
     if sender:
         like = f"%{sender}%"

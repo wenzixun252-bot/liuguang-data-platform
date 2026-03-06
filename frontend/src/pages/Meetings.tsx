@@ -11,14 +11,15 @@ import { TagChips, TagFilter, BatchTagBar, useContentTags, InlineTagEditor } fro
 const MEETING_COLUMNS: ColumnDef[] = [
   { key: 'title', label: '主题' },
   { key: 'tags', label: '标签' },
+  { key: 'keywords', label: '关键词', defaultVisible: false },
   { key: 'meeting_time', label: '时间' },
   { key: 'organizer', label: '组织者' },
-  { key: 'uploader_name', label: '上传人' },
+  { key: 'uploader_name', label: '上传人', defaultVisible: false },
   { key: 'duration', label: '时长', defaultVisible: false },
   { key: 'location', label: '地点', defaultVisible: false },
   { key: 'participants', label: '参会人', defaultVisible: false },
   { key: 'conclusions', label: '结论', defaultVisible: false },
-  { key: 'minutes_url', label: '会议纪要', defaultVisible: false },
+  { key: 'source_url', label: '会议纪要', defaultVisible: false },
 ]
 
 interface AttachmentMeta {
@@ -49,7 +50,8 @@ interface MeetingItem {
   conclusions: string | null
   action_items: { task?: string; assignee?: string; deadline?: string }[]
   content_text: string
-  minutes_url: string | null
+  keywords: string[]
+  source_url: string | null
   uploader_name: string | null
   extra_fields?: { _attachments?: AttachmentMeta[]; _links?: LinkMeta[]; [key: string]: unknown }
   bitable_url: string | null
@@ -232,6 +234,7 @@ export default function Meetings() {
                     </th>
                     {isVisible('title') && <th className="text-left py-3 px-4 text-gray-500 font-medium">主题</th>}
                     {isVisible('tags') && <th className="text-left py-3 px-4 text-gray-500 font-medium">标签</th>}
+                    {isVisible('keywords') && <th className="text-left py-3 px-4 text-gray-500 font-medium">关键词</th>}
                     {isVisible('meeting_time') && <th className="text-left py-3 px-4 text-gray-500 font-medium">时间</th>}
                     {isVisible('organizer') && <th className="text-left py-3 px-4 text-gray-500 font-medium">组织者</th>}
                     {isVisible('uploader_name') && <th className="text-left py-3 px-4 text-gray-500 font-medium">上传人</th>}
@@ -239,7 +242,7 @@ export default function Meetings() {
                     {isVisible('location') && <th className="text-left py-3 px-4 text-gray-500 font-medium">地点</th>}
                     {isVisible('participants') && <th className="text-left py-3 px-4 text-gray-500 font-medium">参会人</th>}
                     {isVisible('conclusions') && <th className="text-left py-3 px-4 text-gray-500 font-medium">结论</th>}
-                    {isVisible('minutes_url') && <th className="text-left py-3 px-4 text-gray-500 font-medium">会议纪要</th>}
+                    {isVisible('source_url') && <th className="text-left py-3 px-4 text-gray-500 font-medium">会议纪要</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -263,6 +266,18 @@ export default function Meetings() {
                           />
                         </td>
                       )}
+                      {isVisible('keywords') && (
+                        <td className="py-3 px-4 max-w-[200px]">
+                          <div className="flex flex-wrap gap-1">
+                            {(item.keywords || []).slice(0, 3).map((kw, i) => (
+                              <span key={i} className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">{kw}</span>
+                            ))}
+                            {(item.keywords || []).length > 3 && (
+                              <span className="px-1.5 py-0.5 text-gray-400 text-xs">+{item.keywords.length - 3}</span>
+                            )}
+                          </div>
+                        </td>
+                      )}
                       {isVisible('meeting_time') && <td className="py-3 px-4 text-gray-500 whitespace-nowrap">{item.meeting_time ? new Date(item.meeting_time).toLocaleString('zh-CN') : '-'}</td>}
                       {isVisible('organizer') && <td className="py-3 px-4 text-gray-500">{item.organizer || '-'}</td>}
                       {isVisible('uploader_name') && <td className="py-3 px-4 text-gray-500">{item.uploader_name || '-'}</td>}
@@ -270,11 +285,11 @@ export default function Meetings() {
                       {isVisible('location') && <td className="py-3 px-4 text-gray-500 truncate max-w-[200px]">{item.location || '-'}</td>}
                       {isVisible('participants') && <td className="py-3 px-4 text-gray-500">{item.participants.length > 0 ? `${item.participants.length} 人` : '-'}</td>}
                       {isVisible('conclusions') && <td className="py-3 px-4 text-gray-500 max-w-[250px] truncate">{item.conclusions || '-'}</td>}
-                      {isVisible('minutes_url') && (
+                      {isVisible('source_url') && (
                         <td className="py-3 px-4">
-                          {item.minutes_url ? (
+                          {item.source_url ? (
                             <a
-                              href={item.minutes_url}
+                              href={item.source_url}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="text-indigo-600 hover:text-indigo-800 hover:underline"
@@ -366,6 +381,18 @@ function MeetingDetail({ meeting, onClose, onDelete }: { meeting: MeetingItem; o
             <TagChips contentType="meeting" contentId={meeting.id} editable />
           </div>
 
+          {/* 关键词 */}
+          {meeting.keywords && meeting.keywords.length > 0 && (
+            <div>
+              <p className="text-sm text-gray-500 mb-1">关键词</p>
+              <div className="flex flex-wrap gap-1.5">
+                {meeting.keywords.map((kw, i) => (
+                  <span key={i} className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full text-xs">{kw}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="flex flex-wrap gap-4 text-sm text-gray-600">
             {meeting.meeting_time && (
               <span className="flex items-center gap-1">
@@ -386,13 +413,13 @@ function MeetingDetail({ meeting, onClose, onDelete }: { meeting: MeetingItem; o
           {meeting.organizer && <Field label="组织者" value={meeting.organizer} />}
 
           {/* 链接 */}
-          {(meeting.minutes_url || meeting.bitable_url) && (
+          {(meeting.source_url || meeting.bitable_url) && (
             <div>
               <p className="text-sm text-gray-500 mb-1">相关链接</p>
               <div className="flex flex-wrap gap-2">
-                {meeting.minutes_url && (
+                {meeting.source_url && (
                   <a
-                    href={meeting.minutes_url}
+                    href={meeting.source_url}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-2 px-3 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm hover:bg-blue-100 transition-colors"

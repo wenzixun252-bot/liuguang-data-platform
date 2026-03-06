@@ -54,13 +54,11 @@ class Document(Base):
     file_type: Mapped[str | None] = mapped_column(String(64))
     file_size: Mapped[int | None] = mapped_column(Integer)
     file_path: Mapped[str | None] = mapped_column(String(1024))
-    doc_url: Mapped[str | None] = mapped_column(String(1024))
     source_url: Mapped[str | None] = mapped_column(String(1024))
     uploader_name: Mapped[str | None] = mapped_column(String(256))
     content_vector = mapped_column(Vector(settings.embedding_dimension), nullable=True)
     # -- LLM 提取的统一字段 --
     keywords: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="[]")
-    involved_people: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="[]")
     sentiment: Mapped[str | None] = mapped_column(String(16))
     # -- 数据质量字段 --
     quality_score: Mapped[float | None] = mapped_column(Float)
@@ -71,6 +69,7 @@ class Document(Base):
     feishu_created_at: Mapped[datetime | None] = mapped_column()
     feishu_updated_at: Mapped[datetime | None] = mapped_column()
     parse_status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="done")
+    processed_at: Mapped[datetime | None] = mapped_column()
     synced_at: Mapped[datetime | None] = mapped_column()
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now(), onupdate=func.now())

@@ -86,7 +86,7 @@ interface DocumentDetail {
   category: string | null
   file_type: string | null
   tags: Record<string, unknown>
-  doc_url: string | null
+  source_url: string | null
   uploader_name: string | null
   extra_fields?: { _attachments?: AttachmentMeta[]; _links?: LinkMeta[]; [key: string]: unknown }
   bitable_url: string | null
@@ -106,7 +106,7 @@ interface MeetingDetailData {
   conclusions: string | null
   action_items: { task?: string; assignee?: string; deadline?: string }[]
   content_text: string
-  minutes_url: string | null
+  source_url: string | null
   uploader_name: string | null
   extra_fields?: { _attachments?: AttachmentMeta[]; _links?: LinkMeta[]; [key: string]: unknown }
   bitable_url: string | null
@@ -1086,12 +1086,12 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
                   <div><p className="text-sm text-gray-500">组织者</p><p className="text-sm text-gray-800 font-medium">{meetingDetail.organizer}</p></div>
                 )}
 
-                {(meetingDetail.minutes_url || meetingDetail.bitable_url) && (
+                {(meetingDetail.source_url || meetingDetail.bitable_url) && (
                   <div>
                     <p className="text-sm text-gray-500 mb-1">相关链接</p>
                     <div className="flex flex-wrap gap-2">
-                      {meetingDetail.minutes_url && (
-                        <a href={meetingDetail.minutes_url} target="_blank" rel="noopener noreferrer"
+                      {meetingDetail.source_url && (
+                        <a href={meetingDetail.source_url} target="_blank" rel="noopener noreferrer"
                           className="inline-flex items-center gap-2 px-3 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm hover:bg-blue-100 transition-colors">
                           <FileText size={14} /> 查看完整纪要
                         </a>
@@ -1247,8 +1247,8 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
                   <div>
                     <p className="text-sm text-gray-500 mb-1">文档链接</p>
                     <div className="flex flex-wrap gap-2">
-                      {assetDetail.doc_url && (
-                        <a href={assetDetail.doc_url} target="_blank" rel="noopener noreferrer"
+                      {assetDetail.source_url && (
+                        <a href={assetDetail.source_url} target="_blank" rel="noopener noreferrer"
                           className="inline-flex items-center gap-2 px-3 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm hover:bg-blue-100 transition-colors">
                           <ExternalLink size={14} /> 在飞书中打开
                         </a>

@@ -12,11 +12,10 @@ const MSG_COLUMNS: ColumnDef[] = [
   { key: 'sender', label: '发送人' },
   { key: 'tags', label: '标签' },
   { key: 'content', label: '内容' },
-  { key: 'uploader_name', label: '上传人' },
-  { key: 'message_type', label: '类型', defaultVisible: false },
+  { key: 'chat_name', label: '群组名称' },
+  { key: 'uploader_name', label: '上传人', defaultVisible: false },
   { key: 'sent_at', label: '发送时间' },
   { key: 'attachments', label: '附件', defaultVisible: false },
-  { key: 'chat_id', label: '会话 ID', defaultVisible: false },
 ]
 
 interface AttachmentMeta {
@@ -38,8 +37,8 @@ interface ChatMessageItem {
   source_app_token: string | null
   source_table_id: string | null
   chat_id: string | null
+  chat_name: string | null
   sender: string | null
-  message_type: string | null
   content_text: string
   sent_at: string | null
   reply_to: string | null
@@ -63,7 +62,7 @@ export default function Messages() {
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
-  const [chatIdFilter, setChatIdFilter] = useState('')
+  const [chatNameFilter, setChatNameFilter] = useState('')
   const [senderFilter, setSenderFilter] = useState('')
   const [selected, setSelected] = useState<ChatMessageItem | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
@@ -79,7 +78,7 @@ export default function Messages() {
     setLoading(true)
     const params: Record<string, unknown> = { page, page_size: pageSize }
     if (search) params.search = search
-    if (chatIdFilter) params.chat_id = chatIdFilter
+    if (chatNameFilter) params.chat_name = chatNameFilter
     if (senderFilter) params.sender = senderFilter
     if (tagFilter.length > 0) params.tag_ids = tagFilter
 
@@ -87,11 +86,11 @@ export default function Messages() {
       .then((res) => setData(res.data))
       .catch(() => toast.error('加载聊天记录失败'))
       .finally(() => setLoading(false))
-  }, [page, search, chatIdFilter, senderFilter, tagFilter, refreshKey])
+  }, [page, search, chatNameFilter, senderFilter, tagFilter, refreshKey])
 
   useEffect(() => {
     setSelectedIds(new Set())
-  }, [page, search, chatIdFilter, senderFilter, tagFilter])
+  }, [page, search, chatNameFilter, senderFilter, tagFilter])
 
   // 从搜索结果跳转过来时自动打开详情
   useEffect(() => {
@@ -166,10 +165,10 @@ export default function Messages() {
           />
           <input
             type="text"
-            placeholder="会话 ID 筛选"
+            placeholder="群组名称筛选"
             className="px-3 py-2 border border-gray-200 rounded-lg text-sm w-40 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-            value={chatIdFilter}
-            onChange={(e) => { setChatIdFilter(e.target.value); setPage(1) }}
+            value={chatNameFilter}
+            onChange={(e) => { setChatNameFilter(e.target.value); setPage(1) }}
           />
           <ColumnSettingsButton columns={colDefs} isVisible={isVisible} toggle={toggle} />
         </div>
@@ -218,11 +217,10 @@ export default function Messages() {
                     {isVisible('sender') && <th className="text-left py-3 px-4 text-gray-500 font-medium">发送人</th>}
                     {isVisible('tags') && <th className="text-left py-3 px-4 text-gray-500 font-medium">标签</th>}
                     {isVisible('content') && <th className="text-left py-3 px-4 text-gray-500 font-medium">内容</th>}
+                    {isVisible('chat_name') && <th className="text-left py-3 px-4 text-gray-500 font-medium">群组名称</th>}
                     {isVisible('uploader_name') && <th className="text-left py-3 px-4 text-gray-500 font-medium">上传人</th>}
-                    {isVisible('message_type') && <th className="text-left py-3 px-4 text-gray-500 font-medium">类型</th>}
                     {isVisible('sent_at') && <th className="text-left py-3 px-4 text-gray-500 font-medium">发送时间</th>}
                     {isVisible('attachments') && <th className="text-left py-3 px-4 text-gray-500 font-medium">附件</th>}
-                    {isVisible('chat_id') && <th className="text-left py-3 px-4 text-gray-500 font-medium">会话 ID</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -249,8 +247,8 @@ export default function Messages() {
                           </td>
                         )}
                         {isVisible('content') && <td className="py-3 px-4 text-gray-500 max-w-xs truncate">{item.content_text?.slice(0, 80)}</td>}
+                        {isVisible('chat_name') && <td className="py-3 px-4 text-gray-500">{item.chat_name || '个人聊天'}</td>}
                         {isVisible('uploader_name') && <td className="py-3 px-4 text-gray-500">{item.uploader_name || '-'}</td>}
-                        {isVisible('message_type') && <td className="py-3 px-4 text-gray-500">{item.message_type || '-'}</td>}
                         {isVisible('sent_at') && <td className="py-3 px-4 text-gray-500 whitespace-nowrap">{item.sent_at ? new Date(item.sent_at).toLocaleString('zh-CN') : '-'}</td>}
                         {isVisible('attachments') && (
                           <td className="py-3 px-4 text-gray-500">
@@ -261,7 +259,6 @@ export default function Messages() {
                             ) : '-'}
                           </td>
                         )}
-                        {isVisible('chat_id') && <td className="py-3 px-4 text-gray-400 font-mono text-xs truncate max-w-[150px]">{item.chat_id || '-'}</td>}
                       </tr>
                     )
                   })}
@@ -337,6 +334,7 @@ function MessageDetail({ msg, onClose, onDelete }: { msg: ChatMessageItem; onClo
         </div>
         <div className="p-6 space-y-4">
           {msg.sender && <Field label="发送人" value={msg.sender} />}
+          <Field label="群组名称" value={msg.chat_name || '个人聊天'} />
           {msg.uploader_name && <Field label="上传人" value={msg.uploader_name} icon={<User size={14} />} />}
 
           {/* 标签 */}
@@ -344,8 +342,6 @@ function MessageDetail({ msg, onClose, onDelete }: { msg: ChatMessageItem; onClo
             <p className="text-sm text-gray-500 mb-1">标签</p>
             <TagChips contentType="chat_message" contentId={msg.id} editable />
           </div>
-          {msg.message_type && <Field label="消息类型" value={msg.message_type} />}
-          {msg.chat_id && <Field label="会话 ID" value={msg.chat_id} />}
           {msg.sent_at && <Field label="发送时间" value={new Date(msg.sent_at).toLocaleString('zh-CN')} />}
           {msg.reply_to && <Field label="回复" value={msg.reply_to} />}
 

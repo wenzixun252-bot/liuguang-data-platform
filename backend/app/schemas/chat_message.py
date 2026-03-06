@@ -27,13 +27,13 @@ class ChatMessageOut(BaseModel):
     source_url: str | None = None
     uploader_name: str | None = None
     keywords: list = []
-    involved_people: list = []
     sentiment: str | None = None
     quality_score: float | None = None
     duplicate_of: int | None = None
     extra_fields: dict = {}
     feishu_record_id: str
     parse_status: str = "done"
+    processed_at: datetime | None = None
     synced_at: datetime | None = None
     created_at: datetime
     updated_at: datetime

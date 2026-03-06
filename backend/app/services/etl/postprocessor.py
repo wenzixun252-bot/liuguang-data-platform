@@ -33,7 +33,6 @@ class ContentPostprocessor:
         title: str | None = None,
         summary: str | None = None,
         keywords: list | None = None,
-        involved_people: list | None = None,
     ) -> float:
         """基于多维度计算数据质量评分 (0-1)。"""
         scores = {}
@@ -57,8 +56,8 @@ class ContentPostprocessor:
         scores["no_garbage"] = self._garbage_score(content_text)
 
         # 4. LLM 增强字段完整度
-        enriched = sum(1 for v in [summary, keywords, involved_people] if v)
-        scores["has_enrichment"] = enriched / 3
+        enriched = sum(1 for v in [summary, keywords] if v)
+        scores["has_enrichment"] = enriched / 2
 
         # 加权求和
         total = sum(scores[k] * WEIGHTS[k] for k in WEIGHTS)

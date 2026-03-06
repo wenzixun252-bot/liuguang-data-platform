@@ -19,11 +19,11 @@ class StructuredTableOut(BaseModel):
     row_count: int = 0
     column_count: int = 0
     keywords: list = []
-    involved_people: list = []
     sentiment: str | None = None
     quality_score: float | None = None
     duplicate_of: int | None = None
     parse_status: str = "done"
+    processed_at: datetime | None = None
     synced_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
@@ -50,12 +50,12 @@ class StructuredTableDetail(BaseModel):
     row_count: int = 0
     column_count: int = 0
     keywords: list = []
-    involved_people: list = []
     sentiment: str | None = None
     quality_score: float | None = None
     duplicate_of: int | None = None
     extra_fields: dict = {}
     parse_status: str = "done"
+    processed_at: datetime | None = None
     synced_at: datetime | None = None
     created_at: datetime
     updated_at: datetime

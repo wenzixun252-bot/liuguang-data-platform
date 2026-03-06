@@ -36,7 +36,6 @@ class TransformedDocument:
     content_text: str = ""
     summary: str | None = None
     author: str | None = None
-    doc_url: str | None = None
     source_url: str | None = None
     source_platform: str | None = None
     uploader_name: str | None = None
@@ -46,12 +45,12 @@ class TransformedDocument:
     feishu_updated_at: datetime | None = None
     # -- LLM 提取字段 --
     keywords: list = field(default_factory=list)
-    involved_people: list = field(default_factory=list)
     sentiment: str | None = None
     # -- 后处理字段 --
     quality_score: float | None = None
     duplicate_of: int | None = None
     content_hash: str | None = None
+    processed_at: datetime | None = None
     chunks: list[str] = field(default_factory=list)
 
 
@@ -75,7 +74,6 @@ class TransformedMeeting:
     summary: str | None = None
     transcript: str | None = None
     recording_url: str | None = None
-    minutes_url: str | None = None
     source_url: str | None = None
     source_platform: str | None = None
     uploader_name: str | None = None
@@ -85,12 +83,12 @@ class TransformedMeeting:
     feishu_updated_at: datetime | None = None
     # -- LLM 提取字段 --
     keywords: list = field(default_factory=list)
-    involved_people: list = field(default_factory=list)
     sentiment: str | None = None
     # -- 后处理字段 --
     quality_score: float | None = None
     duplicate_of: int | None = None
     content_hash: str | None = None
+    processed_at: datetime | None = None
     chunks: list[str] = field(default_factory=list)
 
 
@@ -118,12 +116,12 @@ class TransformedChatMessage:
     attachments: list = field(default_factory=list)
     # -- LLM 提取字段 --
     keywords: list = field(default_factory=list)
-    involved_people: list = field(default_factory=list)
     sentiment: str | None = None
     # -- 后处理字段 --
     quality_score: float | None = None
     duplicate_of: int | None = None
     content_hash: str | None = None
+    processed_at: datetime | None = None
     chunks: list[str] = field(default_factory=list)
 
 
@@ -145,7 +143,7 @@ DOCUMENT_KEYWORDS: dict[str, list[str]] = {
     "owner_id": ["所有者", "创建者", "作者", "负责人", "owner", "creator", "文件所有者"],
     "feishu_record_id": ["标识", "record_id", "id", "文件标识"],
     "author": ["作者", "作成者", "author", "writer"],
-    "doc_url": ["文档链接", "文件链接", "链接", "URL", "url", "doc_url", "文档地址"],
+    "source_url": ["文档链接", "文件链接", "链接", "URL", "url", "doc_url", "文档地址"],
     "feishu_created_at": ["创建时间", "created", "创建日期", "文件创建时间"],
     "feishu_updated_at": ["修改时间", "更新时间", "updated", "最近修改", "文件最近修改时间"],
 }
@@ -163,7 +161,7 @@ MEETING_KEYWORDS: dict[str, list[str]] = {
     "agenda": ["议程", "agenda"],
     "conclusions": ["结论", "决议", "conclusion"],
     "action_items": ["待办", "行动项", "action_items", "todo"],
-    "minutes_url": ["完整会议纪要", "会议纪要链接", "纪要链接", "会议纪要", "minutes_url", "纪要", "会议链接"],
+    "source_url": ["完整会议纪要", "会议纪要链接", "纪要链接", "会议纪要", "minutes_url", "纪要", "会议链接"],
     "recording_url": ["录音", "录音链接", "recording", "音频", "录像"],
     "transcript": ["转写", "转写文本", "transcript", "录音文字", "语音转文字"],
     "feishu_created_at": ["创建时间", "created"],
@@ -267,14 +265,7 @@ class DataTransformer:
             )
             record.summary = enrich_result.summary
             record.keywords = enrich_result.keywords
-            record.involved_people = enrich_result.involved_people
             record.sentiment = enrich_result.sentiment
-
-            # 尝试关联用户 ID
-            if enrich_result.involved_people:
-                record.involved_people = await content_enricher.resolve_people_ids(
-                    enrich_result.involved_people, db,
-                )
 
             # ── Step 3: 程序后处理 ──
             record.quality_score = content_postprocessor.compute_quality_score(
@@ -282,7 +273,6 @@ class DataTransformer:
                 title=getattr(record, "title", None),
                 summary=record.summary,
                 keywords=record.keywords,
-                involved_people=record.involved_people,
             )
             record.content_hash = content_postprocessor.compute_content_hash(record.content_text)
             record.chunks = content_postprocessor.split_chunks(record.content_text)
@@ -290,11 +280,8 @@ class DataTransformer:
             # 设置 source_platform
             record.source_platform = "feishu"
 
-            # 设置 source_url
-            if hasattr(record, "doc_url") and record.doc_url:
-                record.source_url = record.doc_url
-            elif hasattr(record, "minutes_url") and record.minutes_url:
-                record.source_url = record.minutes_url
+            # 设置 processed_at
+            record.processed_at = datetime.utcnow()
 
             transformed.append(record)
 
@@ -509,7 +496,7 @@ class DataTransformer:
                 content_text=content_text,
                 transcript=self._extract_text(mapped_values.get("transcript")),
                 recording_url=self._extract_url(mapped_values.get("recording_url")),
-                minutes_url=self._extract_url(mapped_values.get("minutes_url")),
+                source_url=self._extract_url(mapped_values.get("source_url")),
                 extra_fields=extra_fields,
                 attachments=attachments,
                 feishu_created_at=self._parse_time(mapped_values.get("feishu_created_at")),
@@ -542,7 +529,7 @@ class DataTransformer:
                 title=title,
                 content_text=content_text,
                 author=self._extract_text(mapped_values.get("author")),
-                doc_url=self._extract_url(mapped_values.get("doc_url")),
+                source_url=self._extract_url(mapped_values.get("source_url")),
                 extra_fields=extra_fields,
                 attachments=attachments,
                 feishu_created_at=self._parse_time(mapped_values.get("feishu_created_at")),

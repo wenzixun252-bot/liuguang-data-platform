@@ -11,10 +11,10 @@ import { TagChips, TagFilter, BatchTagBar, useContentTags, InlineTagEditor } fro
 const DOC_COLUMNS: ColumnDef[] = [
   { key: 'title', label: '标题' },
   { key: 'tags', label: '标签' },
+  { key: 'keywords', label: '关键词', defaultVisible: false },
   { key: 'summary', label: '摘要' },
   { key: 'source_type', label: '来源' },
-  { key: 'uploader_name', label: '上传人' },
-  { key: 'category', label: '分类', defaultVisible: false },
+  { key: 'uploader_name', label: '上传人', defaultVisible: false },
   { key: 'file_type', label: '类型', defaultVisible: false },
   { key: 'author', label: '作者', defaultVisible: false },
   { key: 'time', label: '时间' },
@@ -43,10 +43,10 @@ interface DocumentItem {
   content_text: string
   summary: string | null
   author: string | null
-  category: string | null
   file_type: string | null
+  keywords: string[]
   tags: Record<string, unknown>
-  doc_url: string | null
+  source_url: string | null
   uploader_name: string | null
   extra_fields?: { _attachments?: AttachmentMeta[]; _links?: LinkMeta[]; [key: string]: unknown }
   feishu_record_id: string | null
@@ -253,10 +253,10 @@ export default function Documents() {
                     </th>
                     {isVisible('title') && <th className="text-left py-3 px-4 text-gray-500 font-medium">标题</th>}
                     {isVisible('tags') && <th className="text-left py-3 px-4 text-gray-500 font-medium">标签</th>}
+                    {isVisible('keywords') && <th className="text-left py-3 px-4 text-gray-500 font-medium">关键词</th>}
                     {isVisible('summary') && <th className="text-left py-3 px-4 text-gray-500 font-medium">摘要</th>}
                     {isVisible('source_type') && <th className="text-left py-3 px-4 text-gray-500 font-medium">来源</th>}
                     {isVisible('uploader_name') && <th className="text-left py-3 px-4 text-gray-500 font-medium">上传人</th>}
-                    {isVisible('category') && <th className="text-left py-3 px-4 text-gray-500 font-medium">分类</th>}
                     {isVisible('file_type') && <th className="text-left py-3 px-4 text-gray-500 font-medium">类型</th>}
                     {isVisible('author') && <th className="text-left py-3 px-4 text-gray-500 font-medium">作者</th>}
                     {isVisible('time') && <th className="text-left py-3 px-4 text-gray-500 font-medium">时间</th>}
@@ -312,6 +312,18 @@ export default function Documents() {
                           />
                         </td>
                       )}
+                      {isVisible('keywords') && (
+                        <td className="py-3 px-4 max-w-[200px]">
+                          <div className="flex flex-wrap gap-1">
+                            {(item.keywords || []).slice(0, 3).map((kw, i) => (
+                              <span key={i} className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">{kw}</span>
+                            ))}
+                            {(item.keywords || []).length > 3 && (
+                              <span className="px-1.5 py-0.5 text-gray-400 text-xs">+{item.keywords.length - 3}</span>
+                            )}
+                          </div>
+                        </td>
+                      )}
                       {isVisible('summary') && <td className="py-3 px-4 text-gray-500 max-w-[250px] truncate">{item.summary || item.content_text?.slice(0, 60) || '-'}</td>}
                       {isVisible('source_type') && (
                         <td className="py-3 px-4">
@@ -321,7 +333,6 @@ export default function Documents() {
                         </td>
                       )}
                       {isVisible('uploader_name') && <td className="py-3 px-4 text-gray-500">{item.uploader_name || '-'}</td>}
-                      {isVisible('category') && <td className="py-3 px-4 text-gray-500">{item.category || '-'}</td>}
                       {isVisible('file_type') && <td className="py-3 px-4 text-gray-500">{item.file_type ? item.file_type.toUpperCase() : '-'}</td>}
                       {isVisible('author') && <td className="py-3 px-4 text-gray-500">{item.author || '-'}</td>}
                       {isVisible('time') && <td className="py-3 px-4 text-gray-500 whitespace-nowrap">{new Date(item.synced_at || item.created_at).toLocaleString('zh-CN')}</td>}
@@ -469,7 +480,6 @@ function DocumentDetail({ doc, onClose, onDelete }: { doc: DocumentItem; onClose
           <Field label="来源" value={SOURCE_LABELS[doc.source_type] || doc.source_type} />
           {doc.uploader_name && <Field label="上传人" value={doc.uploader_name} icon={<User size={14} />} />}
           {doc.author && <Field label="作者" value={doc.author} />}
-          {doc.category && <Field label="分类" value={doc.category} />}
           {doc.file_type && <Field label="文件类型" value={doc.file_type.toUpperCase()} />}
           <Field label="时间" value={new Date(doc.synced_at || doc.created_at).toLocaleString('zh-CN')} />
 
@@ -478,6 +488,18 @@ function DocumentDetail({ doc, onClose, onDelete }: { doc: DocumentItem; onClose
             <p className="text-sm text-gray-500 mb-1">标签</p>
             <TagChips contentType="document" contentId={doc.id} editable />
           </div>
+
+          {/* 关键词 */}
+          {doc.keywords && doc.keywords.length > 0 && (
+            <div>
+              <p className="text-sm text-gray-500 mb-1">关键词</p>
+              <div className="flex flex-wrap gap-1.5">
+                {doc.keywords.map((kw, i) => (
+                  <span key={i} className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full text-xs">{kw}</span>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* 文档链接/下载 */}
           {doc.source_type === 'local' && (
@@ -511,9 +533,9 @@ function DocumentDetail({ doc, onClose, onDelete }: { doc: DocumentItem; onClose
             <div>
               <p className="text-sm text-gray-500 mb-1">文档链接</p>
               <div className="flex flex-wrap gap-2">
-                {doc.doc_url && (
+                {doc.source_url && (
                   <a
-                    href={doc.doc_url}
+                    href={doc.source_url}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-2 px-3 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm hover:bg-blue-100 transition-colors"

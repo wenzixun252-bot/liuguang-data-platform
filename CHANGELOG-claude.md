@@ -49,3 +49,7 @@
 - **2026-03-05 19:07:59** [数据模型] `backend/app/models/__init__.py` — 添加依赖引用
 - **2026-03-05 19:08:05** [数据模型] `backend/app/models/__init__.py` — 新增 1 行代码
 - **2026-03-05 19:11:29** [数据库迁移] `backend/alembic/versions/q7g8h9i0j1k2_schema_v2_unified_fields.py` — 新建文件 `q7g8h9i0j1k2_schema_v2_unified_fields`，包含 upgrade, downgrade
+- **2026-03-06 09:41:36** [数据库迁移] `backend/alembic/versions/r8h9i0j1k2l3_drop_involved_people_add_processed_at.py` — 新建文件 `r8h9i0j1k2l3_drop_involved_people_add_processed_at`，包含 upgrade, downgrade
+- **2026-03-06 11:19:25** [其他] `C:/Users/ljadmin/.claude/plans/effervescent-weaving-rainbow.md` — 新建文件 `effervescent-weaving-rainbow` (144行)
+- **2026-03-06 11:24:58** [前端页面] `frontend/src/pages/StructuredTables.tsx` — 新增 1 行代码
+- **2026-03-06 11:25:07** [前端页面] `frontend/src/pages/StructuredTables.tsx` — 新增 8 行代码

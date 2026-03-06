@@ -1,14 +1,10 @@
-"""ETL Step 2: LLM 智能提取 — 一次调用提取 summary/keywords/people/sentiment。"""
+"""ETL Step 2: LLM 智能提取 — 一次调用提取 summary/keywords/sentiment。"""
 
 import json
 import logging
 from dataclasses import dataclass, field
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.config import settings
-from app.models.user import User
 
 logger = logging.getLogger(__name__)
 
@@ -28,24 +24,12 @@ ENRICH_PROMPT = """你是一个数据分析专家。请分析以下{content_type
 ## 要求
 1. summary: 生成100-200字的摘要，准确概括核心内容
 2. keywords: 提取5-10个关键词/主题词，按重要性排序
-3. involved_people: 提取所有涉及的人物，标注角色
-4. sentiment: 判断整体情感倾向
-
-## 人物角色说明
-- author: 作者/撰写者
-- organizer: 组织者/发起人
-- participant: 参与者/与会者
-- sender: 发送者
-- mentioned: 被提及的人
-- assignee: 被指派任务的人
+3. sentiment: 判断整体情感倾向
 
 ## 输出格式（仅输出 JSON）
 {{
   "summary": "摘要文本",
   "keywords": ["关键词1", "关键词2"],
-  "involved_people": [
-    {{"name": "人名", "role": "author"}}
-  ],
   "sentiment": "positive"
 }}
 
@@ -61,7 +45,6 @@ class EnrichResult:
     """LLM 提取结果。"""
     summary: str | None = None
     keywords: list[str] = field(default_factory=list)
-    involved_people: list[dict] = field(default_factory=list)
     sentiment: str | None = None
 
 
@@ -120,7 +103,6 @@ class ContentEnricher:
                 return EnrichResult(
                     summary=parsed.get("summary"),
                     keywords=parsed.get("keywords", []),
-                    involved_people=parsed.get("involved_people", []),
                     sentiment=self._validate_sentiment(parsed.get("sentiment")),
                 )
             except (json.JSONDecodeError, IndexError, KeyError) as e:
@@ -133,37 +115,6 @@ class ContentEnricher:
                     return EnrichResult()
 
         return EnrichResult()
-
-    async def resolve_people_ids(
-        self,
-        people: list[dict],
-        db: AsyncSession,
-    ) -> list[dict]:
-        """尝试将人名匹配到系统内用户 ID。"""
-        if not people:
-            return people
-
-        # 批量查询所有用户名
-        result = await db.execute(select(User))
-        users = result.scalars().all()
-
-        # 构建名称 -> user_id 映射
-        name_map: dict[str, str] = {}
-        for user in users:
-            if user.name:
-                name_map[user.name] = user.feishu_open_id
-            if user.en_name:
-                name_map[user.en_name] = user.feishu_open_id
-
-        # 匹配
-        resolved = []
-        for person in people:
-            name = person.get("name", "").strip()
-            if name in name_map:
-                person["user_id"] = name_map[name]
-            resolved.append(person)
-
-        return resolved
 
     @staticmethod
     def _validate_sentiment(value: str | None) -> str | None:

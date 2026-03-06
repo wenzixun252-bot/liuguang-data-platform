@@ -79,7 +79,7 @@ class CloudDocImportService:
 
             # 6. 构建文档 URL
             domain = settings.feishu_base_domain or "feishu.cn"
-            doc_url = f"https://{domain}/docx/{document_id}"
+            source_url = f"https://{domain}/docx/{document_id}"
 
             # 7. 构建时间戳
             created_time = doc_content.get("created_time")
@@ -97,7 +97,7 @@ class CloudDocImportService:
                 existing.summary = parsed.get("summary")
                 existing.author = parsed.get("author")
                 existing.keywords = keywords_list
-                existing.doc_url = doc_url
+                existing.source_url = source_url
                 existing.feishu_created_at = feishu_created
                 existing.feishu_updated_at = feishu_updated
                 existing.synced_at = datetime.utcnow()
@@ -118,7 +118,7 @@ class CloudDocImportService:
                     author=parsed.get("author"),
                     keywords=keywords_list,
                     file_type="docx",
-                    doc_url=doc_url,
+                    source_url=source_url,
                     uploader_name=uploader_name,
                     feishu_created_at=feishu_created,
                     feishu_updated_at=feishu_updated,
@@ -204,7 +204,7 @@ class CloudDocImportService:
 
             # 6. 构建文档 URL
             domain = settings.feishu_base_domain or "feishu.cn"
-            doc_url = f"https://{domain}/file/{file_token}"
+            source_url = f"https://{domain}/file/{file_token}"
 
             # 7. Upsert
             keywords_list = parsed.get("tags", []) if isinstance(parsed.get("tags"), list) else []
@@ -217,7 +217,7 @@ class CloudDocImportService:
                 existing.keywords = keywords_list
                 existing.file_type = ext
                 existing.file_size = file_size
-                existing.doc_url = doc_url
+                existing.source_url = source_url
                 existing.synced_at = datetime.utcnow()
                 if embedding:
                     existing.content_vector = embedding
@@ -237,7 +237,7 @@ class CloudDocImportService:
                     keywords=keywords_list,
                     file_type=ext,
                     file_size=file_size,
-                    doc_url=doc_url,
+                    source_url=source_url,
                     uploader_name=uploader_name,
                     synced_at=datetime.utcnow(),
                 )
@@ -341,7 +341,7 @@ class CloudDocImportService:
                 title=name,
                 content_text="",
                 file_type=doc_type,
-                doc_url=url,
+                source_url=url,
                 uploader_name=uploader_name,
                 parse_status="pending",
                 synced_at=datetime.utcnow(),
