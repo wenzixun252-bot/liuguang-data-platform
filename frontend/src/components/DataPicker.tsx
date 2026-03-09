@@ -223,7 +223,7 @@ export default function DataPicker({ open, selection, onClose, onApply }: Props)
               </span>
             )}
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600" title="关闭" aria-label="关闭">
             <X size={16} />
           </button>
         </div>

@@ -1,0 +1,2828 @@
+[{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/CloudDocSync.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 226,
+	"startColumn": 12,
+	"endLineNumber": 226,
+	"endColumn": 18,
+	"modelVersionId": 1,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/CloudDocSync.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 398,
+	"startColumn": 26,
+	"endLineNumber": 398,
+	"endColumn": 32,
+	"modelVersionId": 1,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/DataPicker.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 226,
+	"startColumn": 12,
+	"endLineNumber": 226,
+	"endColumn": 18,
+	"modelVersionId": 3,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/GlobalSearch.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/select-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Select element must have an accessible name: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 113,
+	"startColumn": 10,
+	"endLineNumber": 113,
+	"endColumn": 16,
+	"modelVersionId": 5,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/KGSidebar.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 97,
+	"startColumn": 12,
+	"endLineNumber": 97,
+	"endColumn": 18,
+	"modelVersionId": 3,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/Layout.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 141,
+	"startColumn": 12,
+	"endLineNumber": 141,
+	"endColumn": 18,
+	"modelVersionId": 4,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/Layout.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 225,
+	"startColumn": 12,
+	"endLineNumber": 225,
+	"endColumn": 18,
+	"modelVersionId": 4,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/RecipeSyncConfig.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 278,
+	"startColumn": 12,
+	"endLineNumber": 278,
+	"endColumn": 18,
+	"modelVersionId": 1,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/ReportPanel.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/label",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Form elements must have labels: Element has no title attribute Element has no placeholder attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 271,
+	"startColumn": 16,
+	"endLineNumber": 271,
+	"endColumn": 21,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/ReportPanel.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/label",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Form elements must have labels: Element has no title attribute Element has no placeholder attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 280,
+	"startColumn": 16,
+	"endLineNumber": 280,
+	"endColumn": 21,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/ReportPanel.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 305,
+	"startColumn": 18,
+	"endLineNumber": 305,
+	"endColumn": 24,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/ReportPanel.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 329,
+	"startColumn": 22,
+	"endLineNumber": 329,
+	"endColumn": 28,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/TagManager.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/select-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Select element must have an accessible name: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 103,
+	"startColumn": 14,
+	"endLineNumber": 103,
+	"endColumn": 20,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/TagManager.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 114,
+	"startColumn": 18,
+	"endLineNumber": 114,
+	"endColumn": 24,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/TagManager.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 150,
+	"startColumn": 18,
+	"endLineNumber": 150,
+	"endColumn": 24,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/TagManager.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 156,
+	"startColumn": 18,
+	"endLineNumber": 156,
+	"endColumn": 24,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/TagManager.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/label",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Form elements must have labels: Element has no title attribute Element has no placeholder attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 172,
+	"startColumn": 12,
+	"endLineNumber": 172,
+	"endColumn": 17,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/TagManager.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 179,
+	"startColumn": 16,
+	"endLineNumber": 179,
+	"endColumn": 22,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/TagManager.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 257,
+	"startColumn": 14,
+	"endLineNumber": 257,
+	"endColumn": 20,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/TagManager.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 265,
+	"startColumn": 12,
+	"endLineNumber": 265,
+	"endColumn": 18,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/TagManager.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 403,
+	"startColumn": 16,
+	"endLineNumber": 403,
+	"endColumn": 22,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/TagManager.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 686,
+	"startColumn": 12,
+	"endLineNumber": 686,
+	"endColumn": 18,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Communications.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/label",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Form elements must have labels: Element has no title attribute Element has no placeholder attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 370,
+	"startColumn": 24,
+	"endLineNumber": 370,
+	"endColumn": 29,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Communications.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/label",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Form elements must have labels: Element has no title attribute Element has no placeholder attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 397,
+	"startColumn": 26,
+	"endLineNumber": 397,
+	"endColumn": 31,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Communications.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 474,
+	"startColumn": 20,
+	"endLineNumber": 474,
+	"endColumn": 26,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Communications.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 477,
+	"startColumn": 20,
+	"endLineNumber": 477,
+	"endColumn": 26,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Communications.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 552,
+	"startColumn": 14,
+	"endLineNumber": 552,
+	"endColumn": 20,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/DataInsights.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 283,
+	"startColumn": 16,
+	"endLineNumber": 283,
+	"endColumn": 22,
+	"modelVersionId": 7,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Documents.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/select-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Select element must have an accessible name: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 188,
+	"startColumn": 12,
+	"endLineNumber": 188,
+	"endColumn": 18,
+	"modelVersionId": 4,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Documents.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/select-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Select element must have an accessible name: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 197,
+	"startColumn": 12,
+	"endLineNumber": 197,
+	"endColumn": 18,
+	"modelVersionId": 4,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Documents.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/label",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Form elements must have labels: Element has no title attribute Element has no placeholder attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 258,
+	"startColumn": 24,
+	"endLineNumber": 258,
+	"endColumn": 29,
+	"modelVersionId": 4,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Documents.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/label",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Form elements must have labels: Element has no title attribute Element has no placeholder attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 284,
+	"startColumn": 26,
+	"endLineNumber": 284,
+	"endColumn": 31,
+	"modelVersionId": 4,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Documents.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 360,
+	"startColumn": 20,
+	"endLineNumber": 360,
+	"endColumn": 26,
+	"modelVersionId": 4,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Documents.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 363,
+	"startColumn": 20,
+	"endLineNumber": 363,
+	"endColumn": 26,
+	"modelVersionId": 4,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Documents.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 443,
+	"startColumn": 12,
+	"endLineNumber": 443,
+	"endColumn": 18,
+	"modelVersionId": 4,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Documents.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 486,
+	"startColumn": 14,
+	"endLineNumber": 486,
+	"endColumn": 20,
+	"modelVersionId": 4,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/ETLAdmin.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/select-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Select element must have an accessible name: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 243,
+	"startColumn": 18,
+	"endLineNumber": 243,
+	"endColumn": 24,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/ETLAdmin.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/label",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Form elements must have labels: Element has no title attribute Element has no placeholder attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 284,
+	"startColumn": 22,
+	"endLineNumber": 284,
+	"endColumn": 27,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/ETLAdmin.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/label",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Form elements must have labels: Element has no title attribute Element has no placeholder attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 304,
+	"startColumn": 26,
+	"endLineNumber": 304,
+	"endColumn": 31,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/KnowledgeGraph.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/select-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Select element must have an accessible name: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 631,
+	"startColumn": 12,
+	"endLineNumber": 631,
+	"endColumn": 18,
+	"modelVersionId": 10,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/KnowledgeGraph.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/select-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Select element must have an accessible name: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 642,
+	"startColumn": 14,
+	"endLineNumber": 642,
+	"endColumn": 20,
+	"modelVersionId": 10,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/KnowledgeGraph.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 739,
+	"startColumn": 20,
+	"endLineNumber": 739,
+	"endColumn": 26,
+	"modelVersionId": 10,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/KnowledgeGraph.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 1038,
+	"startColumn": 16,
+	"endLineNumber": 1038,
+	"endColumn": 22,
+	"modelVersionId": 10,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/KnowledgeGraph.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 1065,
+	"startColumn": 16,
+	"endLineNumber": 1065,
+	"endColumn": 22,
+	"modelVersionId": 10,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Meetings.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/label",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Form elements must have labels: Element has no title attribute Element has no placeholder attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 233,
+	"startColumn": 24,
+	"endLineNumber": 233,
+	"endColumn": 29,
+	"modelVersionId": 1,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Meetings.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/label",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Form elements must have labels: Element has no title attribute Element has no placeholder attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 256,
+	"startColumn": 26,
+	"endLineNumber": 256,
+	"endColumn": 31,
+	"modelVersionId": 1,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Meetings.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 313,
+	"startColumn": 20,
+	"endLineNumber": 313,
+	"endColumn": 26,
+	"modelVersionId": 1,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Meetings.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 316,
+	"startColumn": 20,
+	"endLineNumber": 316,
+	"endColumn": 26,
+	"modelVersionId": 1,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Meetings.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 372,
+	"startColumn": 14,
+	"endLineNumber": 372,
+	"endColumn": 20,
+	"modelVersionId": 1,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Messages.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/label",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Form elements must have labels: Element has no title attribute Element has no placeholder attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 215,
+	"startColumn": 24,
+	"endLineNumber": 215,
+	"endColumn": 29,
+	"modelVersionId": 1,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Messages.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/label",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Form elements must have labels: Element has no title attribute Element has no placeholder attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 236,
+	"startColumn": 28,
+	"endLineNumber": 236,
+	"endColumn": 33,
+	"modelVersionId": 1,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Messages.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 273,
+	"startColumn": 20,
+	"endLineNumber": 273,
+	"endColumn": 26,
+	"modelVersionId": 1,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Messages.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 276,
+	"startColumn": 20,
+	"endLineNumber": 276,
+	"endColumn": 26,
+	"modelVersionId": 1,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Messages.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 332,
+	"startColumn": 14,
+	"endLineNumber": 332,
+	"endColumn": 20,
+	"modelVersionId": 1,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Reports.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/select-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Select element must have an accessible name: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 131,
+	"startColumn": 12,
+	"endLineNumber": 131,
+	"endColumn": 18,
+	"modelVersionId": 3,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Reports.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/label",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Form elements must have labels: Element has no title attribute Element has no placeholder attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 185,
+	"startColumn": 24,
+	"endLineNumber": 185,
+	"endColumn": 29,
+	"modelVersionId": 3,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Reports.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/label",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Form elements must have labels: Element has no title attribute Element has no placeholder attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 203,
+	"startColumn": 28,
+	"endLineNumber": 203,
+	"endColumn": 33,
+	"modelVersionId": 3,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Reports.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 249,
+	"startColumn": 20,
+	"endLineNumber": 249,
+	"endColumn": 26,
+	"modelVersionId": 3,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Reports.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 253,
+	"startColumn": 20,
+	"endLineNumber": 253,
+	"endColumn": 26,
+	"modelVersionId": 3,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Reports.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 349,
+	"startColumn": 12,
+	"endLineNumber": 349,
+	"endColumn": 18,
+	"modelVersionId": 3,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Reports.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/select-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Select element must have an accessible name: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 357,
+	"startColumn": 14,
+	"endLineNumber": 357,
+	"endColumn": 20,
+	"modelVersionId": 3,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Reports.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/label",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Form elements must have labels: Element has no title attribute Element has no placeholder attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 389,
+	"startColumn": 16,
+	"endLineNumber": 389,
+	"endColumn": 21,
+	"modelVersionId": 3,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Reports.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/label",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Form elements must have labels: Element has no title attribute Element has no placeholder attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 398,
+	"startColumn": 16,
+	"endLineNumber": 398,
+	"endColumn": 21,
+	"modelVersionId": 3,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Reports.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/label",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Form elements must have labels: Element has no title attribute Element has no placeholder attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 463,
+	"startColumn": 24,
+	"endLineNumber": 463,
+	"endColumn": 29,
+	"modelVersionId": 3,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Settings.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 175,
+	"startColumn": 18,
+	"endLineNumber": 175,
+	"endColumn": 24,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Settings.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 185,
+	"startColumn": 18,
+	"endLineNumber": 185,
+	"endColumn": 24,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Settings.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/select-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Select element must have an accessible name: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 507,
+	"startColumn": 14,
+	"endLineNumber": 507,
+	"endColumn": 20,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Settings.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/label",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Form elements must have labels: Element has no title attribute Element has no placeholder attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 547,
+	"startColumn": 22,
+	"endLineNumber": 547,
+	"endColumn": 27,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Settings.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 565,
+	"startColumn": 22,
+	"endLineNumber": 565,
+	"endColumn": 28,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Settings.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 711,
+	"startColumn": 20,
+	"endLineNumber": 711,
+	"endColumn": 26,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Settings.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 879,
+	"startColumn": 12,
+	"endLineNumber": 879,
+	"endColumn": 18,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Settings.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 1333,
+	"startColumn": 22,
+	"endLineNumber": 1333,
+	"endColumn": 28,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Settings.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 1424,
+	"startColumn": 12,
+	"endLineNumber": 1424,
+	"endColumn": 18,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Settings.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 1805,
+	"startColumn": 18,
+	"endLineNumber": 1805,
+	"endColumn": 24,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Settings.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 1814,
+	"startColumn": 18,
+	"endLineNumber": 1814,
+	"endColumn": 24,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/StructuredTables.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 294,
+	"startColumn": 14,
+	"endLineNumber": 294,
+	"endColumn": 20,
+	"modelVersionId": 5,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/StructuredTables.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 332,
+	"startColumn": 18,
+	"endLineNumber": 332,
+	"endColumn": 24,
+	"modelVersionId": 5,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/StructuredTables.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 333,
+	"startColumn": 18,
+	"endLineNumber": 333,
+	"endColumn": 24,
+	"modelVersionId": 5,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/StructuredTables.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/select-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Select element must have an accessible name: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 352,
+	"startColumn": 10,
+	"endLineNumber": 352,
+	"endColumn": 16,
+	"modelVersionId": 5,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/StructuredTables.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/label",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Form elements must have labels: Element has no title attribute Element has no placeholder attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 407,
+	"startColumn": 24,
+	"endLineNumber": 407,
+	"endColumn": 29,
+	"modelVersionId": 5,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/StructuredTables.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/label",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Form elements must have labels: Element has no title attribute Element has no placeholder attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 430,
+	"startColumn": 26,
+	"endLineNumber": 430,
+	"endColumn": 31,
+	"modelVersionId": 5,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/StructuredTables.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 478,
+	"startColumn": 20,
+	"endLineNumber": 478,
+	"endColumn": 26,
+	"modelVersionId": 5,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/StructuredTables.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 479,
+	"startColumn": 20,
+	"endLineNumber": 479,
+	"endColumn": 26,
+	"modelVersionId": 5,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/StructuredTables.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 575,
+	"startColumn": 14,
+	"endLineNumber": 575,
+	"endColumn": 20,
+	"modelVersionId": 5,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/StructuredTables.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 576,
+	"startColumn": 14,
+	"endLineNumber": 576,
+	"endColumn": 20,
+	"modelVersionId": 5,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/StructuredTables.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 652,
+	"startColumn": 18,
+	"endLineNumber": 652,
+	"endColumn": 24,
+	"modelVersionId": 5,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/StructuredTables.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 653,
+	"startColumn": 18,
+	"endLineNumber": 653,
+	"endColumn": 24,
+	"modelVersionId": 5,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/StructuredTables.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 690,
+	"startColumn": 12,
+	"endLineNumber": 690,
+	"endColumn": 18,
+	"modelVersionId": 5,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/StructuredTables.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/label",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Form elements must have labels: Element has no title attribute Element has no placeholder attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 694,
+	"startColumn": 12,
+	"endLineNumber": 694,
+	"endColumn": 17,
+	"modelVersionId": 5,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/StructuredTables.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 892,
+	"startColumn": 12,
+	"endLineNumber": 892,
+	"endColumn": 18,
+	"modelVersionId": 5,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Todos.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/select-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Select element must have an accessible name: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 179,
+	"startColumn": 12,
+	"endLineNumber": 179,
+	"endColumn": 18,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Todos.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/label",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Form elements must have labels: Element has no title attribute Element has no placeholder attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 267,
+	"startColumn": 16,
+	"endLineNumber": 267,
+	"endColumn": 21,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Todos.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/forms",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/label",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Form elements must have labels: Element has no title attribute Element has no placeholder attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 277,
+	"startColumn": 22,
+	"endLineNumber": 277,
+	"endColumn": 27,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Todos.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 284,
+	"startColumn": 22,
+	"endLineNumber": 284,
+	"endColumn": 28,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Todos.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/button-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 8,
+	"message": "Buttons must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 290,
+	"startColumn": 22,
+	"endLineNumber": 290,
+	"endColumn": 28,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/tsconfig.json",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "typescript-config/strict",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-typescript-config/strict/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 8,
+	"message": "The compiler option \"strict\" should be enabled to reduce type errors.",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 1,
+	"startColumn": 1,
+	"endLineNumber": 1,
+	"endColumn": 2,
+	"modelVersionId": 1,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/DataPicker.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "no-inline-styles",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-no-inline-styles/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "CSS inline styles should not be used, move styles to an external CSS file",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 211,
+	"startColumn": 8,
+	"endLineNumber": 211,
+	"endColumn": 11,
+	"modelVersionId": 3,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/GlobalSearch.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "no-inline-styles",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-no-inline-styles/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "CSS inline styles should not be used, move styles to an external CSS file",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 187,
+	"startColumn": 26,
+	"endLineNumber": 187,
+	"endColumn": 30,
+	"modelVersionId": 5,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/KGSidebar.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "no-inline-styles",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-no-inline-styles/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "CSS inline styles should not be used, move styles to an external CSS file",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 122,
+	"startColumn": 20,
+	"endLineNumber": 122,
+	"endColumn": 24,
+	"modelVersionId": 3,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/TagManager.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "no-inline-styles",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-no-inline-styles/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "CSS inline styles should not be used, move styles to an external CSS file",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 114,
+	"startColumn": 18,
+	"endLineNumber": 114,
+	"endColumn": 24,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/TagManager.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "no-inline-styles",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-no-inline-styles/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "CSS inline styles should not be used, move styles to an external CSS file",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 140,
+	"startColumn": 12,
+	"endLineNumber": 140,
+	"endColumn": 15,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/TagManager.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "no-inline-styles",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-no-inline-styles/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "CSS inline styles should not be used, move styles to an external CSS file",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 145,
+	"startColumn": 14,
+	"endLineNumber": 145,
+	"endColumn": 18,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/TagManager.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "no-inline-styles",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-no-inline-styles/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "CSS inline styles should not be used, move styles to an external CSS file",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 179,
+	"startColumn": 16,
+	"endLineNumber": 179,
+	"endColumn": 22,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/TagManager.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "no-inline-styles",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-no-inline-styles/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "CSS inline styles should not be used, move styles to an external CSS file",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 250,
+	"startColumn": 10,
+	"endLineNumber": 250,
+	"endColumn": 14,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/TagManager.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "no-inline-styles",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-no-inline-styles/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "CSS inline styles should not be used, move styles to an external CSS file",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 273,
+	"startColumn": 20,
+	"endLineNumber": 273,
+	"endColumn": 26,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/TagManager.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "no-inline-styles",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-no-inline-styles/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "CSS inline styles should not be used, move styles to an external CSS file",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 322,
+	"startColumn": 10,
+	"endLineNumber": 322,
+	"endColumn": 16,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/TagManager.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "no-inline-styles",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-no-inline-styles/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "CSS inline styles should not be used, move styles to an external CSS file",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 397,
+	"startColumn": 14,
+	"endLineNumber": 397,
+	"endColumn": 18,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/TagManager.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "no-inline-styles",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-no-inline-styles/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "CSS inline styles should not be used, move styles to an external CSS file",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 426,
+	"startColumn": 18,
+	"endLineNumber": 426,
+	"endColumn": 22,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/TagManager.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "no-inline-styles",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-no-inline-styles/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "CSS inline styles should not be used, move styles to an external CSS file",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 427,
+	"startColumn": 18,
+	"endLineNumber": 427,
+	"endColumn": 22,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/TagManager.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "no-inline-styles",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-no-inline-styles/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "CSS inline styles should not be used, move styles to an external CSS file",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 563,
+	"startColumn": 10,
+	"endLineNumber": 563,
+	"endColumn": 16,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/TagManager.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "no-inline-styles",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-no-inline-styles/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "CSS inline styles should not be used, move styles to an external CSS file",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 680,
+	"startColumn": 10,
+	"endLineNumber": 680,
+	"endColumn": 14,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/TagManager.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "no-inline-styles",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-no-inline-styles/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "CSS inline styles should not be used, move styles to an external CSS file",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 723,
+	"startColumn": 22,
+	"endLineNumber": 723,
+	"endColumn": 26,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/components/TagManager.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "no-inline-styles",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-no-inline-styles/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "CSS inline styles should not be used, move styles to an external CSS file",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 724,
+	"startColumn": 22,
+	"endLineNumber": 724,
+	"endColumn": 26,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Communications.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/link-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 4,
+	"message": "Links must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 449,
+	"startColumn": 30,
+	"endLineNumber": 449,
+	"endColumn": 31,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/KnowledgeGraph.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "no-inline-styles",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-no-inline-styles/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "CSS inline styles should not be used, move styles to an external CSS file",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 684,
+	"startColumn": 16,
+	"endLineNumber": 684,
+	"endColumn": 20,
+	"modelVersionId": 10,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/KnowledgeGraph.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "no-inline-styles",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-no-inline-styles/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "CSS inline styles should not be used, move styles to an external CSS file",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 715,
+	"startColumn": 16,
+	"endLineNumber": 715,
+	"endColumn": 20,
+	"modelVersionId": 10,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/KnowledgeGraph.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "no-inline-styles",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-no-inline-styles/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "CSS inline styles should not be used, move styles to an external CSS file",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 727,
+	"startColumn": 8,
+	"endLineNumber": 727,
+	"endColumn": 11,
+	"modelVersionId": 10,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/KnowledgeGraph.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "no-inline-styles",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-no-inline-styles/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "CSS inline styles should not be used, move styles to an external CSS file",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 745,
+	"startColumn": 20,
+	"endLineNumber": 745,
+	"endColumn": 24,
+	"modelVersionId": 10,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/KnowledgeGraph.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "no-inline-styles",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-no-inline-styles/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "CSS inline styles should not be used, move styles to an external CSS file",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 748,
+	"startColumn": 22,
+	"endLineNumber": 748,
+	"endColumn": 26,
+	"modelVersionId": 10,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/KnowledgeGraph.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "no-inline-styles",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-no-inline-styles/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "CSS inline styles should not be used, move styles to an external CSS file",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 1035,
+	"startColumn": 12,
+	"endLineNumber": 1035,
+	"endColumn": 15,
+	"modelVersionId": 10,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Meetings.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "axe/name-role-value",
+		"target": {
+			"$mid": 1,
+			"path": "/rules/axe/4.11/link-name",
+			"scheme": "https",
+			"authority": "dequeuniversity.com",
+			"query": "application=axeAPI"
+		}
+	},
+	"severity": 4,
+	"message": "Links must have discernible text: Element has no title attribute",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 291,
+	"startColumn": 30,
+	"endLineNumber": 291,
+	"endColumn": 31,
+	"modelVersionId": 1,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Settings.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "no-inline-styles",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-no-inline-styles/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "CSS inline styles should not be used, move styles to an external CSS file",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 292,
+	"startColumn": 8,
+	"endLineNumber": 292,
+	"endColumn": 11,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Settings.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "no-inline-styles",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-no-inline-styles/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "CSS inline styles should not be used, move styles to an external CSS file",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 332,
+	"startColumn": 16,
+	"endLineNumber": 332,
+	"endColumn": 19,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Settings.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "no-inline-styles",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-no-inline-styles/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "CSS inline styles should not be used, move styles to an external CSS file",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 891,
+	"startColumn": 18,
+	"endLineNumber": 891,
+	"endColumn": 24,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Settings.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "no-inline-styles",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-no-inline-styles/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "CSS inline styles should not be used, move styles to an external CSS file",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 1235,
+	"startColumn": 18,
+	"endLineNumber": 1235,
+	"endColumn": 24,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Settings.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "no-inline-styles",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-no-inline-styles/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "CSS inline styles should not be used, move styles to an external CSS file",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 1293,
+	"startColumn": 30,
+	"endLineNumber": 1293,
+	"endColumn": 34,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Settings.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "no-inline-styles",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-no-inline-styles/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "CSS inline styles should not be used, move styles to an external CSS file",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 1347,
+	"startColumn": 28,
+	"endLineNumber": 1347,
+	"endColumn": 34,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Settings.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "no-inline-styles",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-no-inline-styles/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "CSS inline styles should not be used, move styles to an external CSS file",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 1640,
+	"startColumn": 8,
+	"endLineNumber": 1640,
+	"endColumn": 14,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/src/pages/Settings.tsx",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "no-inline-styles",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-no-inline-styles/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "CSS inline styles should not be used, move styles to an external CSS file",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 1657,
+	"startColumn": 14,
+	"endLineNumber": 1657,
+	"endColumn": 17,
+	"modelVersionId": 2,
+	"origin": "extHost1"
+},{
+	"resource": "/d:/CC/liuguang-data-platform/frontend/tsconfig.json",
+	"owner": "_generated_diagnostic_collection_name_#2",
+	"code": {
+		"value": "typescript-config/consistent-casing",
+		"target": {
+			"$mid": 1,
+			"path": "/docs/user-guide/hints/hint-typescript-config/consistent-casing/",
+			"scheme": "https",
+			"authority": "webhint.io"
+		}
+	},
+	"severity": 4,
+	"message": "The compiler option \"forceConsistentCasingInFileNames\" should be enabled to reduce issues when working with different OSes.",
+	"source": "Microsoft Edge Tools",
+	"startLineNumber": 1,
+	"startColumn": 1,
+	"endLineNumber": 1,
+	"endColumn": 2,
+	"modelVersionId": 1,
+	"origin": "extHost1"
+}]

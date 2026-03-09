@@ -86,3 +86,11 @@
 - **2026-03-09 14:43:17** [数据模型] `backend/app/models/__init__.py` — 删除 2 行代码
 - **2026-03-09 14:43:29** [数据模型] `backend/app/models/__init__.py` — 删除 2 行代码
 - **2026-03-09 14:44:17** [数据库迁移] `backend/alembic/versions/t0j1k2l3m4n5_drop_archived_tables.py` — 新建文件 `t0j1k2l3m4n5_drop_archived_tables`，包含 upgrade, downgrade
+- **2026-03-09 15:18:42** [数据库迁移] `backend/alembic/versions/s9i0j1k2l3m4_asset_type_restructure.py` — 修改逻辑 (+2/-2行)
+- **2026-03-09 15:19:37** [数据库迁移] `backend/alembic/versions/s9i0j1k2l3m4_asset_type_restructure.py` — 修改逻辑 (+2/-2行)
+- **2026-03-09 15:24:46** [数据库迁移] `backend/alembic/versions/s9i0j1k2l3m4_asset_type_restructure.py` — 修改逻辑 (+5/-3行)
+- **2026-03-09 15:25:48** [数据库迁移] `backend/alembic/versions/s9i0j1k2l3m4_asset_type_restructure.py` — 修改逻辑 (+1/-2行)
+- **2026-03-09 15:43:21** [前端组件] `frontend/src/components/CloudDocSync.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-09 15:43:50** [数据库迁移] `backend/alembic/versions/s9i0j1k2l3m4_asset_type_restructure.py` — 修改逻辑 (+17/-1行)
+- **2026-03-09 15:44:35** [前端组件] `frontend/src/components/DataPicker.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-09 15:45:34** [数据库迁移] `backend/alembic/versions/s9i0j1k2l3m4_asset_type_restructure.py` — 新增 16 行代码

@@ -611,7 +611,7 @@ function CommunicationDetail({
           {item.uploader_name && <Field label="上传人" value={item.uploader_name} icon={<User size={14} />} />}
 
           {/* 相关链接 */}
-          {(item.source_url || item.recording_url || item.extra_fields?.bitable_url) && (
+          {(item.source_url || item.recording_url || (item.extra_fields?.bitable_url as string | undefined)) && (
             <div>
               <p className="text-sm text-gray-500 mb-1">相关链接</p>
               <div className="flex flex-wrap gap-2">
@@ -637,9 +637,9 @@ function CommunicationDetail({
                     查看录音
                   </a>
                 )}
-                {(item.extra_fields as Record<string, unknown>)?.bitable_url && (
+                {(item.extra_fields?.bitable_url as string | undefined) && (
                   <a
-                    href={(item.extra_fields as Record<string, unknown>).bitable_url as string}
+                    href={item.extra_fields?.bitable_url as string}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-2 px-3 py-2 bg-purple-50 text-purple-700 rounded-lg text-sm hover:bg-purple-100 transition-colors"

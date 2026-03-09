@@ -104,13 +104,14 @@ def upgrade() -> None:
     op.create_index("idx_comm_chat_id", "communications", ["chat_id"])
 
     # ── 2. 从 meetings 迁移数据 ──────────────────────────
+    # 注意：content_vector 跳过（维度可能不匹配），后续 ETL 会重新生成
     op.execute("""
         INSERT INTO communications (
             owner_id, comm_type, source_platform, source_app_token, source_table_id,
             feishu_record_id, title, comm_time, initiator, participants,
             duration_minutes, location, agenda, conclusions, action_items,
             transcript, recording_url,
-            content_text, summary, source_url, uploader_name, content_vector,
+            content_text, summary, source_url, uploader_name,
             keywords, sentiment, quality_score, duplicate_of, content_hash,
             extra_fields, feishu_created_at, feishu_updated_at,
             parse_status, processed_at, synced_at, created_at, updated_at
@@ -120,7 +121,7 @@ def upgrade() -> None:
             feishu_record_id, title, meeting_time, organizer, participants,
             duration_minutes, location, agenda, conclusions, action_items,
             transcript, recording_url,
-            content_text, summary, source_url, uploader_name, content_vector,
+            content_text, summary, source_url, uploader_name,
             keywords, sentiment, quality_score, duplicate_of, content_hash,
             extra_fields, feishu_created_at, feishu_updated_at,
             parse_status, processed_at, synced_at, created_at, updated_at
@@ -128,12 +129,13 @@ def upgrade() -> None:
     """)
 
     # ── 3. 从 chat_messages 迁移数据 ──────────────────────
+    # 注意：content_vector 跳过（维度可能不匹配），后续 ETL 会重新生成
     op.execute("""
         INSERT INTO communications (
             owner_id, comm_type, source_platform, source_app_token, source_table_id,
             feishu_record_id, title, comm_time, initiator, participants,
             chat_id, chat_type, chat_name, message_type, reply_to,
-            content_text, summary, source_url, uploader_name, content_vector,
+            content_text, summary, source_url, uploader_name,
             keywords, sentiment, quality_score, duplicate_of, content_hash,
             extra_fields,
             parse_status, processed_at, synced_at, created_at, updated_at
@@ -142,14 +144,17 @@ def upgrade() -> None:
             owner_id, 'chat', source_platform, source_app_token, source_table_id,
             feishu_record_id, NULL, sent_at, sender, mentions,
             chat_id, chat_type, chat_name, message_type, reply_to,
-            content_text, summary, source_url, uploader_name, content_vector,
+            content_text, summary, source_url, uploader_name,
             keywords, sentiment, quality_score, duplicate_of, content_hash,
             extra_fields,
             parse_status, processed_at, synced_at, created_at, updated_at
         FROM chat_messages
     """)
 
-    # ── 4. 迁移 content_tags 关联 ─────────────────────────
+    # ── 4. 更新 content_tags CHECK 约束（先删除再更新数据）───────
+    op.drop_constraint("ck_content_tag_type", "content_tags", type_="check")
+
+    # ── 5. 迁移 content_tags 关联 ─────────────────────────
     # meeting -> communication（通过 feishu_record_id 映射新 ID）
     op.execute("""
         UPDATE content_tags ct
@@ -174,7 +179,7 @@ def upgrade() -> None:
           AND c.comm_type = 'chat'
     """)
 
-    # ── 5. 迁移 content_chunks 关联 ───────────────────────
+    # ── 6. 迁移 content_chunks 关联 ───────────────────────
     op.execute("""
         UPDATE content_chunks cc
         SET content_type = 'communication',
@@ -197,7 +202,7 @@ def upgrade() -> None:
           AND c.comm_type = 'chat'
     """)
 
-    # ── 6. 迁移 content_entity_links 关联 ─────────────────
+    # ── 7. 迁移 content_entity_links 关联 ─────────────────
     op.execute("""
         UPDATE content_entity_links cel
         SET content_type = 'communication',
@@ -234,8 +239,7 @@ def upgrade() -> None:
         "asset_type IN ('document', 'communication')",
     )
 
-    # ── 8. 更新 content_tags CHECK 约束 ───────────────────
-    op.drop_constraint("ck_content_tag_type", "content_tags", type_="check")
+    # ── 8. 创建 content_tags 新 CHECK 约束 ───────────────────
     op.create_check_constraint(
         "ck_content_tag_type",
         "content_tags",
@@ -255,15 +259,59 @@ def upgrade() -> None:
     op.add_column("structured_tables", sa.Column("table_category", sa.String(64), nullable=True))
     op.create_index("idx_str_table_category", "structured_tables", ["table_category"])
 
-    # ── 11. 旧表重命名保留 ────────────────────────────────
+    # ── 11. 删除旧视图（依赖旧表）────────────────────────
+    op.execute("DROP VIEW IF EXISTS unified_content")
+
+    # ── 12. 旧表重命名保留 ────────────────────────────────
     op.rename_table("meetings", "_archived_meetings")
     op.rename_table("chat_messages", "_archived_chat_messages")
 
+    # ── 13. 创建新的 unified_content 视图 ────────────────
+    op.execute("""
+        CREATE VIEW unified_content AS
+        SELECT id, 'document'::text AS content_type, owner_id, title,
+               LEFT(content_text, 500) AS content_text, created_at, updated_at
+        FROM documents
+        UNION ALL
+        SELECT id, 'communication'::text AS content_type, owner_id, title,
+               LEFT(content_text, 500) AS content_text, created_at, updated_at
+        FROM communications
+        UNION ALL
+        SELECT id, 'structured_table'::text AS content_type, owner_id, name AS title,
+               COALESCE(summary, '') AS content_text, created_at, updated_at
+        FROM structured_tables
+        WHERE summary IS NOT NULL
+    """)
+
 
 def downgrade() -> None:
+    # 删除新视图
+    op.execute("DROP VIEW IF EXISTS unified_content")
+
     # 恢复旧表名
     op.rename_table("_archived_meetings", "meetings")
     op.rename_table("_archived_chat_messages", "chat_messages")
+
+    # 重新创建旧视图
+    op.execute("""
+        CREATE VIEW unified_content AS
+        SELECT id, 'document'::text AS content_type, owner_id, title,
+               LEFT(content_text, 500) AS content_text, created_at, updated_at
+        FROM documents
+        UNION ALL
+        SELECT id, 'meeting'::text AS content_type, owner_id, title,
+               LEFT(content_text, 500) AS content_text, created_at, updated_at
+        FROM meetings
+        UNION ALL
+        SELECT id, 'chat_message'::text AS content_type, owner_id, NULL::varchar AS title,
+               LEFT(content_text, 500) AS content_text, created_at, updated_at
+        FROM chat_messages
+        UNION ALL
+        SELECT id, 'structured_table'::text AS content_type, owner_id, name AS title,
+               COALESCE(summary, '') AS content_text, created_at, updated_at
+        FROM structured_tables
+        WHERE summary IS NOT NULL
+    """)
 
     # 删除新字段
     op.drop_index("idx_str_table_category", "structured_tables")

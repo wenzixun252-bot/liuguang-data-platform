@@ -223,7 +223,7 @@ export default function CloudDocSync({ onClose, onImportComplete }: CloudDocSync
       <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl mx-4 max-h-[85vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
           <h3 className="text-lg font-semibold text-gray-800">同步飞书文档</h3>
-          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded"><X size={20} /></button>
+          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded" title="关闭" aria-label="关闭"><X size={20} /></button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 space-y-5">
@@ -395,7 +395,7 @@ export default function CloudDocSync({ onClose, onImportComplete }: CloudDocSync
                         <span className="flex-1 text-gray-700">{f.folder_name || f.folder_token}</span>
                         <SyncStatusBadge status={f.last_sync_status} errorMessage={f.error_message} />
                         <span className="text-xs text-gray-400">{f.files_synced} 个文件</span>
-                        <button onClick={() => handleDeleteFolder(f.id)} className="p-1 text-gray-400 hover:text-red-500 rounded">
+                        <button onClick={() => handleDeleteFolder(f.id)} className="p-1 text-gray-400 hover:text-red-500 rounded" title="删除文件夹" aria-label="删除文件夹">
                           <Trash2 size={14} />
                         </button>
                       </div>
