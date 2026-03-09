@@ -56,7 +56,7 @@ class ETLDataSource(Base):
     __tablename__ = "etl_data_sources"
     __table_args__ = (
         CheckConstraint(
-            "asset_type IN ('document', 'meeting', 'chat_message')",
+            "asset_type IN ('document', 'communication')",
             name="ck_etl_ds_asset_type",
         ),
         Index("uq_etl_ds", "app_token", "table_id", unique=True),

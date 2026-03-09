@@ -1,4 +1,4 @@
-"""RAG 检索引擎 — 权限感知的跨三表混合检索 (Vector + BM25 + RRF)。"""
+"""RAG 检索引擎 — 权限感知的跨两表混合检索 (Vector + BM25 + RRF)。"""
 
 import logging
 from dataclasses import dataclass, field
@@ -16,7 +16,7 @@ class SearchResult:
     """单条检索结果。"""
 
     id: int
-    source_table: str  # 'document' | 'meeting' | 'chat_message'
+    source_table: str  # 'document' | 'communication'
     title: str | None
     content_text: str
     owner_id: str
@@ -26,13 +26,12 @@ class SearchResult:
 
 
 # 所有可搜索的表
-ALL_SOURCE_TABLES = ["document", "meeting", "chat_message"]
+ALL_SOURCE_TABLES = ["document", "communication"]
 
 # 表名到实际数据库表名的映射
 _TABLE_MAP = {
     "document": "documents",
-    "meeting": "meetings",
-    "chat_message": "chat_messages",
+    "communication": "communications",
 }
 
 
@@ -119,11 +118,9 @@ class VectorSearcher:
             all_params.update(id_params)
             all_params.update(tag_params)
 
-            title_col = "NULL as title" if table_key == "chat_message" else "title"
-            frid_col = "feishu_record_id" if table_key == "document" else "NULL as feishu_record_id"
             unions.append(
-                f"SELECT id, '{table_key}' as source_table, {title_col}, content_text, owner_id, "
-                f"{frid_col}, "
+                f"SELECT id, '{table_key}' as source_table, title, content_text, owner_id, "
+                f"feishu_record_id, "
                 f"content_vector <=> :query_vector AS distance "
                 f"FROM {db_table} "
                 f"WHERE content_vector IS NOT NULL AND {owner_filter} AND {id_filter} AND {tag_filter}"
@@ -159,7 +156,7 @@ class VectorSearcher:
 
 
 class BM25Searcher:
-    """权限感知的跨三表全文关键词检索。"""
+    """权限感知的跨两表全文关键词检索。"""
 
     async def search(
         self,
@@ -184,15 +181,10 @@ class BM25Searcher:
             all_params.update(id_params)
             all_params.update(tag_params)
 
-            title_col = "NULL as title" if table_key == "chat_message" else "title"
-            frid_col = "feishu_record_id" if table_key == "document" else "NULL as feishu_record_id"
-            ts_content = (
-                "content_text" if table_key == "chat_message"
-                else "coalesce(title, '') || ' ' || content_text"
-            )
+            ts_content = "coalesce(title, '') || ' ' || content_text"
             unions.append(
-                f"SELECT id, '{table_key}' as source_table, {title_col}, content_text, owner_id, "
-                f"{frid_col}, "
+                f"SELECT id, '{table_key}' as source_table, title, content_text, owner_id, "
+                f"feishu_record_id, "
                 f"ts_rank_cd(to_tsvector('simple', {ts_content}), plainto_tsquery('simple', :query)) AS rank "
                 f"FROM {db_table} "
                 f"WHERE to_tsvector('simple', {ts_content}) @@ plainto_tsquery('simple', :query) "

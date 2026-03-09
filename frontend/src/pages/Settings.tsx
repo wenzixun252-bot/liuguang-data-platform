@@ -510,8 +510,7 @@ function MySourcesSection() {
               className="text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white"
             >
               <option value="document">文档</option>
-              <option value="meeting">会议</option>
-              <option value="chat_message">会话</option>
+              <option value="communication">沟通记录</option>
             </select>
           </div>
           <IncludeSharedCheckbox

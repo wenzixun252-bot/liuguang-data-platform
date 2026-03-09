@@ -10,9 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.models.content_entity_link import ContentEntityLink
+from app.models.communication import Communication
 from app.models.document import Document
-from app.models.meeting import Meeting
-from app.models.chat_message import ChatMessage
 from app.models.knowledge_graph import KGEntity, KGRelation
 from app.models.kg_analysis_result import KGAnalysisResult
 from app.models.user import User
@@ -304,22 +303,22 @@ async def get_linked_assets(
     for r in doc_result.all():
         assets.append(LinkedAsset(id=r.id, title=r.title or "无标题", source_type=r.source_type, asset_type="document"))
 
-    # 在 meetings 表模糊匹配
-    mtg_result = await db.execute(
-        select(Meeting.id, Meeting.title)
+    # 在 communications 表模糊匹配
+    comm_result = await db.execute(
+        select(Communication.id, Communication.title, Communication.comm_type)
         .where(
             and_(
-                Meeting.owner_id == owner_id,
+                Communication.owner_id == owner_id,
                 or_(
-                    Meeting.title.ilike(f"%{entity.name}%"),
-                    Meeting.content_text.ilike(f"%{entity.name}%"),
+                    Communication.title.ilike(f"%{entity.name}%"),
+                    Communication.content_text.ilike(f"%{entity.name}%"),
                 ),
             )
         )
         .limit(10)
     )
-    for r in mtg_result.all():
-        assets.append(LinkedAsset(id=r.id, title=r.title or "无标题", source_type="meeting", asset_type="meeting"))
+    for r in comm_result.all():
+        assets.append(LinkedAsset(id=r.id, title=r.title or "无标题", source_type=r.comm_type or "communication", asset_type="communication"))
 
     return assets
 
@@ -412,12 +411,9 @@ async def get_entity_content(
         if link.content_type == "document":
             doc = await db.get(Document, link.content_id)
             title = doc.title if doc else "无标题"
-        elif link.content_type == "meeting":
-            mtg = await db.get(Meeting, link.content_id)
-            title = mtg.title if mtg else "无标题"
-        elif link.content_type == "chat_message":
-            msg = await db.get(ChatMessage, link.content_id)
-            title = (msg.sender or "聊天记录") if msg else "聊天记录"
+        elif link.content_type == "communication":
+            comm = await db.get(Communication, link.content_id)
+            title = (comm.title or comm.initiator or "沟通记录") if comm else "沟通记录"
 
         items.append({
             "content_type": link.content_type,

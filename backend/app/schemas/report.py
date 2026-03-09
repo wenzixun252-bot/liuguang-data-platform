@@ -33,7 +33,7 @@ class ReportGenerateRequest(BaseModel):
     title: str
     time_range_start: datetime
     time_range_end: datetime
-    data_sources: list[str] = ["document", "meeting", "chat_message"]
+    data_sources: list[str] = ["document", "communication"]
     extra_instructions: str | None = None
     target_reader_ids: list[str] | None = None
 

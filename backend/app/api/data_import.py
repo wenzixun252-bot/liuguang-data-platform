@@ -50,8 +50,8 @@ async def add_feishu_source(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> DataSourceOut:
     """用户添加自己的飞书多维表格数据源。"""
-    if body.asset_type not in ("document", "meeting", "chat_message"):
-        raise HTTPException(400, "asset_type 必须是 document / meeting / chat_message")
+    if body.asset_type not in ("document", "communication"):
+        raise HTTPException(400, "asset_type 必须是 document / communication")
 
     existing = await db.execute(
         select(ETLDataSource).where(
@@ -394,7 +394,7 @@ async def add_feishu_sources_batch(
     created: list[DataSourceOut] = []
 
     for item in body:
-        if item.asset_type not in ("document", "meeting", "chat_message"):
+        if item.asset_type not in ("document", "communication"):
             continue
 
         existing = await db.execute(
@@ -439,8 +439,8 @@ async def add_feishu_source_from_url(
     """
     import re
 
-    if body.asset_type not in ("document", "meeting", "chat_message"):
-        raise HTTPException(400, "asset_type 必须是 document / meeting / chat_message")
+    if body.asset_type not in ("document", "communication"):
+        raise HTTPException(400, "asset_type 必须是 document / communication")
 
     url = body.url.strip()
 

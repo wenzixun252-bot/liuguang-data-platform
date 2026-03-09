@@ -393,6 +393,7 @@ async def list_tables(
     page_size: int = Query(20, ge=1, le=100),
     search: str = Query("", max_length=200),
     source_type: str = Query("", max_length=32),
+    table_category: str | None = Query(None),
     tag_ids: list[int] = Query(default=[]),
     current_user: Annotated[User, Depends(get_current_user)] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
@@ -404,6 +405,8 @@ async def list_tables(
         conditions.append(StructuredTable.name.ilike(f"%{search}%"))
     if source_type:
         conditions.append(StructuredTable.source_type == source_type)
+    if table_category:
+        conditions.append(StructuredTable.table_category == table_category)
     if tag_ids:
         subq = select(ContentTag.content_id).where(
             ContentTag.content_type == "structured_table",
@@ -427,6 +430,26 @@ async def list_tables(
     items = result.scalars().all()
 
     return StructuredTableListResponse(items=items, total=total)
+
+
+@router.get("/categories", summary="获取表格分类列表")
+async def list_table_categories(
+    current_user: Annotated[User, Depends(get_current_user)] = None,
+    db: Annotated[AsyncSession, Depends(get_db)] = None,
+):
+    """返回当前用户所有表格的 table_category 去重列表（动态，由 AI 识别）。"""
+    owner_id = current_user.feishu_open_id
+    stmt = (
+        select(StructuredTable.table_category)
+        .where(
+            StructuredTable.owner_id == owner_id,
+            StructuredTable.table_category.isnot(None),
+        )
+        .distinct()
+        .order_by(StructuredTable.table_category)
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+    return {"categories": rows}
 
 
 @router.get("/search", response_model=SearchResponse, summary="穿透搜索")

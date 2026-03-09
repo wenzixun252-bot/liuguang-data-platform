@@ -5,7 +5,6 @@ import {
   ChevronDown,
   Loader2,
   FileText,
-  Calendar,
   MessageSquare,
   Search,
   X,
@@ -27,8 +26,7 @@ interface DataItem {
 
 const CATEGORIES = [
   { key: 'document', label: '文档数据', icon: FileText, endpoint: '/documents/list' },
-  { key: 'meeting', label: '会议记录', icon: Calendar, endpoint: '/meetings/list' },
-  { key: 'chat_message', label: '会话记录', icon: MessageSquare, endpoint: '/chat-messages/list' },
+  { key: 'communication', label: '沟通记录', icon: MessageSquare, endpoint: '/communications/list' },
 ] as const
 
 interface CategoryData {

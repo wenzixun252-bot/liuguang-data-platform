@@ -9,9 +9,8 @@ from sqlalchemy import select, and_, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, get_visible_owner_ids
+from app.models.communication import Communication
 from app.models.document import Document
-from app.models.meeting import Meeting
-from app.models.chat_message import ChatMessage
 from app.models.knowledge_graph import KGEntity
 from app.models.structured_table import StructuredTable, StructuredTableRow
 from app.models.user import User
@@ -33,7 +32,7 @@ class SearchResultItem(BaseModel):
     id: int
     title: str
     content_preview: str
-    source_type: str  # document / meeting / chat_message / kg_entity / structured_table
+    source_type: str  # document / communication / kg_entity / structured_table
     created_at: str | None = None
     entity_type: str | None = None
     mention_count: int | None = None
@@ -58,7 +57,7 @@ async def global_search(
     current_user: Annotated[User, Depends(get_current_user)] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> SearchResponse:
-    """全局搜索：同时查询知识图谱实体 + 文档/会议/聊天记录，支持标签过滤。"""
+    """全局搜索：同时查询知识图谱实体 + 文档/沟通记录，支持标签过滤。"""
     owner_id = current_user.feishu_open_id
     keyword = (q or "").strip()
     entities: list[SearchResultItem] = []

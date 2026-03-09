@@ -5,8 +5,7 @@ import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
 import Login from './pages/Login'
 import Documents from './pages/Documents'
-import Meetings from './pages/Meetings'
-import Messages from './pages/Messages'
+import Communications from './pages/Communications'
 import Chat from './pages/Chat'
 import ReportDetail from './pages/ReportDetail'
 import StructuredTables from './pages/StructuredTables'
@@ -37,8 +36,10 @@ export default function App() {
             <Route path="/data-insights" element={<DataInsights />} />
             <Route path="/structured-tables" element={<StructuredTables />} />
             <Route path="/documents" element={<Documents />} />
-            <Route path="/meetings" element={<Meetings />} />
-            <Route path="/messages" element={<Messages />} />
+            <Route path="/communications" element={<Communications />} />
+            {/* 旧路由重定向 */}
+            <Route path="/meetings" element={<Navigate to="/communications?comm_type=meeting" replace />} />
+            <Route path="/messages" element={<Navigate to="/communications?comm_type=chat" replace />} />
             <Route path="/calendar" element={<Navigate to="/chat?tab=calendar" replace />} />
             <Route path="/chat" element={<Chat />} />
             <Route path="/search" element={<SearchPage />} />

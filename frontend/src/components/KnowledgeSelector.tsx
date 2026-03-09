@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Database, ChevronRight, ChevronDown, Loader2, FileText, Calendar, MessageSquare } from 'lucide-react'
+import { Database, ChevronRight, ChevronDown, Loader2, FileText, MessageSquare } from 'lucide-react'
 import api from '../lib/api'
 
 export interface KnowledgeFilter {
@@ -24,8 +24,7 @@ interface CategoryState {
 
 const CATEGORIES = [
   { key: 'document', label: '文档数据', icon: FileText, endpoint: '/documents' },
-  { key: 'meeting', label: '会议记录', icon: Calendar, endpoint: '/meetings' },
-  { key: 'chat_message', label: '会话记录', icon: MessageSquare, endpoint: '/chat-messages' },
+  { key: 'communication', label: '沟通记录', icon: MessageSquare, endpoint: '/communications' },
 ] as const
 
 interface Props {

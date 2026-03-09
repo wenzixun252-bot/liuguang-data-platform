@@ -59,7 +59,7 @@ interface LinkedAsset {
   id: number
   title: string
   source_type: string
-  asset_type: 'document' | 'meeting'
+  asset_type: 'document' | 'communication'
 }
 
 interface AttachmentMeta {
@@ -96,11 +96,12 @@ interface DocumentDetail {
 
 interface MeetingDetailData {
   id: number
+  comm_type: string
   title: string | null
-  meeting_time: string | null
+  comm_time: string | null
   duration_minutes: number | null
   location: string | null
-  organizer: string | null
+  initiator: string | null
   participants: { name?: string; open_id?: string }[]
   agenda: string | null
   conclusions: string | null
@@ -219,7 +220,7 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
   const [showAssetModal, setShowAssetModal] = useState(false)
   const [assetDetail, setAssetDetail] = useState<DocumentDetail | null>(null)
   const [meetingDetail, setMeetingDetail] = useState<MeetingDetailData | null>(null)
-  const [assetModalType, setAssetModalType] = useState<'document' | 'meeting'>('document')
+  const [assetModalType, setAssetModalType] = useState<'document' | 'communication'>('document')
   const [assetLoading, setAssetLoading] = useState(false)
   const [imagePreview, setImagePreview] = useState<string | null>(null)
 
@@ -473,8 +474,8 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
     setMeetingDetail(null)
     setAssetModalType(asset.asset_type)
     try {
-      if (asset.asset_type === 'meeting') {
-        const res = await api.get(`/meetings/${asset.id}`)
+      if (asset.asset_type === 'communication') {
+        const res = await api.get(`/communications/${asset.id}`)
         setMeetingDetail(res.data)
       } else {
         const res = await api.get(`/documents/${asset.id}`)
@@ -800,7 +801,7 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
                           <FileText size={14} className="shrink-0" />
                           <span className="truncate">{asset.title}</span>
                           <span className="text-xs text-gray-400 ml-auto shrink-0">
-                            {asset.asset_type === 'meeting' ? '会议' : (SOURCE_TYPE_LABELS[asset.source_type] || asset.source_type)}
+                            {asset.asset_type === 'communication' ? '沟通记录' : (SOURCE_TYPE_LABELS[asset.source_type] || asset.source_type)}
                           </span>
                         </div>
                       ))}
@@ -1060,21 +1061,21 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
         <div className="fixed inset-0 bg-black/50 z-50 flex justify-end" onClick={() => setShowAssetModal(false)}>
           <div className="w-full max-w-lg bg-white h-full overflow-y-auto shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-gray-800">{assetModalType === 'meeting' ? '会议详情' : '文档详情'}</h2>
+              <h2 className="text-lg font-semibold text-gray-800">{assetModalType === 'communication' ? '沟通详情' : '文档详情'}</h2>
               <button onClick={() => setShowAssetModal(false)} className="p-1 hover:bg-gray-100 rounded"><X size={20} /></button>
             </div>
             {assetLoading ? (
               <div className="flex items-center justify-center py-20 text-gray-400">
                 <Loader2 size={24} className="animate-spin mr-2" /> 加载中...
               </div>
-            ) : assetModalType === 'meeting' && meetingDetail ? (
+            ) : assetModalType === 'communication' && meetingDetail ? (
               /* ── 会议详情 ── */
               <div className="p-6 space-y-4">
                 <h3 className="text-lg font-semibold text-gray-800">{meetingDetail.title || '无标题'}</h3>
 
                 <div className="flex flex-wrap gap-4 text-sm text-gray-600">
-                  {meetingDetail.meeting_time && (
-                    <span>{new Date(meetingDetail.meeting_time).toLocaleString('zh-CN')}{meetingDetail.duration_minutes ? ` (${meetingDetail.duration_minutes}分钟)` : ''}</span>
+                  {meetingDetail.comm_time && (
+                    <span>{new Date(meetingDetail.comm_time).toLocaleString('zh-CN')}{meetingDetail.duration_minutes ? ` (${meetingDetail.duration_minutes}分钟)` : ''}</span>
                   )}
                   {meetingDetail.location && <span>{meetingDetail.location}</span>}
                 </div>
@@ -1082,8 +1083,8 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
                 {meetingDetail.uploader_name && (
                   <div><p className="text-sm text-gray-500">上传人</p><p className="text-sm text-gray-800 font-medium">{meetingDetail.uploader_name}</p></div>
                 )}
-                {meetingDetail.organizer && (
-                  <div><p className="text-sm text-gray-500">组织者</p><p className="text-sm text-gray-800 font-medium">{meetingDetail.organizer}</p></div>
+                {meetingDetail.initiator && (
+                  <div><p className="text-sm text-gray-500">组织者/发送者</p><p className="text-sm text-gray-800 font-medium">{meetingDetail.initiator}</p></div>
                 )}
 
                 {(meetingDetail.source_url || meetingDetail.bitable_url) && (

@@ -2,7 +2,6 @@ import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { getUser, clearAuth } from '../lib/auth'
 import {
   FileText,
-  Calendar,
   MessageSquare,
   Table2,
   Settings,
@@ -48,10 +47,9 @@ const NAV_ITEMS: NavEntry[] = [
     label: '数据资产',
     icon: FolderOpen,
     children: [
-      { path: '/structured-tables', label: '表格数据', icon: Table2 },
-      { path: '/documents', label: '文档数据', icon: FileText },
-      { path: '/meetings', label: '会议记录', icon: Calendar },
-      { path: '/messages', label: '会话记录', icon: MessageSquare },
+      { path: '/communications', label: '沟通资产', icon: MessageSquare },
+      { path: '/documents', label: '知识库', icon: FileText },
+      { path: '/structured-tables', label: '业务数仓', icon: Table2 },
     ],
   },
   { path: '/chat', label: '智能助手', icon: Bot },
@@ -238,7 +236,7 @@ export default function Layout() {
               className="w-full flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm text-gray-400 transition-colors"
             >
               <Search size={16} />
-              <span>搜索文档、会议、聊天...</span>
+              <span>搜索文档、沟通记录...</span>
               <kbd className="ml-auto text-xs bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded">Ctrl+K</kbd>
             </button>
           </div>

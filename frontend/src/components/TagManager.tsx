@@ -455,7 +455,7 @@ export function BatchTagBar({
   onDone,
 }: {
   selectedIds: Set<number>
-  contentType: 'document' | 'meeting' | 'chat_message' | 'structured_table'
+  contentType: 'document' | 'communication' | 'structured_table'
   onDone: () => void
 }) {
   const [mode, setMode] = useState<'add' | 'remove' | null>(null)

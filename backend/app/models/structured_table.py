@@ -48,12 +48,14 @@ class StructuredTable(Base):
         Index("idx_str_table_source_type", "source_type"),
         Index("idx_str_table_keywords", "keywords", postgresql_using="gin"),
         Index("idx_str_table_content_hash", "content_hash"),
+        Index("idx_str_table_category", "table_category"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     owner_id: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(512), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    table_category: Mapped[str | None] = mapped_column(String(64))
     source_type: Mapped[str] = mapped_column(String(32), nullable=False)
     source_platform: Mapped[str | None] = mapped_column(String(32))
     source_app_token: Mapped[str | None] = mapped_column(String(128), nullable=True)

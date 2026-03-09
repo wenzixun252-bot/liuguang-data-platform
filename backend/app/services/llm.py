@@ -23,44 +23,38 @@ feishu_created_at: 飞书端创建时间
 feishu_updated_at: 飞书端更新时间
 """.strip()
 
-TARGET_SCHEMA_MEETING = """
+TARGET_SCHEMA_COMMUNICATION = """
 feishu_record_id: 记录唯一标识
 owner_id: 数据归属人的飞书 open_id
-title: 会议主题
-content_text: 会议全文内容/纪要
-meeting_time: 会议时间
-duration_minutes: 时长(分钟)
+comm_type: 沟通类型(meeting/chat/recording)
+title: 会议主题/录音标题（会话可为空）
+content_text: 正文内容（会议纪要/消息内容）
+comm_time: 会议时间/发送时间
+initiator: 组织者/发送者
+participants: 参与人/提及人列表
+duration_minutes: 时长(分钟，会议独有)
 location: 会议地点/链接
-organizer: 组织者
-participants: 参与人列表
 agenda: 议程
 conclusions: 结论
 action_items: 行动项/待办
-source_url: 会议纪要链接
+source_url: 链接
 recording_url: 录音/录像链接
 transcript: AI转写文本/录音文字
+chat_id: 会话 ID/群组 ID
+chat_type: 聊天类型(group/private)
+chat_name: 群名称/会话名称
+message_type: 消息类型(text/image/file等)
+reply_to: 回复的记录 ID
 feishu_created_at: 飞书端创建时间
 feishu_updated_at: 飞书端更新时间
 """.strip()
 
-TARGET_SCHEMA_CHAT_MESSAGE = """
-feishu_record_id: 记录唯一标识
-owner_id: 数据归属人的飞书 open_id
-content_text: 消息内容
-chat_id: 会话 ID/群组 ID
-chat_type: 聊天类型(group/private)
-chat_name: 群名称/会话名称
-sender: 发送人
-message_type: 消息类型 (text/image/file 等)
-sent_at: 发送时间
-reply_to: 回复的记录 ID
-mentions: 提及的人
-""".strip()
-
 TARGET_SCHEMAS = {
     "document": TARGET_SCHEMA_DOCUMENT,
-    "meeting": TARGET_SCHEMA_MEETING,
-    "chat_message": TARGET_SCHEMA_CHAT_MESSAGE,
+    "communication": TARGET_SCHEMA_COMMUNICATION,
+    # 兼容旧值
+    "meeting": TARGET_SCHEMA_COMMUNICATION,
+    "chat_message": TARGET_SCHEMA_COMMUNICATION,
 }
 
 SCHEMA_MAPPING_PROMPT = """你是一个数据 Schema 映射专家。请将源表字段映射到目标标准字段。

@@ -1,4 +1,4 @@
-"""ETL Transform 模块 — 三表路由 + Schema 映射缓存 + 3步增强工作流。"""
+"""ETL Transform 模块 — 两表路由 + Schema 映射缓存 + 3步增强工作流。"""
 
 import hashlib
 import json
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 REQUIRED_FIELDS = {"feishu_record_id", "owner_id", "content_text"}
 
 
-# ── 三种目标表的转换结果 dataclass ────────────────────────
+# ── 两种目标表的转换结果 dataclass ────────────────────────
 
 @dataclass
 class TransformedDocument:
@@ -46,6 +46,7 @@ class TransformedDocument:
     # -- LLM 提取字段 --
     keywords: list = field(default_factory=list)
     sentiment: str | None = None
+    doc_category: str | None = None
     # -- 后处理字段 --
     quality_score: float | None = None
     duplicate_of: int | None = None
@@ -55,25 +56,31 @@ class TransformedDocument:
 
 
 @dataclass
-class TransformedMeeting:
-    """会议记录。"""
+class TransformedCommunication:
+    """沟通记录（会议/会话/录音）。"""
     feishu_record_id: str
     owner_id: str
     source_app_token: str
     source_table_id: str
+    comm_type: str = "meeting"  # meeting | chat | recording
     title: str | None = None
-    meeting_time: datetime | None = None
+    comm_time: datetime | None = None
+    initiator: str | None = None
+    participants: list = field(default_factory=list)
     duration_minutes: int | None = None
     location: str | None = None
-    organizer: str | None = None
-    participants: list = field(default_factory=list)
     agenda: str | None = None
     conclusions: str | None = None
     action_items: list = field(default_factory=list)
-    content_text: str = ""
-    summary: str | None = None
     transcript: str | None = None
     recording_url: str | None = None
+    chat_id: str | None = None
+    chat_type: str | None = None
+    chat_name: str | None = None
+    message_type: str | None = None
+    reply_to: str | None = None
+    content_text: str = ""
+    summary: str | None = None
     source_url: str | None = None
     source_platform: str | None = None
     uploader_name: str | None = None
@@ -81,43 +88,8 @@ class TransformedMeeting:
     attachments: list = field(default_factory=list)
     feishu_created_at: datetime | None = None
     feishu_updated_at: datetime | None = None
-    # -- LLM 提取字段 --
     keywords: list = field(default_factory=list)
     sentiment: str | None = None
-    # -- 后处理字段 --
-    quality_score: float | None = None
-    duplicate_of: int | None = None
-    content_hash: str | None = None
-    processed_at: datetime | None = None
-    chunks: list[str] = field(default_factory=list)
-
-
-@dataclass
-class TransformedChatMessage:
-    """聊天消息。"""
-    feishu_record_id: str
-    owner_id: str
-    source_app_token: str
-    source_table_id: str
-    chat_id: str | None = None
-    chat_type: str | None = None
-    chat_name: str | None = None
-    sender: str | None = None
-    message_type: str | None = None
-    content_text: str = ""
-    summary: str | None = None
-    sent_at: datetime | None = None
-    reply_to: str | None = None
-    mentions: list = field(default_factory=list)
-    source_url: str | None = None
-    source_platform: str | None = None
-    uploader_name: str | None = None
-    extra_fields: dict = field(default_factory=dict)
-    attachments: list = field(default_factory=list)
-    # -- LLM 提取字段 --
-    keywords: list = field(default_factory=list)
-    sentiment: str | None = None
-    # -- 后处理字段 --
     quality_score: float | None = None
     duplicate_of: int | None = None
     content_hash: str | None = None
@@ -135,7 +107,7 @@ class TransformResult:
     table_id: str = ""
 
 
-# ── 三套规则关键词映射 ──────────────────────────────────────
+# ── 两套规则关键词映射 ──────────────────────────────────────
 
 DOCUMENT_KEYWORDS: dict[str, list[str]] = {
     "title": ["标题", "文件名", "名称", "title", "name", "主题"],
@@ -148,15 +120,15 @@ DOCUMENT_KEYWORDS: dict[str, list[str]] = {
     "feishu_updated_at": ["修改时间", "更新时间", "updated", "最近修改", "文件最近修改时间"],
 }
 
-MEETING_KEYWORDS: dict[str, list[str]] = {
+COMMUNICATION_MEETING_KEYWORDS: dict[str, list[str]] = {
     "title": ["标题", "会议主题", "主题", "title", "name"],
     "content_text": ["内容", "纪要", "content", "会议记录", "详情", "正文"],
     "owner_id": ["所有者", "创建者", "组织者", "owner", "creator"],
     "feishu_record_id": ["标识", "record_id", "id"],
-    "meeting_time": ["会议时间", "开始时间", "时间", "meeting_time", "start_time"],
+    "comm_time": ["会议时间", "开始时间", "时间", "meeting_time", "start_time"],
     "duration_minutes": ["时长", "持续", "duration"],
     "location": ["地点", "会议室", "location"],
-    "organizer": ["组织者", "发起人", "organizer"],
+    "initiator": ["组织者", "发起人", "organizer"],
     "participants": ["参与人", "参会人", "与会者", "participants", "attendees"],
     "agenda": ["议程", "agenda"],
     "conclusions": ["结论", "决议", "conclusion"],
@@ -168,37 +140,41 @@ MEETING_KEYWORDS: dict[str, list[str]] = {
     "feishu_updated_at": ["修改时间", "更新时间", "updated"],
 }
 
-CHAT_MESSAGE_KEYWORDS: dict[str, list[str]] = {
+COMMUNICATION_CHAT_KEYWORDS: dict[str, list[str]] = {
     "content_text": ["聊天记录", "消息内容", "内容", "消息", "message", "content", "正文", "text"],
     "owner_id": ["所有者", "创建者", "owner", "creator", "配方 Owner"],
     "feishu_record_id": ["消息ID", "标识", "record_id", "id", "msg_id"],
     "chat_id": ["所在群", "会话", "群组", "chat_id", "group", "群名"],
     "chat_type": ["聊天类型", "会话类型", "chat_type", "类型"],
     "chat_name": ["群名", "群名称", "群组名", "chat_name", "group_name"],
-    "sender": ["发送人", "发送者", "sender", "from"],
+    "initiator": ["发送人", "发送者", "sender", "from"],
     "message_type": ["消息类型", "类型", "type", "message_type"],
-    "sent_at": ["发送时间", "时间", "sent_at", "send_time"],
+    "comm_time": ["发送时间", "时间", "sent_at", "send_time"],
     "reply_to": ["话题回复内容", "回复", "reply", "reply_to"],
-    "mentions": ["提及", "@", "mentions"],
+    "participants": ["提及", "@", "mentions"],
 }
 
 # asset_type -> target_table 映射
 ASSET_TYPE_TO_TABLE = {
     "document": "documents",
-    "meeting": "meetings",
-    "chat_message": "chat_messages",
+    "communication": "communications",
+    # 兼容旧值
+    "meeting": "communications",
+    "chat_message": "communications",
 }
 
 # asset_type -> 关键词字典
 ASSET_TYPE_TO_KEYWORDS = {
     "document": DOCUMENT_KEYWORDS,
-    "meeting": MEETING_KEYWORDS,
-    "chat_message": CHAT_MESSAGE_KEYWORDS,
+    "communication": COMMUNICATION_MEETING_KEYWORDS,  # 默认用会议关键词
+    # 兼容旧值
+    "meeting": COMMUNICATION_MEETING_KEYWORDS,
+    "chat_message": COMMUNICATION_CHAT_KEYWORDS,
 }
 
 
 class DataTransformer:
-    """Schema 映射缓存 + 3步增强工作流，支持三表路由。"""
+    """Schema 映射缓存 + 3步增强工作流，支持两表路由。"""
 
     async def transform(
         self,
@@ -266,6 +242,8 @@ class DataTransformer:
             record.summary = enrich_result.summary
             record.keywords = enrich_result.keywords
             record.sentiment = enrich_result.sentiment
+            if hasattr(record, "doc_category") and enrich_result.doc_category:
+                record.doc_category = enrich_result.doc_category
 
             # ── Step 3: 程序后处理 ──
             record.quality_score = content_postprocessor.compute_quality_score(
@@ -479,16 +457,17 @@ class DataTransformer:
         title = self._extract_text(mapped_values.get("title"))
 
         if asset_type == "meeting":
-            return TransformedMeeting(
+            return TransformedCommunication(
                 feishu_record_id=feishu_record_id,
                 owner_id=owner_id,
                 source_app_token=app_token,
                 source_table_id=table_id,
+                comm_type="meeting",
                 title=title,
-                meeting_time=self._parse_time(mapped_values.get("meeting_time")),
+                comm_time=self._parse_time(mapped_values.get("comm_time")),
                 duration_minutes=self._extract_int(mapped_values.get("duration_minutes")),
                 location=self._extract_text(mapped_values.get("location")),
-                organizer=self._extract_text(mapped_values.get("organizer")),
+                initiator=self._extract_text(mapped_values.get("initiator")),
                 participants=self._extract_list(mapped_values.get("participants")),
                 agenda=self._extract_text(mapped_values.get("agenda")),
                 conclusions=self._extract_text(mapped_values.get("conclusions")),
@@ -503,22 +482,59 @@ class DataTransformer:
                 feishu_updated_at=self._parse_time(mapped_values.get("feishu_updated_at")),
             )
         elif asset_type == "chat_message":
-            return TransformedChatMessage(
+            return TransformedCommunication(
                 feishu_record_id=feishu_record_id,
                 owner_id=owner_id,
                 source_app_token=app_token,
                 source_table_id=table_id,
+                comm_type="chat",
                 chat_id=self._extract_text(mapped_values.get("chat_id")),
                 chat_type=self._extract_text(mapped_values.get("chat_type")) or None,
                 chat_name=self._extract_text(mapped_values.get("chat_name")) or None,
-                sender=self._extract_text(mapped_values.get("sender")),
+                initiator=self._extract_text(mapped_values.get("initiator")),
                 message_type=self._extract_text(mapped_values.get("message_type")),
                 content_text=content_text,
-                sent_at=self._parse_time(mapped_values.get("sent_at")),
+                comm_time=self._parse_time(mapped_values.get("comm_time")),
                 reply_to=self._extract_text(mapped_values.get("reply_to")),
-                mentions=self._extract_list(mapped_values.get("mentions")),
+                participants=self._extract_list(mapped_values.get("participants")),
                 extra_fields=extra_fields,
                 attachments=attachments,
+            )
+        elif asset_type == "communication":
+            # 自动判断 comm_type：mapping 中有会议特征字段则为 meeting，否则为 chat
+            has_meeting_fields = "comm_time" in mapping and any(
+                kw in mapping.get("comm_time", "")
+                for kw in ["会议时间", "meeting_time", "start_time"]
+            ) or "duration_minutes" in mapping or "agenda" in mapping
+            comm_type = "meeting" if has_meeting_fields else "chat"
+            return TransformedCommunication(
+                feishu_record_id=feishu_record_id,
+                owner_id=owner_id,
+                source_app_token=app_token,
+                source_table_id=table_id,
+                comm_type=comm_type,
+                title=title,
+                comm_time=self._parse_time(mapped_values.get("comm_time")),
+                initiator=self._extract_text(mapped_values.get("initiator")),
+                participants=self._extract_list(mapped_values.get("participants")),
+                duration_minutes=self._extract_int(mapped_values.get("duration_minutes")),
+                location=self._extract_text(mapped_values.get("location")),
+                agenda=self._extract_text(mapped_values.get("agenda")),
+                conclusions=self._extract_text(mapped_values.get("conclusions")),
+                action_items=self._extract_list(mapped_values.get("action_items")),
+                transcript=self._extract_text(mapped_values.get("transcript")),
+                recording_url=self._extract_url(mapped_values.get("recording_url")),
+                chat_id=self._extract_text(mapped_values.get("chat_id")),
+                chat_type=self._extract_text(mapped_values.get("chat_type")) or None,
+                chat_name=self._extract_text(mapped_values.get("chat_name")) or None,
+                message_type=self._extract_text(mapped_values.get("message_type")),
+                reply_to=self._extract_text(mapped_values.get("reply_to")),
+                content_text=content_text,
+                source_url=self._extract_url(mapped_values.get("source_url")),
+                extra_fields=extra_fields,
+                attachments=attachments,
+                feishu_created_at=self._parse_time(mapped_values.get("feishu_created_at")),
+                feishu_updated_at=self._parse_time(mapped_values.get("feishu_updated_at")),
             )
         else:
             return TransformedDocument(

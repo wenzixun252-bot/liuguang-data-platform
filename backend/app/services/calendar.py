@@ -10,7 +10,7 @@ from sqlalchemy import String, and_, or_, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.knowledge_graph import KGEntity, KGRelation
-from app.models.meeting import Meeting
+from app.models.communication import Communication
 from app.models.todo_item import TodoItem
 from app.services.rag import hybrid_searcher
 
@@ -129,25 +129,27 @@ async def gather_meeting_context(
 
         # 将 JSONB participants 转为文本后模糊匹配参会人姓名
         conditions = [
-            func.cast(Meeting.participants, String).ilike(f"%{name}%")
+            func.cast(Communication.participants, String).ilike(f"%{name}%")
             for name in attendee_names[:5]
         ]
         try:
             result = await db.execute(
-                select(Meeting).where(
+                select(Communication).where(
                     and_(
-                        Meeting.owner_id == owner_id,
+                        Communication.owner_id == owner_id,
+                        Communication.comm_type == "meeting",
                         or_(*conditions),
                     )
-                ).order_by(Meeting.meeting_time.desc()).limit(5)
+                ).order_by(Communication.comm_time.desc().nullslast()).limit(5)
             )
             meetings = result.scalars().all()
         except Exception:
             # 回退：取最近的会议
             result = await db.execute(
-                select(Meeting).where(
-                    Meeting.owner_id == owner_id,
-                ).order_by(Meeting.meeting_time.desc()).limit(5)
+                select(Communication).where(
+                    Communication.owner_id == owner_id,
+                    Communication.comm_type == "meeting",
+                ).order_by(Communication.comm_time.desc().nullslast()).limit(5)
             )
             meetings = result.scalars().all()
 
@@ -156,7 +158,7 @@ async def gather_meeting_context(
 
         parts = []
         for m in meetings:
-            time_str = m.meeting_time.strftime("%Y-%m-%d %H:%M") if m.meeting_time else "时间未知"
+            time_str = m.comm_time.strftime("%Y-%m-%d %H:%M") if m.comm_time else "时间未知"
             conclusions = (m.conclusions or "无结论")[:200]
             parts.append(f"- **{m.title or '无标题'}** ({time_str})\n  结论: {conclusions}")
 
@@ -221,7 +223,7 @@ async def gather_meeting_context(
                 query_text=event_summary,
                 visible_ids=visible_ids if visible_ids else [owner_id],
                 db=db,
-                source_tables=["chat_message"],
+                source_tables=["communication"],
                 top_k=3,
             )
         except Exception as e:

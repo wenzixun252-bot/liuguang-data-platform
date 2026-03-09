@@ -32,7 +32,7 @@ async def unified_search(
             params[f"vid_{i}"] = vid
 
     # 内容类型过滤
-    allowed_types = content_types or ["document", "meeting", "chat_message", "structured_table"]
+    allowed_types = content_types or ["document", "communication", "structured_table"]
 
     # 标签过滤子查询
     tag_filter = ""
@@ -62,15 +62,10 @@ async def unified_search(
             "LEFT(content_text, 200) AS content_text, created_at, updated_at "
             "FROM documents"
         ),
-        "meeting": (
-            "SELECT id, 'meeting' AS content_type, owner_id, title, "
+        "communication": (
+            "SELECT id, 'communication' AS content_type, owner_id, title, "
             "LEFT(content_text, 200) AS content_text, created_at, updated_at "
-            "FROM meetings"
-        ),
-        "chat_message": (
-            "SELECT id, 'chat_message' AS content_type, owner_id, NULL AS title, "
-            "LEFT(content_text, 200) AS content_text, created_at, updated_at "
-            "FROM chat_messages"
+            "FROM communications"
         ),
         "structured_table": (
             "SELECT id, 'structured_table' AS content_type, owner_id, name AS title, "

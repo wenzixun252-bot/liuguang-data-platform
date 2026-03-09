@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Network, ChevronRight, X, FileText, Calendar, MessageSquare } from 'lucide-react'
+import { Network, ChevronRight, X, FileText, MessageSquare } from 'lucide-react'
 import api from '../lib/api'
 
 interface EntityInfo {
@@ -24,8 +24,7 @@ interface ContentLink {
 
 const TYPE_ICONS: Record<string, React.ReactNode> = {
   document: <FileText size={12} className="text-blue-400" />,
-  meeting: <Calendar size={12} className="text-green-400" />,
-  chat_message: <MessageSquare size={12} className="text-purple-400" />,
+  communication: <MessageSquare size={12} className="text-green-400" />,
 }
 
 const ENTITY_TYPE_COLORS: Record<string, string> = {

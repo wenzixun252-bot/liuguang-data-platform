@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Search, FileText, Calendar, MessageSquare, Database, Network } from 'lucide-react'
+import { Search, FileText, MessageSquare, Database, Network } from 'lucide-react'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
 import { TagFilter } from './TagManager'
@@ -31,16 +31,14 @@ interface SearchResponse {
 
 const TYPE_ICONS: Record<string, React.ReactNode> = {
   document: <FileText size={14} className="text-blue-500" />,
-  meeting: <Calendar size={14} className="text-green-500" />,
-  chat_message: <MessageSquare size={14} className="text-purple-500" />,
+  communication: <MessageSquare size={14} className="text-green-500" />,
   structured_table: <Database size={14} className="text-orange-500" />,
   kg_entity: <Network size={14} className="text-indigo-500" />,
 }
 
 const TYPE_LABELS: Record<string, string> = {
   document: '文档',
-  meeting: '会议',
-  chat_message: '聊天',
+  communication: '沟通记录',
   structured_table: '数据表',
   kg_entity: '实体',
 }
@@ -48,8 +46,7 @@ const TYPE_LABELS: Record<string, string> = {
 const CONTENT_TYPE_OPTIONS = [
   { value: '', label: '全部类型' },
   { value: 'document', label: '文档' },
-  { value: 'meeting', label: '会议' },
-  { value: 'chat_message', label: '聊天' },
+  { value: 'communication', label: '沟通记录' },
   { value: 'structured_table', label: '数据表' },
 ]
 
@@ -65,8 +62,7 @@ export default function GlobalSearch({
   const handleItemClick = (item: SearchResultItem) => {
     const routes: Record<string, string> = {
       document: '/documents',
-      meeting: '/meetings',
-      chat_message: '/messages',
+      communication: '/communications',
       structured_table: '/structured-tables',
     }
     const route = routes[item.source_type]
@@ -107,7 +103,7 @@ export default function GlobalSearch({
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
           <input
             type="text"
-            placeholder="搜索文档、会议、聊天、数据表、知识图谱实体..."
+            placeholder="搜索文档、沟通记录、数据表、知识图谱实体..."
             className="w-full pl-9 pr-4 py-2.5 bg-white border border-gray-200 rounded-lg text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400"
             value={keyword}
             onChange={e => setKeyword(e.target.value)}

@@ -53,3 +53,36 @@
 - **2026-03-06 11:19:25** [其他] `C:/Users/ljadmin/.claude/plans/effervescent-weaving-rainbow.md` — 新建文件 `effervescent-weaving-rainbow` (144行)
 - **2026-03-06 11:24:58** [前端页面] `frontend/src/pages/StructuredTables.tsx` — 新增 1 行代码
 - **2026-03-06 11:25:07** [前端页面] `frontend/src/pages/StructuredTables.tsx` — 新增 8 行代码
+- **2026-03-09 11:56:36** [数据模型] `backend/app/models/__init__.py` — 添加依赖引用
+- **2026-03-09 11:56:37** [数据模型] `backend/app/models/__init__.py` — 新增 1 行代码
+- **2026-03-09 11:58:01** [数据库迁移] `backend/alembic/versions/s9i0j1k2l3m4_asset_type_restructure.py` — 新建文件 `s9i0j1k2l3m4_asset_type_restructure`，包含 upgrade, downgrade
+- **2026-03-09 14:12:39** [前端页面] `frontend/src/pages/StructuredTables.tsx` — 新增 2 行代码
+- **2026-03-09 14:12:50** [前端页面] `frontend/src/pages/StructuredTables.tsx` — 修改逻辑 (+9/-3行)
+- **2026-03-09 14:13:09** [前端页面] `frontend/src/pages/StructuredTables.tsx` — 新增 12 行代码
+- **2026-03-09 14:13:33** [前端组件] `frontend/src/components/Layout.tsx` — 修改逻辑 (+3/-4行)
+- **2026-03-09 14:13:39** [前端组件] `frontend/src/components/Layout.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-09 14:13:46** [前端组件] `frontend/src/components/Layout.tsx` — 删除 1 行代码
+- **2026-03-09 14:13:52** [前端] `frontend/src/App.tsx` — 添加依赖引用
+- **2026-03-09 14:13:59** [前端] `frontend/src/App.tsx` — 调整UI组件
+- **2026-03-09 14:14:34** [前端组件] `frontend/src/components/GlobalSearch.tsx` — 调整UI组件
+- **2026-03-09 14:14:40** [前端组件] `frontend/src/components/GlobalSearch.tsx` — 修改逻辑 (+1/-2行)
+- **2026-03-09 14:14:46** [前端组件] `frontend/src/components/GlobalSearch.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-09 14:14:57** [前端组件] `frontend/src/components/GlobalSearch.tsx` — 添加依赖引用
+- **2026-03-09 14:15:29** [前端页面] `frontend/src/pages/DataInsights.tsx` — 修改逻辑 (+3/-9行)
+- **2026-03-09 14:15:46** [前端页面] `frontend/src/pages/DataInsights.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-09 14:16:23** [前端组件] `frontend/src/components/KGSidebar.tsx` — 调整UI组件
+- **2026-03-09 14:16:36** [前端组件] `frontend/src/components/KGSidebar.tsx` — 添加依赖引用
+- **2026-03-09 14:17:11** [前端组件] `frontend/src/components/DataPicker.tsx` — 修改逻辑 (+1/-2行)
+- **2026-03-09 14:17:22** [前端组件] `frontend/src/components/DataPicker.tsx` — 删除 1 行代码
+- **2026-03-09 14:17:40** [前端组件] `frontend/src/components/KnowledgeSelector.tsx` — 修改逻辑 (+1/-2行)
+- **2026-03-09 14:17:52** [前端组件] `frontend/src/components/KnowledgeSelector.tsx` — 添加依赖引用
+- **2026-03-09 14:18:28** [前端页面] `frontend/src/pages/ETLAdmin.tsx` — 修改逻辑 (+1/-2行)
+- **2026-03-09 14:40:11** [前端页面] `frontend/src/pages/DataInsights.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-09 14:40:34** [前端页面] `frontend/src/pages/DataInsights.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-09 14:40:40** [前端页面] `frontend/src/pages/DataInsights.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-09 14:40:46** [前端页面] `frontend/src/pages/DataInsights.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-09 14:40:56** [前端页面] `frontend/src/pages/Reports.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-09 14:41:06** [前端页面] `frontend/src/pages/Reports.tsx` — 修改逻辑 (+1/-2行)
+- **2026-03-09 14:43:17** [数据模型] `backend/app/models/__init__.py` — 删除 2 行代码
+- **2026-03-09 14:43:29** [数据模型] `backend/app/models/__init__.py` — 删除 2 行代码
+- **2026-03-09 14:44:17** [数据库迁移] `backend/alembic/versions/t0j1k2l3m4n5_drop_archived_tables.py` — 新建文件 `t0j1k2l3m4n5_drop_archived_tables`，包含 upgrade, downgrade

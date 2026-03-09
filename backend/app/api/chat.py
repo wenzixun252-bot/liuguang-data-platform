@@ -42,8 +42,7 @@ MAX_HISTORY_TURNS = 10
 
 SOURCE_TABLE_LABELS = {
     "document": "文档",
-    "meeting": "会议",
-    "chat_message": "聊天",
+    "communication": "沟通记录",
 }
 
 

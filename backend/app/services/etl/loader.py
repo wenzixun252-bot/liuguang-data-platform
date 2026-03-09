@@ -13,9 +13,8 @@ from app.models.asset import ETLDataSource, ETLSyncState
 from app.services.etl.postprocessor import content_postprocessor
 from app.services.etl.transformer import (
     TransformResult,
-    TransformedChatMessage,
+    TransformedCommunication,
     TransformedDocument,
-    TransformedMeeting,
 )
 from app.models.user import User
 from app.services.feishu import feishu_client
@@ -96,16 +95,13 @@ class AssetLoader:
                 # 去重检测（入库后再检查，因为需要数据库中的 ID）
                 content_type = {
                     TransformedDocument: "document",
-                    TransformedMeeting: "meeting",
-                    TransformedChatMessage: "chat_message",
+                    TransformedCommunication: "communication",
                 }.get(type(record), "document")
 
                 if isinstance(record, TransformedDocument):
                     await self._upsert_document(db, record, vector_str)
-                elif isinstance(record, TransformedMeeting):
-                    await self._upsert_meeting(db, record, vector_str)
-                elif isinstance(record, TransformedChatMessage):
-                    await self._upsert_chat_message(db, record, vector_str)
+                elif isinstance(record, TransformedCommunication):
+                    await self._upsert_communication(db, record, vector_str)
                 else:
                     logger.warning("未知记录类型: %s", type(record))
                     continue
@@ -115,8 +111,7 @@ class AssetLoader:
                 # 查询刚 upsert 的记录 ID
                 table_name = {
                     "document": "documents",
-                    "meeting": "meetings",
-                    "chat_message": "chat_messages",
+                    "communication": "communications",
                 }.get(content_type, "documents")
 
                 id_result = await db.execute(
@@ -188,7 +183,7 @@ class AssetLoader:
                 INSERT INTO documents (
                     owner_id, source_type, source_platform, source_app_token, source_table_id,
                     feishu_record_id, title, content_text, content_vector,
-                    summary, author, source_url, uploader_name,
+                    summary, author, doc_category, source_url, uploader_name,
                     keywords, sentiment,
                     quality_score, content_hash, parse_status, processed_at,
                     extra_fields,
@@ -196,7 +191,7 @@ class AssetLoader:
                 ) VALUES (
                     :owner_id, 'cloud', :source_platform, :source_app_token, :source_table_id,
                     :feishu_record_id, :title, :content_text, :content_vector,
-                    :summary, :author, :source_url, :uploader_name,
+                    :summary, :author, :doc_category, :source_url, :uploader_name,
                     CAST(:keywords AS jsonb), :sentiment,
                     :quality_score, :content_hash, 'done', :processed_at,
                     CAST(:extra_fields AS jsonb),
@@ -209,6 +204,7 @@ class AssetLoader:
                     title = EXCLUDED.title,
                     summary = EXCLUDED.summary,
                     author = EXCLUDED.author,
+                    doc_category = EXCLUDED.doc_category,
                     source_url = EXCLUDED.source_url,
                     uploader_name = EXCLUDED.uploader_name,
                     keywords = EXCLUDED.keywords,
@@ -233,6 +229,7 @@ class AssetLoader:
                 "content_vector": vector_str,
                 "summary": r.summary,
                 "author": r.author,
+                "doc_category": r.doc_category,
                 "source_url": r.source_url or None,
                 "uploader_name": r.uploader_name or None,
                 "keywords": _list_to_json(r.keywords),
@@ -247,48 +244,60 @@ class AssetLoader:
         )
 
     @staticmethod
-    async def _upsert_meeting(db: AsyncSession, r: TransformedMeeting, vector_str: str | None) -> None:
+    async def _upsert_communication(db: AsyncSession, r: TransformedCommunication, vector_str: str | None) -> None:
         await db.execute(
             text("""
-                INSERT INTO meetings (
+                INSERT INTO communications (
                     owner_id, source_platform, source_app_token, source_table_id,
-                    feishu_record_id, title, meeting_time, duration_minutes,
-                    location, organizer, participants, agenda, conclusions,
-                    action_items, content_text, content_vector,
-                    summary, transcript, recording_url,
-                    source_url, uploader_name,
+                    feishu_record_id, comm_type, title, comm_time,
+                    initiator, participants, duration_minutes,
+                    location, agenda, conclusions, action_items,
+                    transcript, recording_url,
+                    chat_id, chat_type, chat_name,
+                    message_type, reply_to,
+                    content_text, content_vector,
+                    summary, source_url, uploader_name,
                     keywords, sentiment,
                     quality_score, content_hash, parse_status, processed_at,
                     extra_fields,
                     feishu_created_at, feishu_updated_at, synced_at, created_at, updated_at
                 ) VALUES (
                     :owner_id, :source_platform, :source_app_token, :source_table_id,
-                    :feishu_record_id, :title, :meeting_time, :duration_minutes,
-                    :location, :organizer, CAST(:participants AS jsonb), :agenda, :conclusions,
-                    CAST(:action_items AS jsonb), :content_text, :content_vector,
-                    :summary, :transcript, :recording_url,
-                    :source_url, :uploader_name,
+                    :feishu_record_id, :comm_type, :title, :comm_time,
+                    :initiator, CAST(:participants AS jsonb), :duration_minutes,
+                    :location, :agenda, :conclusions, CAST(:action_items AS jsonb),
+                    :transcript, :recording_url,
+                    :chat_id, :chat_type, :chat_name,
+                    :message_type, :reply_to,
+                    :content_text, :content_vector,
+                    :summary, :source_url, :uploader_name,
                     CAST(:keywords AS jsonb), :sentiment,
                     :quality_score, :content_hash, 'done', :processed_at,
                     CAST(:extra_fields AS jsonb),
                     :feishu_created_at, :feishu_updated_at,
                     now(), now(), now()
                 )
-                ON CONFLICT (feishu_record_id) DO UPDATE SET
-                    content_text = EXCLUDED.content_text,
-                    content_vector = EXCLUDED.content_vector,
+                ON CONFLICT (feishu_record_id) WHERE feishu_record_id IS NOT NULL DO UPDATE SET
+                    comm_type = EXCLUDED.comm_type,
                     title = EXCLUDED.title,
-                    meeting_time = EXCLUDED.meeting_time,
+                    comm_time = EXCLUDED.comm_time,
+                    initiator = EXCLUDED.initiator,
+                    participants = EXCLUDED.participants,
                     duration_minutes = EXCLUDED.duration_minutes,
                     location = EXCLUDED.location,
-                    organizer = EXCLUDED.organizer,
-                    participants = EXCLUDED.participants,
                     agenda = EXCLUDED.agenda,
                     conclusions = EXCLUDED.conclusions,
                     action_items = EXCLUDED.action_items,
-                    summary = EXCLUDED.summary,
                     transcript = EXCLUDED.transcript,
                     recording_url = EXCLUDED.recording_url,
+                    chat_id = EXCLUDED.chat_id,
+                    chat_type = EXCLUDED.chat_type,
+                    chat_name = EXCLUDED.chat_name,
+                    message_type = EXCLUDED.message_type,
+                    reply_to = EXCLUDED.reply_to,
+                    content_text = EXCLUDED.content_text,
+                    content_vector = EXCLUDED.content_vector,
+                    summary = EXCLUDED.summary,
                     source_url = EXCLUDED.source_url,
                     uploader_name = EXCLUDED.uploader_name,
                     keywords = EXCLUDED.keywords,
@@ -308,20 +317,26 @@ class AssetLoader:
                 "source_app_token": r.source_app_token,
                 "source_table_id": r.source_table_id,
                 "feishu_record_id": r.feishu_record_id,
+                "comm_type": r.comm_type,
                 "title": r.title,
-                "meeting_time": r.meeting_time,
+                "comm_time": r.comm_time,
+                "initiator": r.initiator,
+                "participants": _list_to_json(r.participants),
                 "duration_minutes": r.duration_minutes,
                 "location": r.location,
-                "organizer": r.organizer,
-                "participants": _list_to_json(r.participants),
                 "agenda": r.agenda,
                 "conclusions": r.conclusions,
                 "action_items": _list_to_json(r.action_items),
+                "transcript": r.transcript,
+                "recording_url": r.recording_url or None,
+                "chat_id": r.chat_id,
+                "chat_type": r.chat_type,
+                "chat_name": r.chat_name,
+                "message_type": r.message_type,
+                "reply_to": r.reply_to,
                 "content_text": r.content_text,
                 "content_vector": vector_str,
                 "summary": r.summary,
-                "transcript": r.transcript,
-                "recording_url": r.recording_url or None,
                 "source_url": r.source_url or None,
                 "uploader_name": r.uploader_name or None,
                 "keywords": _list_to_json(r.keywords),
@@ -332,82 +347,6 @@ class AssetLoader:
                 "extra_fields": _dict_to_json(r.extra_fields),
                 "feishu_created_at": r.feishu_created_at,
                 "feishu_updated_at": r.feishu_updated_at,
-            },
-        )
-
-    @staticmethod
-    async def _upsert_chat_message(db: AsyncSession, r: TransformedChatMessage, vector_str: str | None) -> None:
-        await db.execute(
-            text("""
-                INSERT INTO chat_messages (
-                    owner_id, source_platform, source_app_token, source_table_id,
-                    feishu_record_id, chat_id, chat_type, chat_name,
-                    sender, message_type,
-                    content_text, summary, sent_at, reply_to, mentions,
-                    source_url, uploader_name, content_vector,
-                    keywords, sentiment,
-                    quality_score, content_hash, parse_status, processed_at,
-                    extra_fields,
-                    synced_at, created_at, updated_at
-                ) VALUES (
-                    :owner_id, :source_platform, :source_app_token, :source_table_id,
-                    :feishu_record_id, :chat_id, :chat_type, :chat_name,
-                    :sender, :message_type,
-                    :content_text, :summary, :sent_at, :reply_to, CAST(:mentions AS jsonb),
-                    :source_url, :uploader_name, :content_vector,
-                    CAST(:keywords AS jsonb), :sentiment,
-                    :quality_score, :content_hash, 'done', :processed_at,
-                    CAST(:extra_fields AS jsonb),
-                    now(), now(), now()
-                )
-                ON CONFLICT (feishu_record_id) DO UPDATE SET
-                    content_text = EXCLUDED.content_text,
-                    content_vector = EXCLUDED.content_vector,
-                    summary = EXCLUDED.summary,
-                    sender = EXCLUDED.sender,
-                    message_type = EXCLUDED.message_type,
-                    chat_type = EXCLUDED.chat_type,
-                    chat_name = EXCLUDED.chat_name,
-                    sent_at = EXCLUDED.sent_at,
-                    reply_to = EXCLUDED.reply_to,
-                    mentions = EXCLUDED.mentions,
-                    source_url = EXCLUDED.source_url,
-                    uploader_name = EXCLUDED.uploader_name,
-                    keywords = EXCLUDED.keywords,
-                    sentiment = EXCLUDED.sentiment,
-                    quality_score = EXCLUDED.quality_score,
-                    content_hash = EXCLUDED.content_hash,
-                    parse_status = EXCLUDED.parse_status,
-                    processed_at = EXCLUDED.processed_at,
-                    extra_fields = EXCLUDED.extra_fields,
-                    synced_at = now(),
-                    updated_at = now()
-            """),
-            {
-                "owner_id": r.owner_id,
-                "source_platform": r.source_platform or "feishu",
-                "source_app_token": r.source_app_token,
-                "source_table_id": r.source_table_id,
-                "feishu_record_id": r.feishu_record_id,
-                "chat_id": r.chat_id,
-                "chat_type": r.chat_type,
-                "chat_name": r.chat_name,
-                "sender": r.sender,
-                "message_type": r.message_type,
-                "content_text": r.content_text,
-                "summary": r.summary,
-                "sent_at": r.sent_at,
-                "reply_to": r.reply_to,
-                "mentions": _list_to_json(r.mentions),
-                "source_url": r.source_url or None,
-                "uploader_name": r.uploader_name or None,
-                "content_vector": vector_str,
-                "keywords": _list_to_json(r.keywords),
-                "sentiment": r.sentiment,
-                "quality_score": r.quality_score,
-                "content_hash": r.content_hash,
-                "processed_at": r.processed_at,
-                "extra_fields": _dict_to_json(r.extra_fields),
             },
         )
 
@@ -467,8 +406,7 @@ class AssetLoader:
         """将数据源的默认标签继承到同步的记录上。"""
         table_name = {
             "document": "documents",
-            "meeting": "meetings",
-            "chat_message": "chat_messages",
+            "communication": "communications",
         }.get(content_type)
         if not table_name:
             return

@@ -9,9 +9,8 @@ from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models.chat_message import ChatMessage
+from app.models.communication import Communication
 from app.models.document import Document
-from app.models.meeting import Meeting
 from app.models.leadership_insight import LeadershipInsight
 from app.models.user import User
 from app.services.llm import llm_client
@@ -53,29 +52,17 @@ async def get_leadership_candidates(
     """获取可分析的领导候选人列表。"""
     candidates: dict[str, dict] = {}
 
-    # 从会议中找组织者
-    meeting_result = await db.execute(
-        select(Meeting.organizer, func.count(Meeting.id)).where(
-            and_(Meeting.owner_id == owner_id, Meeting.organizer.isnot(None))
-        ).group_by(Meeting.organizer)
+    # 从沟通记录中找发起人（initiator）
+    comm_result = await db.execute(
+        select(Communication.initiator, func.count(Communication.id)).where(
+            and_(Communication.owner_id == owner_id, Communication.initiator.isnot(None))
+        ).group_by(Communication.initiator)
     )
-    for name, count in meeting_result.all():
+    for name, count in comm_result.all():
         if name:
             if name not in candidates:
-                candidates[name] = {"name": name, "meeting_count": 0, "message_count": 0, "document_count": 0}
-            candidates[name]["meeting_count"] = count
-
-    # 从聊天消息中找发送者
-    msg_result = await db.execute(
-        select(ChatMessage.sender, func.count(ChatMessage.id)).where(
-            and_(ChatMessage.owner_id == owner_id, ChatMessage.sender.isnot(None))
-        ).group_by(ChatMessage.sender)
-    )
-    for name, count in msg_result.all():
-        if name:
-            if name not in candidates:
-                candidates[name] = {"name": name, "meeting_count": 0, "message_count": 0, "document_count": 0}
-            candidates[name]["message_count"] = count
+                candidates[name] = {"name": name, "comm_count": 0, "document_count": 0}
+            candidates[name]["comm_count"] = count
 
     # 从文档中找作者
     doc_result = await db.execute(
@@ -86,7 +73,7 @@ async def get_leadership_candidates(
     for name, count in doc_result.all():
         if name:
             if name not in candidates:
-                candidates[name] = {"name": name, "meeting_count": 0, "message_count": 0, "document_count": 0}
+                candidates[name] = {"name": name, "comm_count": 0, "document_count": 0}
             candidates[name]["document_count"] = count
 
     # 获取所有内部用户名集合
@@ -100,7 +87,7 @@ async def get_leadership_candidates(
     # 按总数据量排序
     result = sorted(
         candidates.values(),
-        key=lambda x: x["meeting_count"] + x["message_count"] + x["document_count"],
+        key=lambda x: x["comm_count"] + x["document_count"],
         reverse=True,
     )
     return result[:50]
@@ -112,41 +99,26 @@ async def gather_leader_data(
     target_name: str,
 ) -> dict:
     """收集目标领导的相关数据。"""
-    data: dict = {"meetings": [], "messages": [], "documents": []}
+    data: dict = {"communications": [], "documents": []}
 
-    # 会议（作为组织者或参与者）
-    meetings = await db.execute(
-        select(Meeting).where(
+    # 沟通记录（作为发起人）
+    comms = await db.execute(
+        select(Communication).where(
             and_(
-                Meeting.owner_id == owner_id,
-                Meeting.organizer == target_name,
+                Communication.owner_id == owner_id,
+                Communication.initiator == target_name,
             )
-        ).order_by(Meeting.meeting_time.desc()).limit(30)
+        ).order_by(Communication.comm_time.desc().nullslast()).limit(100)
     )
-    for m in meetings.scalars().all():
-        data["meetings"].append({
-            "title": m.title,
-            "time": str(m.meeting_time),
-            "duration": m.duration_minutes,
-            "conclusions": m.conclusions,
-            "action_items": m.action_items,
-            "participants_count": len(m.participants) if m.participants else 0,
-        })
-
-    # 聊天消息
-    messages = await db.execute(
-        select(ChatMessage).where(
-            and_(
-                ChatMessage.owner_id == owner_id,
-                ChatMessage.sender == target_name,
-            )
-        ).order_by(ChatMessage.sent_at.desc()).limit(100)
-    )
-    for m in messages.scalars().all():
-        data["messages"].append({
-            "content": m.content_text[:300],
-            "time": str(m.sent_at),
-            "type": m.message_type,
+    for c in comms.scalars().all():
+        data["communications"].append({
+            "type": c.comm_type,
+            "title": c.title,
+            "time": str(c.comm_time or c.created_at),
+            "duration": c.duration_minutes,
+            "conclusions": c.conclusions,
+            "content": c.content_text[:300] if c.content_text else "",
+            "participants_count": len(c.participants) if c.participants else 0,
         })
 
     # 文档
@@ -189,8 +161,7 @@ async def generate_insight(
         target_user_id=target_user_id,
         target_user_name=target_user_name,
         data_coverage={
-            "meetings": len(data["meetings"]),
-            "messages": len(data["messages"]),
+            "communications": len(data["communications"]),
             "documents": len(data["documents"]),
         },
     )
@@ -240,8 +211,7 @@ async def generate_insight_stream(
         target_user_id=target_user_id,
         target_user_name=target_user_name,
         data_coverage={
-            "meetings": len(data["meetings"]),
-            "messages": len(data["messages"]),
+            "communications": len(data["communications"]),
             "documents": len(data["documents"]),
         },
     )

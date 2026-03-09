@@ -8,9 +8,8 @@ from sqlalchemy import cast, Date, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, get_visible_owner_ids
-from app.models.chat_message import ChatMessage
+from app.models.communication import Communication
 from app.models.document import Document
-from app.models.meeting import Meeting
 from app.models.structured_table import StructuredTable
 from app.models.user import User
 from app.schemas.asset import AssetStatsResponse
@@ -26,36 +25,37 @@ async def get_asset_stats(
     """返回三张表的聚合统计数据。"""
     visible_ids = await get_visible_owner_ids(current_user, db)
 
-    async def _count(model) -> int:
+    async def _count(model, extra_filter=None) -> int:
         stmt = select(func.count()).select_from(model)
         if visible_ids is not None:
             stmt = stmt.where(model.owner_id.in_(visible_ids))
+        if extra_filter is not None:
+            stmt = stmt.where(extra_filter)
         return (await db.execute(stmt)).scalar() or 0
 
-    async def _today_count(model) -> int:
+    async def _today_count(model, extra_filter=None) -> int:
         today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
         stmt = select(func.count()).select_from(model).where(model.created_at >= today_start)
         if visible_ids is not None:
             stmt = stmt.where(model.owner_id.in_(visible_ids))
+        if extra_filter is not None:
+            stmt = stmt.where(extra_filter)
         return (await db.execute(stmt)).scalar() or 0
 
     doc_count = await _count(Document)
-    meeting_count = await _count(Meeting)
-    chat_count = await _count(ChatMessage)
+    comm_count = await _count(Communication)
     table_count = await _count(StructuredTable)
 
-    total = doc_count + meeting_count + chat_count + table_count
+    total = doc_count + comm_count + table_count
     by_table = {
         "documents": doc_count,
-        "meetings": meeting_count,
-        "chat_messages": chat_count,
+        "communications": comm_count,
         "tables": table_count,
     }
 
     today_new = {
         "documents": await _today_count(Document),
-        "meetings": await _today_count(Meeting),
-        "chat_messages": await _today_count(ChatMessage),
+        "communications": await _today_count(Communication),
         "tables": await _today_count(StructuredTable),
     }
 

@@ -10,12 +10,11 @@ from app.logging_config import setup_logging
 setup_logging()
 from app.api.auth import router as auth_router
 from app.api.chat import router as chat_router
-from app.api.chat_messages import router as chat_messages_router
+from app.api.communications import router as communications_router
 from app.api.data_import import router as data_import_router
 from app.api.departments import router as departments_router
 from app.api.documents import router as documents_router
 from app.api.etl import router as etl_router
-from app.api.meetings import router as meetings_router
 from app.api.upload import router as upload_router
 from app.api.users import router as users_router
 from app.api.todos import router as todos_router
@@ -77,8 +76,7 @@ app.include_router(etl_router)
 app.include_router(chat_router)
 app.include_router(assets_router)
 app.include_router(documents_router)
-app.include_router(meetings_router)
-app.include_router(chat_messages_router)
+app.include_router(communications_router)
 app.include_router(upload_router)
 app.include_router(data_import_router)
 app.include_router(departments_router)

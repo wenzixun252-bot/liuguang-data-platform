@@ -307,7 +307,7 @@ export default function Todos() {
                     {item.priority === 'high' ? '高' : item.priority === 'medium' ? '中' : '低'}
                   </span>
                   <span className="text-xs text-gray-400">
-                    来源: {item.source_type === 'meeting' ? '会议' : '聊天'}
+                    来源: 沟通记录
                   </span>
                   {item.due_date && (
                     <span className="text-xs text-gray-400 flex items-center gap-1">

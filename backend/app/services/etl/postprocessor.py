@@ -109,8 +109,7 @@ class ContentPostprocessor:
 
         table_name = {
             "document": "documents",
-            "meeting": "meetings",
-            "chat_message": "chat_messages",
+            "communication": "communications",
             "structured_table": "structured_tables",
         }.get(content_type)
 

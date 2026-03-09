@@ -1,7 +1,7 @@
 import { useState, useEffect, lazy, Suspense } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  FileText, Calendar, MessageSquare, Table2, X, TrendingUp,
+  FileText, MessageSquare, Table2, X, TrendingUp,
   CheckSquare, Clock, AlertCircle, Loader2,
 } from 'lucide-react'
 import api from '../lib/api'
@@ -21,7 +21,7 @@ interface DetailItem {
   title?: string | null
   name?: string | null
   content_text?: string
-  sender?: string | null
+  initiator?: string | null
   created_at: string
 }
 
@@ -45,18 +45,11 @@ const CARD_CONFIG = [
     api: '/documents/list',
   },
   {
-    key: 'meetings',
-    label: '会议',
-    icon: Calendar,
-    color: 'from-purple-500 to-purple-600',
-    api: '/meetings/list',
-  },
-  {
-    key: 'chat_messages',
-    label: '聊天',
+    key: 'communications',
+    label: '沟通',
     icon: MessageSquare,
-    color: 'from-emerald-500 to-emerald-600',
-    api: '/chat-messages/list',
+    color: 'from-purple-500 to-purple-600',
+    api: '/communications/list',
   },
   {
     key: 'tables',
@@ -302,7 +295,7 @@ export default function DataInsights() {
                     <tr>
                       <th className="text-left py-3 px-4 text-gray-500 font-medium w-12">#</th>
                       <th className="text-left py-3 px-4 text-gray-500 font-medium">
-                        {detailModal.key === 'chat_messages' ? '发送人' : '标题'}
+                        {detailModal.key === 'communications' ? '组织者/发送者' : '标题'}
                       </th>
                       <th className="text-left py-3 px-4 text-gray-500 font-medium">内容摘要</th>
                       <th className="text-left py-3 px-4 text-gray-500 font-medium w-40">时间</th>
@@ -313,8 +306,8 @@ export default function DataInsights() {
                       <tr key={item.id} className="border-t border-gray-100 hover:bg-gray-50">
                         <td className="py-3 px-4 text-gray-400">{i + 1}</td>
                         <td className="py-3 px-4 text-gray-800 font-medium truncate max-w-[200px]">
-                          {detailModal.key === 'chat_messages'
-                            ? (item.sender || '未知')
+                          {detailModal.key === 'communications'
+                            ? (item.initiator || '未知')
                             : (item.title || item.name || '无标题')}
                         </td>
                         <td className="py-3 px-4 text-gray-500 truncate max-w-[300px]">

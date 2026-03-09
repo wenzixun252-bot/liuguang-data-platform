@@ -9,9 +9,8 @@ from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models.chat_message import ChatMessage
+from app.models.communication import Communication
 from app.models.document import Document
-from app.models.meeting import Meeting
 from app.models.report import Report, ReportTemplate
 from app.services.llm import llm_client
 
@@ -154,7 +153,7 @@ async def gather_data(
     if time_end.tzinfo is not None:
         time_end = time_end.replace(tzinfo=None)
 
-    data: dict = {"documents": [], "meetings": [], "chat_messages": []}
+    data: dict = {"documents": [], "communications": []}
 
     if "document" in data_sources:
         result = await db.execute(
@@ -172,43 +171,27 @@ async def gather_data(
             for d in docs
         ]
 
-    if "meeting" in data_sources:
+    if "communication" in data_sources:
         result = await db.execute(
-            select(Meeting).where(
+            select(Communication).where(
                 and_(
-                    Meeting.owner_id == owner_id,
-                    Meeting.created_at >= time_start,
-                    Meeting.created_at <= time_end,
+                    Communication.owner_id == owner_id,
+                    Communication.created_at >= time_start,
+                    Communication.created_at <= time_end,
                 )
-            ).order_by(Meeting.created_at.desc()).limit(50)
+            ).order_by(Communication.comm_time.desc().nullslast()).limit(100)
         )
-        meetings = result.scalars().all()
-        data["meetings"] = [
+        comms = result.scalars().all()
+        data["communications"] = [
             {
-                "title": m.title,
-                "time": str(m.meeting_time),
-                "organizer": m.organizer,
-                "conclusions": m.conclusions,
-                "action_items": m.action_items,
-                "content": m.content_text[:500],
+                "type": c.comm_type,
+                "title": c.title,
+                "time": str(c.comm_time or c.created_at),
+                "initiator": c.initiator,
+                "conclusions": c.conclusions,
+                "content": c.content_text[:500],
             }
-            for m in meetings
-        ]
-
-    if "chat_message" in data_sources:
-        result = await db.execute(
-            select(ChatMessage).where(
-                and_(
-                    ChatMessage.owner_id == owner_id,
-                    ChatMessage.created_at >= time_start,
-                    ChatMessage.created_at <= time_end,
-                )
-            ).order_by(ChatMessage.sent_at.desc()).limit(100)
-        )
-        messages = result.scalars().all()
-        data["chat_messages"] = [
-            {"sender": m.sender, "content": m.content_text[:300], "time": str(m.sent_at)}
-            for m in messages
+            for c in comms
         ]
 
     return data
@@ -333,8 +316,7 @@ async def generate_report(
             "sources": data_sources,
             "counts": {
                 "documents": len(data["documents"]),
-                "meetings": len(data["meetings"]),
-                "chat_messages": len(data["chat_messages"]),
+                "communications": len(data["communications"]),
             },
         },
     )
@@ -407,8 +389,7 @@ async def generate_report_stream(
             "sources": data_sources,
             "counts": {
                 "documents": len(data["documents"]),
-                "meetings": len(data["meetings"]),
-                "chat_messages": len(data["chat_messages"]),
+                "communications": len(data["communications"]),
             },
         },
     )

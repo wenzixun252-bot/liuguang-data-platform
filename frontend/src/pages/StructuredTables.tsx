@@ -71,6 +71,8 @@ export default function StructuredTables() {
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
   const [sourceFilter, setSourceFilter] = useState('')
+  const [categoryFilter, setCategoryFilter] = useState('')
+  const [categories, setCategories] = useState<string[]>([])
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [refreshKey, setRefreshKey] = useState(0)
 
@@ -97,6 +99,14 @@ export default function StructuredTables() {
 
   const pageSize = 20
 
+  /* ── 加载分类列表 ─────────────────────────────── */
+
+  useEffect(() => {
+    api.get('/structured-tables/categories')
+      .then((res) => setCategories(res.data.categories || []))
+      .catch(() => {})
+  }, [refreshKey])
+
   /* ── 加载表格列表 ─────────────────────────────── */
 
   useEffect(() => {
@@ -104,6 +114,7 @@ export default function StructuredTables() {
     const params: Record<string, unknown> = { page, page_size: pageSize }
     if (search) params.search = search
     if (sourceFilter) params.source_type = sourceFilter
+    if (categoryFilter) params.table_category = categoryFilter
     if (tagFilter.length > 0) params.tag_ids = tagFilter
 
     api.get('/structured-tables', { params })
@@ -113,9 +124,9 @@ export default function StructuredTables() {
       })
       .catch(() => toast.error('加载表格列表失败'))
       .finally(() => setLoading(false))
-  }, [page, search, sourceFilter, tagFilter, refreshKey])
+  }, [page, search, sourceFilter, categoryFilter, tagFilter, refreshKey])
 
-  useEffect(() => { setSelectedIds(new Set()) }, [page, search, sourceFilter, tagFilter])
+  useEffect(() => { setSelectedIds(new Set()) }, [page, search, sourceFilter, categoryFilter, tagFilter])
 
   // 从搜索结果跳转过来时自动打开详情
   useEffect(() => {
@@ -348,6 +359,19 @@ export default function StructuredTables() {
           <option value="spreadsheet">飞书表格</option>
           <option value="local">本地上传</option>
         </select>
+        {categories.length > 0 && (
+          <select
+            title="表格分类筛选"
+            className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-200"
+            value={categoryFilter}
+            onChange={(e) => { setCategoryFilter(e.target.value); setPage(1) }}
+          >
+            <option value="">全部分类</option>
+            {categories.map((cat) => (
+              <option key={cat} value={cat}>{cat}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       {/* 标签筛选 */}

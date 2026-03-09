@@ -8,9 +8,8 @@ from sqlalchemy import select, and_, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models.chat_message import ChatMessage
+from app.models.communication import Communication
 from app.models.document import Document
-from app.models.meeting import Meeting
 from app.models.content_entity_link import ContentEntityLink
 from app.models.knowledge_graph import KGEntity, KGRelation
 from app.services.llm import llm_client
@@ -139,42 +138,27 @@ async def _gather_texts(
             "content_id": doc.id,
         })
 
-    # 会议
-    meetings = await db.execute(
-        select(Meeting).where(
-            and_(Meeting.owner_id == owner_id, Meeting.updated_at > time_filter)
-        ).limit(100)
+    # 沟通记录（会议 + 会话 + 录音）
+    comms = await db.execute(
+        select(Communication).where(
+            and_(Communication.owner_id == owner_id, Communication.updated_at > time_filter)
+        ).order_by(Communication.comm_time.desc().nullslast()).limit(200)
     )
-    for m in meetings.scalars().all():
-        texts.append({
-            "content": f"会议: {m.title}\n参会人: {json.dumps(m.participants, ensure_ascii=False)}\n内容: {m.content_text[:2000]}",
-            "time": str(m.meeting_time or m.created_at),
-            "content_type": "meeting",
-            "content_id": m.id,
-        })
-
-    # 聊天消息（合并处理）
-    msgs = await db.execute(
-        select(ChatMessage).where(
-            and_(ChatMessage.owner_id == owner_id, ChatMessage.updated_at > time_filter)
-        ).order_by(ChatMessage.sent_at.desc()).limit(200)
-    )
-    chat_msgs_list = msgs.scalars().all()
-    chat_texts = []
-    chat_msg_ids: list[int] = []
-    for m in chat_msgs_list:
-        chat_texts.append(f"[{m.sender}] {m.content_text}")
-        chat_msg_ids.append(m.id)
-
-    if chat_texts:
-        # 每50条消息作为一个chunk，记录第一条的 id 作为代表
-        for i in range(0, len(chat_texts), 50):
-            batch = chat_texts[i:i + 50]
+    for c in comms.scalars().all():
+        if c.comm_type == "meeting" or c.comm_type == "recording":
+            participants_str = json.dumps(c.participants, ensure_ascii=False) if c.participants else "[]"
             texts.append({
-                "content": "聊天记录:\n" + "\n".join(batch),
-                "time": str(datetime.utcnow()),
-                "content_type": "chat_message",
-                "content_id": chat_msg_ids[i] if i < len(chat_msg_ids) else 0,
+                "content": f"会议: {c.title}\n参会人: {participants_str}\n内容: {c.content_text[:2000]}",
+                "time": str(c.comm_time or c.created_at),
+                "content_type": "communication",
+                "content_id": c.id,
+            })
+        elif c.comm_type == "chat":
+            texts.append({
+                "content": f"聊天记录 [{c.initiator}]: {c.content_text[:2000]}",
+                "time": str(c.comm_time or c.created_at),
+                "content_type": "communication",
+                "content_id": c.id,
             })
 
     return texts

@@ -45,7 +45,7 @@ class ContentTag(Base):
     __tablename__ = "content_tags"
     __table_args__ = (
         CheckConstraint(
-            "content_type IN ('document', 'meeting', 'chat_message', 'structured_table')",
+            "content_type IN ('document', 'communication', 'structured_table')",
             name="ck_content_tag_type",
         ),
         CheckConstraint(

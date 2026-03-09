@@ -285,7 +285,7 @@ function CreateReportModal({
   const [title, setTitle] = useState('')
   const [timeStart, setTimeStart] = useState('')
   const [timeEnd, setTimeEnd] = useState('')
-  const [dataSources, setDataSources] = useState(['document', 'meeting', 'chat_message'])
+  const [dataSources, setDataSources] = useState(['document', 'communication'])
   const [extra, setExtra] = useState('')
   const [readerOptions, setReaderOptions] = useState<{ user_id: string; name: string; is_internal: boolean }[]>([])
   const [selectedReaders, setSelectedReaders] = useState<string[]>([])
@@ -409,8 +409,7 @@ function CreateReportModal({
             <div className="flex gap-3">
               {[
                 { key: 'document', label: '文档' },
-                { key: 'meeting', label: '会议' },
-                { key: 'chat_message', label: '聊天' },
+                { key: 'communication', label: '沟通记录' },
               ].map((s) => (
                 <label key={s.key} className="flex items-center gap-2 text-sm cursor-pointer">
                   <input

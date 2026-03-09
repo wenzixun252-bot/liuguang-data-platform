@@ -26,6 +26,10 @@ class Document(Base):
             "sentiment IS NULL OR sentiment IN ('positive', 'neutral', 'negative')",
             name="ck_documents_sentiment",
         ),
+        CheckConstraint(
+            "doc_category IS NULL OR doc_category IN ('report', 'proposal', 'policy', 'technical')",
+            name="ck_documents_doc_category",
+        ),
         Index("idx_doc_owner", "owner_id"),
         Index("idx_doc_source_type", "source_type"),
         Index(
@@ -38,11 +42,13 @@ class Document(Base):
         Index("idx_doc_extra", "extra_fields", postgresql_using="gin"),
         Index("idx_doc_keywords", "keywords", postgresql_using="gin"),
         Index("idx_doc_content_hash", "content_hash"),
+        Index("idx_doc_category", "doc_category"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     owner_id: Mapped[str] = mapped_column(String(64), nullable=False)
     source_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    doc_category: Mapped[str | None] = mapped_column(String(32))
     source_platform: Mapped[str | None] = mapped_column(String(32))
     source_app_token: Mapped[str | None] = mapped_column(String(128))
     source_table_id: Mapped[str | None] = mapped_column(String(128))

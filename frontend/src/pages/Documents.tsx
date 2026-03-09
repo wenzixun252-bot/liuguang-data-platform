@@ -76,7 +76,7 @@ export default function Documents() {
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
   const [sourceFilter, setSourceFilter] = useState('')
-  const [categoryFilter, _setCategoryFilter] = useState('')
+  const [categoryFilter, setCategoryFilter] = useState('')
   const [uploaderFilter, setUploaderFilter] = useState('')
   const [selected, setSelected] = useState<DocumentItem | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
@@ -94,7 +94,7 @@ export default function Documents() {
     const params: Record<string, unknown> = { page, page_size: pageSize }
     if (search) params.search = search
     if (sourceFilter) params.source_type = sourceFilter
-    if (categoryFilter) params.category = categoryFilter
+    if (categoryFilter) params.doc_category = categoryFilter
     if (uploaderFilter) params.uploader_name = uploaderFilter
     if (tagFilter.length > 0) params.tag_ids = tagFilter
 
@@ -193,6 +193,17 @@ export default function Documents() {
             <option value="">全部来源</option>
             <option value="cloud">飞书同步</option>
             <option value="local">本地上传</option>
+          </select>
+          <select
+            className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-200"
+            value={categoryFilter}
+            onChange={(e) => { setCategoryFilter(e.target.value); setPage(1) }}
+          >
+            <option value="">全部类型</option>
+            <option value="report">行业报告</option>
+            <option value="proposal">项目方案</option>
+            <option value="policy">规章制度</option>
+            <option value="technical">技术文档</option>
           </select>
           <input
             type="text"

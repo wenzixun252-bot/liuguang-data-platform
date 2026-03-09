@@ -110,7 +110,7 @@ export default function ReportPanel() {
           title: title.trim(),
           time_range_start: new Date(timeStart).toISOString(),
           time_range_end: new Date(timeEnd).toISOString(),
-          data_sources: dataSelection.source_tables || ['document', 'meeting', 'chat_message'],
+          data_sources: dataSelection.source_tables || ['document', 'communication'],
           extra_instructions: extraInstructions || null,
           target_reader_ids: selectedReaders.length > 0
             ? selectedReaders.map((r) => String(r.id))

@@ -9,8 +9,7 @@ from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models.chat_message import ChatMessage
-from app.models.meeting import Meeting
+from app.models.communication import Communication
 from app.models.todo_item import TodoItem
 from app.services.llm import llm_client
 
@@ -33,29 +32,29 @@ EXTRACT_TODO_PROMPT = """你是一个待办事项提取专家。请从以下文�
 """
 
 
-async def extract_todos_from_meetings(
+async def extract_todos_from_communications(
     db: AsyncSession,
     owner_id: str,
     days: int = 7,
 ) -> list[dict]:
-    """从会议记录中提取待办。"""
+    """从沟通记录（会议 + 会话）中提取待办。"""
     since = datetime.utcnow() - timedelta(days=days)
 
     result = await db.execute(
-        select(Meeting).where(
+        select(Communication).where(
             and_(
-                Meeting.owner_id == owner_id,
-                Meeting.created_at >= since,
+                Communication.owner_id == owner_id,
+                Communication.created_at >= since,
             )
-        )
+        ).order_by(Communication.comm_time.desc().nullslast()).limit(200)
     )
-    meetings = result.scalars().all()
+    comms = result.scalars().all()
 
     todos = []
-    for meeting in meetings:
-        # 1. 从 action_items JSONB 直接提取
-        if meeting.action_items:
-            for item in meeting.action_items:
+    for comm in comms:
+        # 会议类：从 action_items JSONB 直接提取
+        if comm.comm_type in ("meeting", "recording") and comm.action_items:
+            for item in comm.action_items:
                 task_text = item.get("task") or item.get("title") or ""
                 if task_text:
                     todos.append({
@@ -63,65 +62,21 @@ async def extract_todos_from_meetings(
                         "description": item.get("description"),
                         "priority": "medium",
                         "due_date": item.get("deadline"),
-                        "source_type": "meeting",
-                        "source_id": meeting.id,
+                        "source_type": "communication",
+                        "source_id": comm.id,
                         "source_text": task_text,
                     })
 
-        # 2. LLM 补充提取
-        if meeting.content_text and len(meeting.content_text) > 50:
-            llm_todos = await _llm_extract(meeting.content_text[:4000])
+        # LLM 补充提取
+        if comm.content_text and len(comm.content_text) > 50:
+            llm_todos = await _llm_extract(comm.content_text[:4000])
             for t in llm_todos:
                 todos.append({
                     **t,
-                    "source_type": "meeting",
-                    "source_id": meeting.id,
-                    "source_text": meeting.content_text[:200],
+                    "source_type": "communication",
+                    "source_id": comm.id,
+                    "source_text": comm.content_text[:200],
                 })
-
-    return todos
-
-
-async def extract_todos_from_chats(
-    db: AsyncSession,
-    owner_id: str,
-    days: int = 7,
-) -> list[dict]:
-    """从聊天消息中提取待办。"""
-    since = datetime.utcnow() - timedelta(days=days)
-
-    result = await db.execute(
-        select(ChatMessage).where(
-            and_(
-                ChatMessage.owner_id == owner_id,
-                ChatMessage.created_at >= since,
-            )
-        ).order_by(ChatMessage.sent_at.desc()).limit(200)
-    )
-    messages = result.scalars().all()
-
-    if not messages:
-        return []
-
-    # 批量拼接后LLM提取
-    combined = "\n".join(
-        f"[{m.sender or '未知'}] {m.content_text}"
-        for m in messages
-        if m.content_text
-    )
-
-    if len(combined) < 20:
-        return []
-
-    llm_todos = await _llm_extract(combined[:6000])
-    todos = []
-    for t in llm_todos:
-        todos.append({
-            **t,
-            "source_type": "chat_message",
-            "source_id": messages[0].id if messages else None,
-            "source_text": combined[:200],
-        })
 
     return todos
 
@@ -132,10 +87,7 @@ async def extract_and_save(
     days: int = 7,
 ) -> list[TodoItem]:
     """提取待办并去重保存到数据库。"""
-    meeting_todos = await extract_todos_from_meetings(db, owner_id, days)
-    chat_todos = await extract_todos_from_chats(db, owner_id, days)
-
-    all_todos = meeting_todos + chat_todos
+    all_todos = await extract_todos_from_communications(db, owner_id, days)
 
     # 按 title 去重
     seen_titles: set[str] = set()

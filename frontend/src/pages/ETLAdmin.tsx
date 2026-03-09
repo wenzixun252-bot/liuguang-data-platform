@@ -34,8 +34,7 @@ const STATUS_CONFIG: Record<string, { icon: React.ReactNode; color: string; labe
 
 const ASSET_TYPES = [
   { value: 'document', label: '文档' },
-  { value: 'meeting', label: '会议' },
-  { value: 'chat_message', label: '聊天记录' },
+  { value: 'communication', label: '沟通记录' },
 ]
 
 export default function ETLAdmin() {
