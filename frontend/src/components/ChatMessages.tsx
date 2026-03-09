@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { Sparkles } from 'lucide-react'
+import { motion } from 'framer-motion'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
@@ -25,19 +26,27 @@ export default function ChatMessages({ messages, promptTemplates, onTemplateClic
   if (messages.length === 0 && promptTemplates && promptTemplates.length > 0) {
     return (
       <div className="flex-1 overflow-y-auto flex flex-col items-center justify-center px-4">
-        <Sparkles size={48} className="text-indigo-200 mb-4" />
-        <p className="text-lg text-gray-400 mb-2">有什么我能帮你的？</p>
-        <p className="text-sm text-gray-400 mb-6">基于你的数据资产为你提供智能问答</p>
+        <motion.div
+          animate={{ scale: [1, 1.05, 1] }}
+          transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+        >
+          <Sparkles size={48} className="text-indigo-300/60 mb-4" />
+        </motion.div>
+        <p className="text-lg mb-2" style={{ color: 'var(--color-text-tertiary)' }}>有什么我能帮你的？</p>
+        <p className="text-sm mb-6" style={{ color: 'var(--color-text-quaternary)' }}>基于你的数据资产为你提供智能问答</p>
         <div className="grid grid-cols-2 gap-3 max-w-lg w-full">
           {promptTemplates.map((t) => (
-            <button
+            <motion.button
               key={t.label}
+              whileHover={{ y: -2, scale: 1.01 }}
+              whileTap={{ scale: 0.98 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 25 }}
               onClick={() => onTemplateClick?.(t.question)}
-              className="text-left p-3 bg-white border border-gray-200 rounded-xl hover:border-indigo-300 hover:shadow-sm transition-all"
+              className="text-left p-4 apple-card-interactive"
             >
-              <p className="text-sm font-medium text-gray-700">{t.label}</p>
-              <p className="text-xs text-gray-400 mt-1 line-clamp-2">{t.question}</p>
-            </button>
+              <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>{t.label}</p>
+              <p className="text-xs mt-1 line-clamp-2" style={{ color: 'var(--color-text-tertiary)' }}>{t.question}</p>
+            </motion.button>
           ))}
         </div>
       </div>
@@ -47,21 +56,28 @@ export default function ChatMessages({ messages, promptTemplates, onTemplateClic
   return (
     <div className="flex-1 overflow-y-auto space-y-4 pb-4 px-4">
       {messages.length === 0 && (
-        <div className="flex flex-col items-center justify-center h-full text-gray-400 space-y-4">
-          <Sparkles size={48} className="text-indigo-200" />
+        <div className="flex flex-col items-center justify-center h-full space-y-4" style={{ color: 'var(--color-text-tertiary)' }}>
+          <Sparkles size={48} className="text-indigo-300/60" />
           <p className="text-lg">有什么我能帮你的？</p>
           <p className="text-sm">基于你的数据资产为你提供智能问答</p>
         </div>
       )}
 
       {messages.map((msg, i) => (
-        <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+        <motion.div
+          key={i}
+          initial={i === messages.length - 1 ? { opacity: 0, y: 8, scale: 0.96 } : false}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+          className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+        >
           <div
-            className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm ${
+            className={`max-w-[80%] px-4 py-3 text-sm ${
               msg.role === 'user'
-                ? 'bg-indigo-600 text-white'
-                : 'bg-white shadow-sm border border-gray-100 text-gray-800'
+                ? 'bg-[var(--color-accent)] text-white rounded-[20px] rounded-br-[6px]'
+                : 'apple-card rounded-[20px] rounded-bl-[6px] p-4'
             }`}
+            style={msg.role === 'assistant' ? { color: 'var(--color-text-primary)' } : undefined}
           >
             {msg.role === 'assistant' ? (
               <div className="prose prose-sm max-w-none prose-pre:bg-gray-900 prose-pre:text-gray-100">
@@ -69,13 +85,13 @@ export default function ChatMessages({ messages, promptTemplates, onTemplateClic
                   {msg.content || '...'}
                 </ReactMarkdown>
                 {msg.sources && msg.sources.length > 0 && (
-                  <div className="mt-3 pt-3 border-t border-gray-100">
-                    <p className="text-xs text-gray-400 mb-1">引用来源:</p>
-                    <div className="flex flex-wrap gap-1">
+                  <div className="mt-3 pt-3 border-t border-black/[0.06]">
+                    <p className="text-xs mb-1" style={{ color: 'var(--color-text-quaternary)' }}>引用来源:</p>
+                    <div className="flex flex-wrap gap-1.5">
                       {msg.sources.map((s) => (
                         <span
                           key={s}
-                          className="px-2 py-0.5 bg-indigo-50 text-indigo-600 text-xs rounded-full"
+                          className="px-2.5 py-1 bg-[var(--color-accent-subtle)] text-[var(--color-accent)] text-xs rounded-lg font-medium cursor-pointer hover:bg-indigo-100 transition-colors"
                         >
                           {s}
                         </span>
@@ -88,7 +104,7 @@ export default function ChatMessages({ messages, promptTemplates, onTemplateClic
               <p className="whitespace-pre-wrap">{msg.content}</p>
             )}
           </div>
-        </div>
+        </motion.div>
       ))}
       <div ref={bottomRef} />
     </div>

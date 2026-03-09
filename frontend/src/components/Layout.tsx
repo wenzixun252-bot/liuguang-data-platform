@@ -14,10 +14,13 @@ import {
   UserCog,
   ChevronDown,
   FolderOpen,
+  Upload,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
 import HeaderSearch from './HeaderSearch'
+import PageTransition from './PageTransition'
 
 // ── 导航类型 ──────────────────────────────────────────
 interface NavItem {
@@ -42,6 +45,7 @@ function isNavGroup(entry: NavEntry): entry is NavGroup {
 // ── 导航配置 ──────────────────────────────────────────
 const NAV_ITEMS: NavEntry[] = [
   { path: '/data-insights', label: '数据洞察', icon: Telescope },
+  { path: '/data-import', label: '数据导入', icon: Upload },
   {
     key: 'data-assets',
     label: '数据资产',
@@ -65,6 +69,8 @@ export default function Layout() {
   const dropdownRef = useRef<HTMLDivElement>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['data-assets']))
+  const [scrolled, setScrolled] = useState(false)
+  const mainRef = useRef<HTMLElement>(null)
 
   // 点击外部关闭下拉菜单
   useEffect(() => {
@@ -103,6 +109,15 @@ export default function Layout() {
     }
   }, [location.pathname])
 
+  // 监听主内容区滚动，驱动顶栏模糊效果
+  useEffect(() => {
+    const main = mainRef.current
+    if (!main) return
+    const handler = () => setScrolled(main.scrollTop > 10)
+    main.addEventListener('scroll', handler)
+    return () => main.removeEventListener('scroll', handler)
+  }, [])
+
   const handleLogout = () => {
     clearAuth()
     navigate('/login')
@@ -118,35 +133,46 @@ export default function Layout() {
   }
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex h-screen" style={{ background: 'var(--color-bg-primary)' }}>
       {/* Mobile sidebar overlay */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
+      <AnimatePresence>
+        {sidebarOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 bg-black/30 backdrop-blur-sm z-40 lg:hidden"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Sidebar */}
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-50 w-64 bg-white border-r border-gray-200 transform transition-transform lg:translate-x-0 ${
+        className={`fixed lg:static inset-y-0 left-0 z-50 w-[272px] apple-glass-heavy border-r border-black/[0.04] transform transition-transform lg:translate-x-0 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        <div className="flex items-center gap-2 h-16 px-6 border-b border-gray-200">
+        <div className="flex items-center gap-2.5 h-16 px-7 border-b border-black/[0.04]">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
             <span className="text-white text-sm font-bold">LG</span>
           </div>
-          <span className="text-lg font-semibold text-gray-800">流光平台</span>
+          <span className="text-lg font-semibold" style={{ color: 'var(--color-text-primary)', letterSpacing: 'var(--tracking-tighter)' }}>
+            流光平台
+          </span>
           <button
-            className="ml-auto lg:hidden text-gray-500"
+            type="button"
+            title="关闭菜单"
+            className="ml-auto lg:hidden apple-btn rounded-lg p-1 hover:bg-black/[0.04]"
+            style={{ color: 'var(--color-text-secondary)' }}
             onClick={() => setSidebarOpen(false)}
           >
             <X size={20} />
           </button>
         </div>
 
-        <nav className="p-4 space-y-1">
+        <nav className="p-5 space-y-1">
           {NAV_ITEMS.map((entry) => {
             if (isNavGroup(entry)) {
               const expanded = expandedGroups.has(entry.key)
@@ -156,42 +182,54 @@ export default function Layout() {
                 <div key={entry.key}>
                   <button
                     onClick={() => toggleGroup(entry.key)}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-sm font-medium transition-colors apple-btn ${
                       groupActive
-                        ? 'bg-indigo-50/60 text-indigo-700'
-                        : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                        ? 'bg-[var(--color-accent-subtle)] text-[var(--color-accent)]'
+                        : 'text-[var(--color-text-secondary)] hover:bg-black/[0.04] hover:text-[var(--color-text-primary)]'
                     }`}
                   >
                     <GroupIcon size={18} />
                     {entry.label}
                     <ChevronDown
                       size={14}
-                      className={`ml-auto transition-transform ${expanded ? 'rotate-180' : ''}`}
+                      className="ml-auto"
+                      style={{
+                        transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                        transition: 'transform 250ms cubic-bezier(0.25, 0.1, 0.25, 1.0)',
+                      }}
                     />
                   </button>
-                  {expanded && (
-                    <div className="ml-4 mt-0.5 space-y-0.5">
-                      {entry.children.map(child => {
-                        const ChildIcon = child.icon
-                        const active = location.pathname === child.path
-                        return (
-                          <Link
-                            key={child.path}
-                            to={child.path}
-                            onClick={() => setSidebarOpen(false)}
-                            className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-                              active
-                                ? 'bg-indigo-50 text-indigo-700 font-medium'
-                                : 'text-gray-500 hover:bg-gray-100 hover:text-gray-900'
-                            }`}
-                          >
-                            <ChildIcon size={16} />
-                            {child.label}
-                          </Link>
-                        )
-                      })}
-                    </div>
-                  )}
+                  <AnimatePresence initial={false}>
+                    {expanded && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.25, ease: [0.25, 0.1, 0.25, 1.0] }}
+                        className="ml-4 mt-0.5 space-y-0.5 overflow-hidden"
+                      >
+                        {entry.children.map(child => {
+                          const ChildIcon = child.icon
+                          const active = location.pathname === child.path
+                          return (
+                            <Link
+                              key={child.path}
+                              to={child.path}
+                              onClick={() => setSidebarOpen(false)}
+                              className={`flex items-center gap-3 px-3 py-2 rounded-[10px] text-sm transition-colors apple-btn ${
+                                active
+                                  ? 'bg-[var(--color-accent-subtle)] text-[var(--color-accent)] font-medium'
+                                  : 'text-[var(--color-text-tertiary)] hover:bg-black/[0.04] hover:text-[var(--color-text-primary)]'
+                              }`}
+                            >
+                              <ChildIcon size={16} />
+                              {child.label}
+                            </Link>
+                          )
+                        })}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               )
             }
@@ -204,10 +242,10 @@ export default function Layout() {
                 key={entry.path}
                 to={entry.path}
                 onClick={() => setSidebarOpen(false)}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-[10px] text-sm font-medium transition-colors apple-btn ${
                   active
-                    ? 'bg-indigo-50 text-indigo-700'
-                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                    ? 'bg-[var(--color-accent-subtle)] text-[var(--color-accent)]'
+                    : 'text-[var(--color-text-secondary)] hover:bg-black/[0.04] hover:text-[var(--color-text-primary)]'
                 }`}
               >
                 <Icon size={18} />
@@ -221,9 +259,19 @@ export default function Layout() {
       {/* Main area */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top bar */}
-        <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 lg:px-6">
+        <header
+          className={`h-16 flex items-center justify-between px-4 lg:px-6 transition-all duration-300 ${
+            scrolled
+              ? 'apple-glass border-b border-black/[0.06]'
+              : 'bg-transparent border-b border-transparent'
+          }`}
+          style={scrolled ? { boxShadow: 'var(--shadow-xs)' } : undefined}
+        >
           <button
-            className="lg:hidden text-gray-500"
+            type="button"
+            title="打开菜单"
+            className="lg:hidden apple-btn rounded-lg p-1.5 hover:bg-black/[0.04]"
+            style={{ color: 'var(--color-text-secondary)' }}
             onClick={() => setSidebarOpen(true)}
           >
             <Menu size={20} />
@@ -233,18 +281,22 @@ export default function Layout() {
           <div className="flex-1 max-w-md mx-4">
             <button
               onClick={() => setSearchOpen(true)}
-              className="w-full flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm text-gray-400 transition-colors"
+              className="w-full flex items-center gap-2 px-3.5 py-2 bg-black/[0.04] hover:bg-black/[0.06] rounded-xl text-sm transition-all duration-200 border border-transparent hover:border-black/[0.04]"
+              style={{ color: 'var(--color-text-tertiary)' }}
             >
-              <Search size={16} />
+              <Search size={15} className="opacity-60" />
               <span>搜索文档、沟通记录...</span>
-              <kbd className="ml-auto text-xs bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded">Ctrl+K</kbd>
+              <kbd className="ml-auto text-[11px] bg-black/[0.05] px-1.5 py-0.5 rounded-md font-medium"
+                   style={{ color: 'var(--color-text-quaternary)' }}>
+                Ctrl+K
+              </kbd>
             </button>
           </div>
 
           <div className="relative" ref={dropdownRef}>
             <button
               onClick={() => setDropdownOpen(!dropdownOpen)}
-              className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+              className="flex items-center gap-2 px-2 py-1.5 rounded-xl hover:bg-black/[0.04] transition-colors apple-btn"
             >
               {user?.avatar_url ? (
                 <img
@@ -253,45 +305,57 @@ export default function Layout() {
                   className="w-8 h-8 rounded-full"
                 />
               ) : (
-                <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center">
-                  <span className="text-indigo-700 text-sm font-medium">
+                <div className="w-8 h-8 rounded-full bg-[var(--color-accent-light)] flex items-center justify-center">
+                  <span className="text-[var(--color-accent)] text-sm font-medium">
                     {user?.name?.[0] || '?'}
                   </span>
                 </div>
               )}
               <div className="hidden sm:block text-left">
-                <p className="text-sm font-medium text-gray-700">{user?.name}</p>
-                <p className="text-xs text-gray-400">{user?.role}</p>
+                <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>{user?.name}</p>
+                <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{user?.role}</p>
               </div>
-              <ChevronDown size={14} className="text-gray-400" />
+              <ChevronDown size={14} style={{ color: 'var(--color-text-quaternary)' }} />
             </button>
 
-            {dropdownOpen && (
-              <div className="absolute right-0 top-full mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
-                <Link
-                  to="/settings"
-                  onClick={() => setDropdownOpen(false)}
-                  className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+            <AnimatePresence>
+              {dropdownOpen && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: -4 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.97, y: -2 }}
+                  transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                  className="absolute right-0 top-full mt-2 w-52 apple-glass-heavy rounded-2xl py-1.5 z-50"
+                  style={{ boxShadow: 'var(--shadow-float)' }}
                 >
-                  <UserCog size={16} />
-                  设置
-                </Link>
-                <div className="border-t border-gray-100 my-1" />
-                <button
-                  onClick={() => { setDropdownOpen(false); handleLogout() }}
-                  className="flex items-center gap-2 w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50"
-                >
-                  <LogOut size={16} />
-                  退出登录
-                </button>
-              </div>
-            )}
+                  <Link
+                    to="/settings"
+                    onClick={() => setDropdownOpen(false)}
+                    className="flex items-center gap-2.5 px-4 py-2.5 text-sm transition-colors hover:bg-black/[0.04] apple-btn"
+                    style={{ color: 'var(--color-text-primary)' }}
+                  >
+                    <UserCog size={16} />
+                    设置
+                  </Link>
+                  <div className="border-t border-black/[0.06] my-1.5 mx-3" />
+                  <button
+                    onClick={() => { setDropdownOpen(false); handleLogout() }}
+                    className="flex items-center gap-2.5 w-full px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 transition-colors apple-btn"
+                  >
+                    <LogOut size={16} />
+                    退出登录
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </header>
 
         {/* Page content */}
-        <main className="flex-1 overflow-auto p-4 lg:p-6">
-          <Outlet />
+        <main ref={mainRef} className="flex-1 overflow-auto p-5 lg:p-8">
+          <PageTransition>
+            <Outlet />
+          </PageTransition>
         </main>
       </div>
 

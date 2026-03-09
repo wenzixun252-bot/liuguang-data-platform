@@ -94,3 +94,49 @@
 - **2026-03-09 15:43:50** [数据库迁移] `backend/alembic/versions/s9i0j1k2l3m4_asset_type_restructure.py` — 修改逻辑 (+17/-1行)
 - **2026-03-09 15:44:35** [前端组件] `frontend/src/components/DataPicker.tsx` — 修改逻辑 (+1/-1行)
 - **2026-03-09 15:45:34** [数据库迁移] `backend/alembic/versions/s9i0j1k2l3m4_asset_type_restructure.py` — 新增 16 行代码
+- **2026-03-09 16:02:01** [其他] `CLAUDE.md` — 新增 10 行代码
+- **2026-03-09 16:53:37** [其他] `C:/Users/ljadmin/.claude/plans/lucky-growing-wombat.md` — 新增 hasSynced
+- **2026-03-09 16:58:35** [其他] `C:/Users/ljadmin/.claude/plans/lucky-growing-wombat.md` — 移除 hasSynced
+- **2026-03-09 17:00:27** [其他] `C:/Users/ljadmin/.claude/plans/lucky-growing-wombat.md` — 修改逻辑 (+7/-2行)
+- **2026-03-09 17:00:51** [其他] `C:/Users/ljadmin/.claude/plans/lucky-growing-wombat.md` — 修改逻辑 (+5/-2行)
+- **2026-03-09 17:20:23** [其他] `C:/Users/ljadmin/.claude/plans/lucky-growing-wombat.md` — 修改逻辑 (+12/-3行)
+- **2026-03-09 17:24:14** [其他] `C:/Users/ljadmin/.claude/plans/lucky-growing-wombat.md` — 修改逻辑 (+34/-10行)
+- **2026-03-09 17:28:05** [其他] `C:/Users/ljadmin/.claude/plans/lucky-growing-wombat.md` — 修改逻辑 (+12/-13行)
+- **2026-03-09 17:36:29** [其他] `C:/Users/ljadmin/.claude/plans/lucky-growing-wombat.md` — 新增 10 行代码
+- **2026-03-09 17:44:04** [前端组件] `frontend/src/components/import/importUtils.ts` — 新建文件 `importUtils`，包含 EXTENSION_MAP, CATEGORY_CONFIG, classifyFile, ext, category
+- **2026-03-09 17:44:49** [前端组件] `frontend/src/components/import/CategoryCard.tsx` — 新建文件 `CategoryCard`，包含 ICON_MAP, CategoryCard, config, IconComponent
+- **2026-03-09 17:45:59** [前端组件] `frontend/src/components/import/SmartDropZone.tsx` — 新建文件 `SmartDropZone`，包含 SmartDropZone, inputRef, handleDragOver, handleDragLeave, rect
+- **2026-03-09 17:47:11** [前端组件] `frontend/src/components/import/ImportConfirmModal.tsx` — 新建文件 `ImportConfirmModal`，包含 CATEGORY_OPTIONS, CATEGORY_ICONS, ImportConfirmModal, handleConfirm, primaryExt
+- **2026-03-09 17:48:08** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 新建文件 `LocalImportSection`，包含 LocalImportSection, handleFilesDetected, handleConfirmUpload, formData, response
+- **2026-03-09 17:50:13** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 新建文件 `FeishuSyncSection`，包含 date, now, diffMs, diffMins, diffHours
+- **2026-03-09 17:51:09** [前端页面] `frontend/src/pages/DataImport.tsx` — 新建文件 `DataImport`，包含 DataImport
+- **2026-03-09 17:52:35** [前端] `frontend/src/App.tsx` — 添加依赖引用
+- **2026-03-09 17:53:44** [前端] `frontend/src/App.tsx` — 调整UI组件
+- **2026-03-09 17:54:10** [前端组件] `frontend/src/components/Layout.tsx` — 新增 1 行代码
+- **2026-03-09 17:54:44** [前端组件] `frontend/src/components/Layout.tsx` — 新增 1 行代码
+- **2026-03-09 18:01:16** [前端组件] `frontend/src/components/import/CategoryCard.tsx` — 添加依赖引用
+- **2026-03-09 18:01:49** [前端组件] `frontend/src/components/import/SmartDropZone.tsx` — 添加依赖引用
+- **2026-03-09 18:01:50** [前端组件] `frontend/src/components/import/ImportConfirmModal.tsx` — 添加依赖引用
+- **2026-03-09 18:01:51** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 添加依赖引用
+- **2026-03-09 18:01:52** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 添加依赖引用
+- **2026-03-09 18:02:52** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 移除 docKeywords, recommendAssetType, kw, commKeywords
+- **2026-03-09 18:04:53** [前端组件] `frontend/src/components/import/ImportConfirmModal.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-09 18:07:03** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 删除 1 行代码
+- **2026-03-09 18:23:51** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 新增 file；移除 response
+- **2026-03-09 18:25:47** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 添加依赖引用
+- **2026-03-09 18:26:15** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 新增 navigate
+- **2026-03-09 18:28:20** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 修改逻辑 (+2/-1行)
+- **2026-03-09 18:29:57** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 修改逻辑 (+2/-1行)
+- **2026-03-09 18:31:35** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-09 20:24:05** [前端] `frontend/src/index.css` — 新建文件 `index` (269行)
+- **2026-03-09 20:24:23** [前端] `frontend/src/index.css` — 微调代码
+- **2026-03-09 20:24:34** [前端组件] `frontend/src/components/PageTransition.tsx` — 新建文件 `PageTransition`，包含 PageTransition, location
+- **2026-03-09 20:25:40** [前端组件] `frontend/src/components/Layout.tsx` — 新建文件 `Layout`，包含 NAV_ITEMS, Layout, user, location, navigate
+- **2026-03-09 20:25:58** [前端组件] `frontend/src/components/Layout.tsx` — 新增 2 行代码
+- **2026-03-09 20:25:59** [前端组件] `frontend/src/components/Layout.tsx` — 新增 2 行代码
+- **2026-03-09 20:26:25** [前端] `frontend/src/App.tsx` — 修改逻辑 (+14/-2行)
+- **2026-03-09 20:27:56** [前端页面] `frontend/src/pages/DataInsights.tsx` — 新建文件 `DataInsights`，包含 KnowledgeGraph, CARD_CONFIG, PRIORITY_STYLES, DataInsights, navigate
+- **2026-03-09 20:30:18** [前端页面] `frontend/src/pages/Chat.tsx` — 新建文件 `Chat`，包含 KnowledgeGraph, CalendarAssistant, Todos, PROMPT_TEMPLATES, TABS
+- **2026-03-09 20:30:19** [前端组件] `frontend/src/components/ChatMessages.tsx` — 新建文件 `ChatMessages`，包含 ChatMessages, bottomRef
+- **2026-03-09 20:30:20** [前端组件] `frontend/src/components/ChatInput.tsx` — 新建文件 `ChatInput`，包含 ChatInput, inputRef, fileRef, handleSend, question
+- **2026-03-09 20:30:58** [前端组件] `frontend/src/components/HeaderSearch.tsx` — 新建文件 `HeaderSearch`，包含 HeaderSearch, panelRef, handleKey

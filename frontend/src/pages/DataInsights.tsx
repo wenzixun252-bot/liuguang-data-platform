@@ -4,6 +4,7 @@ import {
   FileText, MessageSquare, Table2, X, TrendingUp,
   CheckSquare, Clock, AlertCircle, Loader2,
 } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
 
@@ -139,15 +140,17 @@ export default function DataInsights() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-800">数据洞察中心</h1>
+        <h1 className="text-2xl font-semibold" style={{ color: 'var(--color-text-primary)', letterSpacing: 'var(--tracking-tighter)' }}>
+          数据洞察中心
+        </h1>
       </div>
 
       <>
       {/* 数据卡片区 */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 stagger-children">
         {statsLoading ? (
           [1, 2, 3, 4].map((i) => (
-            <div key={i} className="rounded-xl p-5 bg-gray-200 animate-pulse h-24" />
+            <div key={i} className="rounded-2xl p-6 h-28 apple-skeleton" />
           ))
         ) : (
           CARD_CONFIG.map((card) => {
@@ -155,9 +158,14 @@ export default function DataInsights() {
             const total = stats?.by_table[card.key] ?? 0
             const todayNew = stats?.today_new[card.key] ?? 0
             return (
-              <div
+              <motion.div
                 key={card.key}
-                className={`rounded-xl p-5 bg-gradient-to-br ${card.color} text-white shadow-sm hover:shadow-md transition-shadow`}
+                whileHover={{ y: -3, scale: 1.01 }}
+                whileTap={{ scale: 0.98 }}
+                transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+                className={`rounded-2xl p-6 bg-gradient-to-br ${card.color} text-white cursor-pointer`}
+                style={{ boxShadow: 'var(--shadow-lg)' }}
+                onClick={() => showDetail(card, 'all')}
               >
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
@@ -166,21 +174,19 @@ export default function DataInsights() {
                   </div>
                   {todayNew > 0 && (
                     <button
+                      type="button"
                       onClick={(e) => { e.stopPropagation(); showDetail(card, 'today') }}
-                      className="flex items-center gap-1 px-2 py-0.5 bg-white/20 hover:bg-white/30 rounded-full text-xs font-medium transition-colors"
+                      className="flex items-center gap-1 px-2 py-0.5 bg-white/20 hover:bg-white/30 rounded-full text-xs font-medium transition-colors apple-btn"
                     >
                       <TrendingUp size={12} />
                       今日+{todayNew}
                     </button>
                   )}
                 </div>
-                <div
-                  className="text-3xl font-bold cursor-pointer hover:opacity-80 transition-opacity"
-                  onClick={() => showDetail(card, 'all')}
-                >
+                <div className="text-3xl font-bold">
                   {total}
                 </div>
-              </div>
+              </motion.div>
             )
           })
         )}
@@ -188,22 +194,23 @@ export default function DataInsights() {
 
       {/* 待办任务区 */}
       {!todosLoading && todos.length > 0 && (
-        <div className="bg-white rounded-xl shadow-sm p-5">
+        <div className="apple-card p-6">
           <div className="flex items-center gap-2 mb-4">
-            <CheckSquare size={18} className="text-indigo-600" />
-            <h2 className="text-base font-semibold text-gray-800">待办事项</h2>
-            <span className="text-xs text-gray-400 ml-1">{todos.length} 项待处理</span>
+            <CheckSquare size={18} className="text-[var(--color-accent)]" />
+            <h2 className="text-base font-semibold" style={{ color: 'var(--color-text-primary)' }}>待办事项</h2>
+            <span className="text-xs ml-1" style={{ color: 'var(--color-text-quaternary)' }}>{todos.length} 项待处理</span>
             <button
               type="button"
               onClick={() => navigate('/chat?tab=todos')}
-              className="ml-auto text-xs text-indigo-600 hover:text-indigo-800"
+              className="ml-auto text-xs text-[var(--color-accent)] hover:text-[var(--color-accent-hover)] transition-colors"
             >
               查看全部
             </button>
           </div>
           <div className="space-y-2">
             {todos.map((todo) => (
-              <div key={todo.id} className="flex items-center gap-3 px-3 py-2.5 bg-gray-50 rounded-lg group">
+              <div key={todo.id} className="flex items-center gap-3 px-3 py-2.5 rounded-xl group transition-colors hover:bg-black/[0.02]"
+                   style={{ background: 'var(--color-bg-primary)' }}>
                 {/* 状态图标 */}
                 {todo.status === 'pending_review' ? (
                   <AlertCircle size={16} className="text-orange-500 shrink-0" />
@@ -212,39 +219,41 @@ export default function DataInsights() {
                 )}
                 {/* 内容 */}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm text-gray-800 truncate">{todo.title}</p>
+                  <p className="text-sm truncate" style={{ color: 'var(--color-text-primary)' }}>{todo.title}</p>
                   <div className="flex items-center gap-2 mt-0.5">
-                    <span className={`px-1.5 py-0.5 rounded text-xs ${
+                    <span className={`px-1.5 py-0.5 rounded-md text-xs ${
                       todo.status === 'pending_review' ? 'bg-orange-50 text-orange-600' : 'bg-blue-50 text-blue-600'
                     }`}>
                       {todo.status === 'pending_review' ? '待确认' : '进行中'}
                     </span>
                     {todo.priority && (
-                      <span className={`px-1.5 py-0.5 rounded text-xs ${PRIORITY_STYLES[todo.priority] || 'text-gray-500 bg-gray-100'}`}>
+                      <span className={`px-1.5 py-0.5 rounded-md text-xs ${PRIORITY_STYLES[todo.priority] || 'text-gray-500 bg-gray-100'}`}>
                         {todo.priority === 'high' ? '高' : todo.priority === 'medium' ? '中' : '低'}
                       </span>
                     )}
                     {todo.due_date && (
-                      <span className="text-xs text-gray-400">
+                      <span className="text-xs" style={{ color: 'var(--color-text-quaternary)' }}>
                         截止 {new Date(todo.due_date).toLocaleDateString('zh-CN')}
                       </span>
                     )}
                   </div>
                 </div>
                 {/* 操作 */}
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-all duration-200">
                   {todo.status === 'pending_review' && (
                     <button
+                      type="button"
                       onClick={() => updateTodoStatus(todo.id, 'in_progress')}
-                      className="px-2 py-1 text-xs bg-indigo-50 text-indigo-600 rounded hover:bg-indigo-100"
+                      className="px-2.5 py-1 text-xs bg-[var(--color-accent-subtle)] text-[var(--color-accent)] rounded-lg hover:bg-indigo-100 transition-colors apple-btn"
                     >
                       确认
                     </button>
                   )}
                   {todo.status === 'in_progress' && (
                     <button
+                      type="button"
                       onClick={() => updateTodoStatus(todo.id, 'completed')}
-                      className="px-2 py-1 text-xs bg-green-50 text-green-600 rounded hover:bg-green-100"
+                      className="px-2.5 py-1 text-xs bg-green-50 text-green-600 rounded-lg hover:bg-green-100 transition-colors apple-btn"
                     >
                       完成
                     </button>
@@ -252,7 +261,8 @@ export default function DataInsights() {
                   <button
                     type="button"
                     onClick={() => updateTodoStatus(todo.id, 'cancelled')}
-                    className="px-2 py-1 text-xs bg-gray-50 text-gray-500 rounded hover:bg-gray-100"
+                    className="px-2.5 py-1 text-xs bg-black/[0.03] rounded-lg hover:bg-black/[0.06] transition-colors apple-btn"
+                    style={{ color: 'var(--color-text-tertiary)' }}
                   >
                     取消
                   </button>
@@ -265,70 +275,94 @@ export default function DataInsights() {
 
       {/* 数据图谱（完整知识图谱） */}
       <Suspense fallback={
-        <div className="flex items-center justify-center py-20 text-gray-400">
-          <Loader2 size={24} className="animate-spin mr-2" /> 加载数据图谱...
+        <div className="apple-card p-8 flex flex-col items-center justify-center h-64">
+          <div className="w-8 h-8 rounded-full border-2 border-indigo-200 border-t-indigo-500 animate-spin mb-3" />
+          <p className="text-sm" style={{ color: 'var(--color-text-tertiary)', animation: 'apple-breathe 2s ease-in-out infinite' }}>
+            加载数据图谱...
+          </p>
         </div>
       }>
         <KnowledgeGraph embedded />
       </Suspense>
 
       {/* 数据明细弹窗（全量 or 今日新增） */}
-      {detailModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={() => setDetailModal(null)}>
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[80vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-              <h2 className="text-lg font-semibold text-gray-800">
-                {detailModal.label}{detailModal.mode === 'today' ? ' — 今日新增' : ' — 数据概览'}
-              </h2>
-              <button onClick={() => setDetailModal(null)} className="p-1 hover:bg-gray-100 rounded">
-                <X size={20} />
-              </button>
-            </div>
-            <div className="overflow-y-auto max-h-[60vh]">
-              {detailLoading ? (
-                <div className="flex items-center justify-center p-12 text-gray-400">
-                  <Loader2 size={20} className="animate-spin mr-2" /> 加载中...
-                </div>
-              ) : detailModal.items.length > 0 ? (
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 sticky top-0">
-                    <tr>
-                      <th className="text-left py-3 px-4 text-gray-500 font-medium w-12">#</th>
-                      <th className="text-left py-3 px-4 text-gray-500 font-medium">
-                        {detailModal.key === 'communications' ? '组织者/发送者' : '标题'}
-                      </th>
-                      <th className="text-left py-3 px-4 text-gray-500 font-medium">内容摘要</th>
-                      <th className="text-left py-3 px-4 text-gray-500 font-medium w-40">时间</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detailModal.items.map((item, i) => (
-                      <tr key={item.id} className="border-t border-gray-100 hover:bg-gray-50">
-                        <td className="py-3 px-4 text-gray-400">{i + 1}</td>
-                        <td className="py-3 px-4 text-gray-800 font-medium truncate max-w-[200px]">
-                          {detailModal.key === 'communications'
-                            ? (item.initiator || '未知')
-                            : (item.title || item.name || '无标题')}
-                        </td>
-                        <td className="py-3 px-4 text-gray-500 truncate max-w-[300px]">
-                          {(item.content_text || '').slice(0, 80)}
-                        </td>
-                        <td className="py-3 px-4 text-gray-400 text-xs">
-                          {new Date(item.created_at).toLocaleString('zh-CN')}
-                        </td>
+      <AnimatePresence>
+        {detailModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/30 backdrop-blur-sm z-50 flex items-center justify-center"
+            onClick={() => setDetailModal(null)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.92, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 5 }}
+              transition={{ type: 'spring', stiffness: 350, damping: 30 }}
+              className="bg-white rounded-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden"
+              style={{ boxShadow: 'var(--shadow-float)' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between px-6 py-4 border-b border-black/[0.06]">
+                <h2 className="text-lg font-semibold" style={{ color: 'var(--color-text-primary)' }}>
+                  {detailModal.label}{detailModal.mode === 'today' ? ' — 今日新增' : ' — 数据概览'}
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setDetailModal(null)}
+                  className="p-1.5 hover:bg-black/[0.04] rounded-lg transition-colors apple-btn"
+                  title="关闭"
+                >
+                  <X size={18} style={{ color: 'var(--color-text-tertiary)' }} />
+                </button>
+              </div>
+              <div className="overflow-y-auto max-h-[60vh]">
+                {detailLoading ? (
+                  <div className="flex items-center justify-center p-12" style={{ color: 'var(--color-text-tertiary)' }}>
+                    <Loader2 size={20} className="animate-spin mr-2" /> 加载中...
+                  </div>
+                ) : detailModal.items.length > 0 ? (
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0" style={{ background: 'var(--color-bg-primary)' }}>
+                      <tr>
+                        <th className="text-left py-3 px-4 font-medium w-12" style={{ color: 'var(--color-text-tertiary)' }}>#</th>
+                        <th className="text-left py-3 px-4 font-medium" style={{ color: 'var(--color-text-tertiary)' }}>
+                          {detailModal.key === 'communications' ? '组织者/发送者' : '标题'}
+                        </th>
+                        <th className="text-left py-3 px-4 font-medium" style={{ color: 'var(--color-text-tertiary)' }}>内容摘要</th>
+                        <th className="text-left py-3 px-4 font-medium w-40" style={{ color: 'var(--color-text-tertiary)' }}>时间</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : (
-                <div className="p-12 text-center text-gray-400">
-                  {detailModal.mode === 'today' ? '今日暂无新增数据' : '暂无数据'}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+                    </thead>
+                    <tbody>
+                      {detailModal.items.map((item, i) => (
+                        <tr key={item.id} className="border-t border-black/[0.04] hover:bg-black/[0.02] transition-colors">
+                          <td className="py-3 px-4" style={{ color: 'var(--color-text-quaternary)' }}>{i + 1}</td>
+                          <td className="py-3 px-4 font-medium truncate max-w-[200px]" style={{ color: 'var(--color-text-primary)' }}>
+                            {detailModal.key === 'communications'
+                              ? (item.initiator || '未知')
+                              : (item.title || item.name || '无标题')}
+                          </td>
+                          <td className="py-3 px-4 truncate max-w-[300px]" style={{ color: 'var(--color-text-secondary)' }}>
+                            {(item.content_text || '').slice(0, 80)}
+                          </td>
+                          <td className="py-3 px-4 text-xs" style={{ color: 'var(--color-text-quaternary)' }}>
+                            {new Date(item.created_at).toLocaleString('zh-CN')}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <div className="p-12 text-center" style={{ color: 'var(--color-text-tertiary)' }}>
+                    {detailModal.mode === 'today' ? '今日暂无新增数据' : '暂无数据'}
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       </>
     </div>
   )

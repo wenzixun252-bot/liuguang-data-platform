@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { Send, Paperclip, X, Loader2, Database } from 'lucide-react'
+import { motion } from 'framer-motion'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
 import DataPicker from './DataPicker'
@@ -64,15 +65,15 @@ export default function ChatInput({ onSend, disabled, dataSelection, onDataSelec
 
   return (
     <>
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-3">
+      <div className="apple-glass-heavy rounded-2xl p-3" style={{ boxShadow: 'var(--shadow-md)' }}>
         {/* 附件预览 */}
         {attachment && (
-          <div className="flex items-center gap-2 mb-2 px-2 py-1.5 bg-indigo-50 rounded-lg text-sm">
-            <Paperclip size={14} className="text-indigo-500" />
-            <span className="text-indigo-700 flex-1 truncate">
+          <div className="flex items-center gap-2 mb-2 px-2.5 py-1.5 bg-[var(--color-accent-subtle)] rounded-xl text-sm">
+            <Paperclip size={14} className="text-[var(--color-accent)]" />
+            <span className="text-[var(--color-accent)] flex-1 truncate">
               {attachment.filename} ({attachment.char_count} 字)
             </span>
-            <button onClick={() => setAttachment(null)} className="text-gray-400 hover:text-red-500">
+            <button type="button" onClick={() => setAttachment(null)} className="hover:text-red-500 transition-colors apple-btn" style={{ color: 'var(--color-text-quaternary)' }} title="移除附件">
               <X size={14} />
             </button>
           </div>
@@ -80,14 +81,17 @@ export default function ChatInput({ onSend, disabled, dataSelection, onDataSelec
 
         {/* 关联数据标签 */}
         {dataSelection.mode !== 'all' && (
-          <div className="flex items-center gap-2 mb-2 px-2 py-1.5 bg-indigo-50 rounded-lg text-sm">
-            <Database size={14} className="text-indigo-500" />
-            <span className="text-indigo-700 flex-1 truncate">
+          <div className="flex items-center gap-2 mb-2 px-2.5 py-1.5 bg-[var(--color-accent-subtle)] rounded-xl text-sm">
+            <Database size={14} className="text-[var(--color-accent)]" />
+            <span className="text-[var(--color-accent)] flex-1 truncate">
               关联数据: {dataSelection.label}
             </span>
             <button
+              type="button"
               onClick={() => onDataSelectionChange({ mode: 'all', label: '全部' })}
-              className="text-gray-400 hover:text-red-500"
+              className="hover:text-red-500 transition-colors apple-btn"
+              style={{ color: 'var(--color-text-quaternary)' }}
+              title="清除关联数据"
             >
               <X size={14} />
             </button>
@@ -97,9 +101,11 @@ export default function ChatInput({ onSend, disabled, dataSelection, onDataSelec
         <div className="flex items-end gap-2">
           {/* 附件上传按钮 */}
           <button
+            type="button"
             onClick={() => fileRef.current?.click()}
             disabled={uploading || disabled}
-            className="p-2 rounded-lg text-gray-400 hover:text-indigo-500 hover:bg-indigo-50 disabled:opacity-50 transition-colors"
+            className="p-2 rounded-xl hover:bg-black/[0.04] disabled:opacity-50 transition-colors apple-btn"
+            style={{ color: 'var(--color-text-quaternary)' }}
             title="上传附件"
           >
             {uploading ? <Loader2 size={16} className="animate-spin" /> : <Paperclip size={16} />}
@@ -114,13 +120,15 @@ export default function ChatInput({ onSend, disabled, dataSelection, onDataSelec
 
           {/* 关联数据按钮 */}
           <button
+            type="button"
             onClick={() => setShowDataPicker(true)}
             disabled={disabled}
-            className={`p-2 rounded-lg transition-colors ${
+            className={`p-2 rounded-xl transition-colors apple-btn ${
               dataSelection.mode !== 'all'
-                ? 'text-indigo-600 bg-indigo-50'
-                : 'text-gray-400 hover:text-indigo-500 hover:bg-indigo-50'
+                ? 'text-[var(--color-accent)] bg-[var(--color-accent-subtle)]'
+                : 'hover:bg-black/[0.04]'
             } disabled:opacity-50`}
+            style={dataSelection.mode === 'all' ? { color: 'var(--color-text-quaternary)' } : undefined}
             title="关联数据"
           >
             <Database size={16} />
@@ -129,7 +137,8 @@ export default function ChatInput({ onSend, disabled, dataSelection, onDataSelec
           {/* 输入框 */}
           <textarea
             ref={inputRef}
-            className="flex-1 resize-none text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none min-h-[40px] max-h-[120px]"
+            className="flex-1 resize-none text-sm focus:outline-none min-h-[40px] max-h-[120px] bg-transparent"
+            style={{ color: 'var(--color-text-primary)' }}
             placeholder="输入你的问题... (Enter 发送, Shift+Enter 换行)"
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -139,13 +148,16 @@ export default function ChatInput({ onSend, disabled, dataSelection, onDataSelec
           />
 
           {/* 发送按钮 */}
-          <button
+          <motion.button
+            type="button"
+            whileTap={{ scale: 0.9 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 17 }}
             onClick={handleSend}
             disabled={!input.trim() || disabled}
-            className="p-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="p-2.5 rounded-xl bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             <Send size={16} />
-          </button>
+          </motion.button>
         </div>
       </div>
 

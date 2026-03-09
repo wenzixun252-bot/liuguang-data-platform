@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, lazy, Suspense } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Bot } from 'lucide-react'
+import { Bot, Loader2 } from 'lucide-react'
+import { motion } from 'framer-motion'
 import { getToken } from '../lib/auth'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
@@ -24,6 +25,14 @@ const PROMPT_TEMPLATES = [
   { label: '信息查询', question: '查找关于项目的相关信息和进展' },
   { label: '会议回顾', question: '回顾最近的会议，列出关键决策和待办事项' },
 ]
+
+const TABS = [
+  { key: 'chat', label: '智能问答' },
+  { key: 'calendar', label: '日程管家' },
+  { key: 'todos', label: '智能待办' },
+  { key: 'report', label: '报告生成' },
+  { key: 'graph', label: '数据图谱' },
+] as const
 
 type SceneTab = 'chat' | 'report' | 'graph' | 'calendar' | 'todos'
 
@@ -260,6 +269,12 @@ export default function Chat() {
     }
   }
 
+  const loadingFallback = (
+    <div className="flex items-center justify-center h-full" style={{ color: 'var(--color-text-tertiary)' }}>
+      <Loader2 size={20} className="animate-spin mr-2" /> 加载中...
+    </div>
+  )
+
   return (
     <div className="flex h-[calc(100vh-7rem)]">
       {/* 左侧: 会话列表（日程管家 tab 不显示） */}
@@ -276,30 +291,35 @@ export default function Chat() {
 
       {/* 主区域 */}
       <div className="flex-1 flex flex-col min-w-0 px-4">
-        {/* 顶部: Tab 切换 */}
+        {/* 顶部: Tab 切换 — iOS 风分段控制器 */}
         <div className="flex items-center gap-4 mb-3">
           <div className="flex items-center gap-2">
-            <Bot className="text-indigo-500" size={20} />
-            <h1 className="text-xl font-bold text-gray-800">智能助手</h1>
+            <Bot className="text-[var(--color-accent)]" size={20} />
+            <h1 className="text-xl font-semibold" style={{ color: 'var(--color-text-primary)', letterSpacing: 'var(--tracking-tighter)' }}>
+              智能助手
+            </h1>
           </div>
-          <div className="flex bg-gray-100 rounded-lg p-0.5">
-            {([
-              { key: 'chat', label: '智能问答' },
-              { key: 'calendar', label: '日程管家' },
-              { key: 'todos', label: '智能待办' },
-              { key: 'report', label: '报告生成' },
-              { key: 'graph', label: '数据图谱' },
-            ] as const).map(tab => (
+          <div className="flex bg-black/[0.05] rounded-xl p-1 relative">
+            {TABS.map(tab => (
               <button
                 key={tab.key}
-                className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                type="button"
+                className={`relative px-4 py-1.5 text-sm font-medium rounded-[10px] transition-colors z-10 ${
                   scene === tab.key
-                    ? 'bg-white text-indigo-600 shadow-sm'
-                    : 'text-gray-500 hover:text-gray-700'
+                    ? 'text-[var(--color-text-primary)]'
+                    : 'text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]'
                 }`}
                 onClick={() => handleSceneChange(tab.key)}
               >
-                {tab.label}
+                {scene === tab.key && (
+                  <motion.div
+                    layoutId="active-tab-indicator"
+                    className="absolute inset-0 bg-white rounded-[10px]"
+                    style={{ boxShadow: '0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04)' }}
+                    transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                  />
+                )}
+                <span className="relative z-10">{tab.label}</span>
               </button>
             ))}
           </div>
@@ -308,19 +328,19 @@ export default function Chat() {
         {/* 主内容 */}
         {scene === 'graph' ? (
           <div className="flex-1 min-h-0">
-            <Suspense fallback={<div className="flex items-center justify-center h-full text-gray-400">加载中...</div>}>
+            <Suspense fallback={loadingFallback}>
               <KnowledgeGraph />
             </Suspense>
           </div>
         ) : scene === 'calendar' ? (
           <div className="flex-1 min-h-0 -mx-4">
-            <Suspense fallback={<div className="flex items-center justify-center h-full text-gray-400">加载中...</div>}>
+            <Suspense fallback={loadingFallback}>
               <CalendarAssistant />
             </Suspense>
           </div>
         ) : scene === 'todos' ? (
           <div className="flex-1 min-h-0 overflow-y-auto">
-            <Suspense fallback={<div className="flex items-center justify-center h-full text-gray-400">加载中...</div>}>
+            <Suspense fallback={loadingFallback}>
               <Todos />
             </Suspense>
           </div>

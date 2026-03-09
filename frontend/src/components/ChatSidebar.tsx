@@ -8,6 +8,7 @@ import {
   MoreHorizontal,
   Loader2,
 } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
 
@@ -84,92 +85,123 @@ export default function ChatSidebar({
   }
 
   return (
-    <div className="w-64 border-r border-gray-200 bg-gray-50 flex flex-col h-full">
+    <div className="w-[272px] border-r border-black/[0.04] flex flex-col h-full"
+         style={{ background: 'var(--glass-bg-sidebar)' }}>
       {/* 新建按钮 */}
       <div className="p-3">
-        <button
+        <motion.button
+          type="button"
+          whileTap={{ scale: 0.97 }}
           onClick={onNew}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm"
+          className="w-full flex items-center justify-center gap-2 px-3 py-2.5 bg-[var(--color-accent)] text-white rounded-xl hover:bg-[var(--color-accent-hover)] transition-colors text-sm font-medium"
         >
           <Plus size={16} />
           新建对话
-        </button>
+        </motion.button>
       </div>
 
       {/* 会话列表 */}
       <div className="flex-1 overflow-y-auto">
         {loading ? (
           <div className="flex justify-center py-8">
-            <Loader2 size={20} className="animate-spin text-gray-400" />
+            <Loader2 size={20} className="animate-spin" style={{ color: 'var(--color-text-quaternary)' }} />
           </div>
         ) : conversations.length === 0 ? (
-          <p className="text-center text-gray-400 text-sm py-8">暂无对话</p>
+          <p className="text-center text-sm py-8" style={{ color: 'var(--color-text-quaternary)' }}>暂无对话</p>
         ) : (
           conversations.map((conv) => (
             <div
               key={conv.id}
-              className={`group relative px-3 py-2.5 cursor-pointer hover:bg-gray-100 transition-colors ${
-                activeId === conv.id ? 'bg-indigo-50 border-r-2 border-indigo-600' : ''
+              className={`group relative px-3 py-2.5 cursor-pointer transition-colors rounded-xl mx-2 mb-0.5 ${
+                activeId === conv.id
+                  ? 'bg-[var(--color-accent-subtle)]'
+                  : 'hover:bg-black/[0.03]'
               }`}
               onClick={() => onSelect(conv.id)}
             >
-              <div className="flex items-start gap-2">
-                <MessageSquare size={14} className="mt-0.5 text-gray-400 shrink-0" />
+              {/* 活跃会话指示器 */}
+              {activeId === conv.id && (
+                <motion.div
+                  layoutId="active-conv-indicator"
+                  className="absolute left-0 top-2 bottom-2 w-[3px] rounded-full bg-[var(--color-accent)]"
+                  transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                />
+              )}
+              <div className="flex items-start gap-2 pl-2">
+                <MessageSquare size={14} className="mt-0.5 shrink-0" style={{ color: 'var(--color-text-quaternary)' }} />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm text-gray-700 truncate">{conv.title}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">
+                  <p className="text-sm truncate" style={{ color: activeId === conv.id ? 'var(--color-accent)' : 'var(--color-text-primary)' }}>
+                    {conv.title}
+                  </p>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--color-text-quaternary)' }}>
                     {new Date(conv.updated_at).toLocaleDateString()}
                   </p>
                 </div>
                 {/* 更多操作 */}
                 <button
-                  className="opacity-0 group-hover:opacity-100 p-1 hover:bg-gray-200 rounded transition-all"
+                  type="button"
+                  className="opacity-0 group-hover:opacity-100 p-1 hover:bg-black/[0.06] rounded-lg transition-all apple-btn"
                   onClick={(e) => {
                     e.stopPropagation()
                     setMenuOpen(menuOpen === conv.id ? null : conv.id)
                   }}
+                  title="更多操作"
                 >
-                  <MoreHorizontal size={14} className="text-gray-400" />
+                  <MoreHorizontal size={14} style={{ color: 'var(--color-text-quaternary)' }} />
                 </button>
               </div>
 
               {/* 下拉菜单 */}
-              {menuOpen === conv.id && (
-                <div className="absolute right-2 top-10 z-10 bg-white shadow-lg rounded-lg border border-gray-200 py-1 min-w-[140px]">
-                  <button
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handleExport(conv.id)
-                    }}
-                    disabled={exporting}
+              <AnimatePresence>
+                {menuOpen === conv.id && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.92, y: -4 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.95, y: -2 }}
+                    transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                    className="absolute right-2 top-10 z-10 apple-glass-heavy rounded-xl py-1.5 min-w-[160px]"
+                    style={{ boxShadow: 'var(--shadow-float)' }}
                   >
-                    <Download size={14} />
-                    导出 Markdown
-                  </button>
-                  <button
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handlePushFeishu(conv.id)
-                    }}
-                  >
-                    <Send size={14} />
-                    推送飞书文档
-                  </button>
-                  <hr className="my-1" />
-                  <button
-                    className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-red-500 hover:bg-red-50"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handleDelete(conv.id)
-                    }}
-                  >
-                    <Trash2 size={14} />
-                    删除
-                  </button>
-                </div>
-              )}
+                    <button
+                      type="button"
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-black/[0.04] transition-colors apple-btn"
+                      style={{ color: 'var(--color-text-primary)' }}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleExport(conv.id)
+                      }}
+                      disabled={exporting}
+                    >
+                      <Download size={14} />
+                      导出 Markdown
+                    </button>
+                    <button
+                      type="button"
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-black/[0.04] transition-colors apple-btn"
+                      style={{ color: 'var(--color-text-primary)' }}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handlePushFeishu(conv.id)
+                      }}
+                    >
+                      <Send size={14} />
+                      推送飞书文档
+                    </button>
+                    <div className="border-t border-black/[0.06] my-1 mx-2" />
+                    <button
+                      type="button"
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-red-500 hover:bg-red-50 transition-colors apple-btn"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleDelete(conv.id)
+                      }}
+                    >
+                      <Trash2 size={14} />
+                      删除
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           ))
         )}

@@ -99,6 +99,26 @@ hooks/        -> Custom hooks (useAuth, useWidgetConfig, useColumnSettings)
 
 Every frontend modification MUST follow these rules to ensure consistent UX and visual quality.
 
+### Using Frontend Design Skill (IMPORTANT)
+
+创建或修改前端页面、组件时，**务必使用 `frontend-design` skill** 以确保设计质量：
+
+```
+# 创建新页面或组件时，先调用此 skill
+skill: "document-skills:frontend-design"
+```
+
+**触发场景：**
+- 创建新的页面组件（如 Dashboard、Settings 页面）
+- 设计复杂的 UI 交互（如拖拽看板、表单向导）
+- 重构现有页面以提升视觉质量
+- 构建可复用的 UI 组件库
+
+**该 Skill 提供：**
+- 生产级的前端代码生成（React + Tailwind）
+- 响应式布局与无障碍访问最佳实践
+- 与项目设计系统一致的样式规范
+
 ### Design System (DO NOT deviate)
 
 - **Primary color**: Indigo-600 (`bg-indigo-600`, `text-indigo-700`, `ring-indigo-200`)

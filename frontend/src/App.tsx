@@ -10,6 +10,7 @@ import Chat from './pages/Chat'
 import ReportDetail from './pages/ReportDetail'
 import StructuredTables from './pages/StructuredTables'
 import DataInsights from './pages/DataInsights'
+import DataImport from './pages/DataImport'
 import SearchPage from './pages/SearchPage'
 import Settings from './pages/Settings'
 
@@ -34,6 +35,7 @@ export default function App() {
             }
           >
             <Route path="/data-insights" element={<DataInsights />} />
+            <Route path="/data-import" element={<DataImport />} />
             <Route path="/structured-tables" element={<StructuredTables />} />
             <Route path="/documents" element={<Documents />} />
             <Route path="/communications" element={<Communications />} />
@@ -58,10 +60,22 @@ export default function App() {
         </Routes>
       </BrowserRouter>
       <Toaster
-        position="top-right"
+        position="top-center"
         toastOptions={{
           duration: 3000,
-          style: { fontSize: '14px' },
+          style: {
+            fontSize: '14px',
+            fontFamily: 'var(--font-sans)',
+            background: 'rgba(255, 255, 255, 0.85)',
+            backdropFilter: 'blur(20px)',
+            WebkitBackdropFilter: 'blur(20px)',
+            border: '1px solid rgba(255, 255, 255, 0.5)',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.03)',
+            borderRadius: '14px',
+            padding: '12px 16px',
+            color: 'var(--color-text-primary)',
+            letterSpacing: '-0.022em',
+          },
         }}
       />
     </QueryClientProvider>
