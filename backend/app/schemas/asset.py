@@ -9,3 +9,22 @@ class AssetStatsResponse(BaseModel):
     by_table: dict[str, int]
     today_new: dict[str, int]
     recent_trend: list[dict]
+
+
+class ScoreAction(BaseModel):
+    label: str
+    route: str
+
+
+class ScoreDimension(BaseModel):
+    key: str
+    label: str
+    score: int
+    detail: str
+    action: ScoreAction | None = None
+
+
+class AssetScoreResponse(BaseModel):
+    total_score: int
+    level: str
+    dimensions: list[ScoreDimension]

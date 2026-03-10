@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 
-export type WidgetId = 'data-graph' | 'trend'
+export type WidgetId = 'data-graph' | 'trend' | 'asset-score'
 
 export interface WidgetConfig {
   id: WidgetId
@@ -12,8 +12,9 @@ export interface WidgetConfig {
 const STORAGE_KEY = 'liuguang-widget-config-v2'
 
 const DEFAULT_CONFIGS: WidgetConfig[] = [
-  { id: 'data-graph', enabled: true, order: 0, settings: {} },
-  { id: 'trend', enabled: true, order: 1, settings: {} },
+  { id: 'asset-score', enabled: true, order: 0, settings: {} },
+  { id: 'data-graph', enabled: true, order: 1, settings: {} },
+  { id: 'trend', enabled: true, order: 2, settings: {} },
 ]
 
 function loadConfigs(): WidgetConfig[] {
@@ -21,8 +22,16 @@ function loadConfigs(): WidgetConfig[] {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
       const parsed = JSON.parse(raw) as WidgetConfig[]
-      if (Array.isArray(parsed) && parsed.length === DEFAULT_CONFIGS.length) {
-        return parsed
+      if (Array.isArray(parsed)) {
+        // Merge: keep saved configs, add any new defaults
+        const savedIds = new Set(parsed.map(c => c.id))
+        const merged = [...parsed]
+        for (const def of DEFAULT_CONFIGS) {
+          if (!savedIds.has(def.id)) {
+            merged.push({ ...def, order: merged.length })
+          }
+        }
+        return merged
       }
     }
   } catch { /* ignore */ }

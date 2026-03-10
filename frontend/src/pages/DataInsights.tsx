@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
 import Todos from './Todos'
+import AssetScoreWidget from '../components/insights/AssetScoreWidget'
 
 const KnowledgeGraph = lazy(() => import('./KnowledgeGraph'))
 
@@ -143,6 +144,9 @@ export default function DataInsights() {
           })
         )}
       </div>
+
+      {/* 数据资产评分 */}
+      <AssetScoreWidget />
 
       {/* 智能待办（嵌入模式，带分页） */}
       <Todos embedded />
