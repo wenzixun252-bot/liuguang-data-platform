@@ -649,3 +649,95 @@ async def batch_delete_tables(
     )
     await db.commit()
     return {"deleted": result.rowcount}
+
+
+# ── 导出 XLSX ────────────────────────────────────────────────
+
+
+from io import BytesIO
+
+from fastapi.responses import StreamingResponse
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill
+
+
+@router.get("/{table_id}/export", summary="导出为 XLSX 文件")
+async def export_table_xlsx(
+    table_id: int,
+    current_user: Annotated[User, Depends(get_current_user)] = None,
+    db: Annotated[AsyncSession, Depends(get_db)] = None,
+):
+    """导出结构化表格为 Excel 文件。"""
+    # 校验归属
+    result = await db.execute(
+        select(StructuredTable).where(
+            StructuredTable.id == table_id,
+            StructuredTable.owner_id == current_user.feishu_open_id,
+        )
+    )
+    table = result.scalar_one_or_none()
+    if not table:
+        raise HTTPException(status_code=404, detail="表格不存在")
+
+    # 获取所有行数据
+    rows_result = await db.execute(
+        select(StructuredTableRow)
+        .where(StructuredTableRow.table_id == table_id)
+        .order_by(StructuredTableRow.row_index)
+    )
+    rows = rows_result.scalars().all()
+
+    # 创建 Excel 工作簿
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "数据"
+
+    # 获取列名（从第一行数据中提取，如果没有则用默认列名）
+    columns: list[str] = []
+    if rows and rows[0].row_data:
+        columns = list(rows[0].row_data.keys())
+
+    if not columns:
+        columns = ["序号"]
+
+    # 写入表头
+    header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF")
+    for col_idx, col_name in enumerate(columns, 1):
+        cell = ws.cell(row=1, column=col_idx, value=col_name)
+        cell.fill = header_fill
+        cell.font = header_font
+
+    # 写入数据行
+    for row_idx, row in enumerate(rows, 2):
+        if row.row_data:
+            for col_idx, col_name in enumerate(columns, 1):
+                value = row.row_data.get(col_name, "")
+                # 处理特殊类型
+                if isinstance(value, (list, dict)):
+                    value = str(value)
+                ws.cell(row=row_idx, column=col_idx, value=value)
+
+    # 自动调整列宽
+    for col_idx, col_name in enumerate(columns, 1):
+        max_length = len(str(col_name))
+        for row in rows:
+            if row.row_data:
+                cell_value = row.row_data.get(col_name, "")
+                if cell_value:
+                    max_length = max(max_length, len(str(cell_value)))
+        ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = min(max_length + 2, 50)
+
+    # 写入内存缓冲区
+    buffer = BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+
+    # 生成文件名
+    filename = f"{table.name}.xlsx"
+
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename*=UTF-8\'\'{filename}'},
+    )

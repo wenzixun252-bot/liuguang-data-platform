@@ -15,12 +15,15 @@ import {
   ChevronDown,
   FolderOpen,
   Upload,
+  Loader2,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { motion, AnimatePresence } from 'framer-motion'
 import HeaderSearch from './HeaderSearch'
 import PageTransition from './PageTransition'
+import api from '../lib/api'
 
 // ── 导航类型 ──────────────────────────────────────────
 interface NavItem {
@@ -52,8 +55,8 @@ const NAV_ITEMS: NavEntry[] = [
     icon: FolderOpen,
     children: [
       { path: '/communications', label: '沟通资产', icon: MessageSquare },
-      { path: '/documents', label: '知识库', icon: FileText },
-      { path: '/structured-tables', label: '业务数仓', icon: Table2 },
+      { path: '/documents', label: '文档资产', icon: FileText },
+      { path: '/structured-tables', label: '表格资产', icon: Table2 },
     ],
   },
   { path: '/chat', label: '智能助手', icon: Bot },
@@ -117,6 +120,23 @@ export default function Layout() {
     main.addEventListener('scroll', handler)
     return () => main.removeEventListener('scroll', handler)
   }, [])
+
+  // 全局任务运行状态轮询
+  const { data: syncStatusData } = useQuery({
+    queryKey: ['sync-status'],
+    queryFn: async () => { const res = await api.get('/import/sync-status'); return res.data },
+    refetchInterval: 5000,
+    staleTime: 2000,
+  })
+  const { data: kgStatusData } = useQuery({
+    queryKey: ['kg-build-status'],
+    queryFn: async () => { const res = await api.get('/knowledge-graph/build-status'); return res.data },
+    refetchInterval: 5000,
+    staleTime: 2000,
+  })
+  const runningTaskCount =
+    ((syncStatusData as { last_sync_status?: string }[] | undefined) ?? []).filter(s => s.last_sync_status === 'running').length +
+    (kgStatusData?.status === 'running' ? 1 : 0)
 
   const handleLogout = () => {
     clearAuth()
@@ -292,6 +312,18 @@ export default function Layout() {
               </kbd>
             </button>
           </div>
+
+          {/* 全局任务运行指示器 */}
+          {runningTaskCount > 0 && (
+            <Link
+              to="/data-import"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-600 rounded-xl text-xs font-medium hover:bg-indigo-100 transition-colors shrink-0"
+              title="点击查看任务详情"
+            >
+              <Loader2 size={13} className="animate-spin" />
+              {runningTaskCount} 个任务运行中
+            </Link>
+          )}
 
           <div className="relative" ref={dropdownRef}>
             <button

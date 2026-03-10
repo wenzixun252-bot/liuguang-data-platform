@@ -7,12 +7,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
-from openai import AsyncOpenAI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, get_visible_owner_ids
 from app.config import settings
+from app.services.llm import create_openai_client
 from app.models.conversation import Conversation, ConversationMessage
 from app.models.user import User
 from app.schemas.chat import ChatRequest, ChatResponse
@@ -25,14 +25,16 @@ router = APIRouter(prefix="/api/chat", tags=["流光助手"])
 
 # ── System Prompt 模板 ───────────────────────────────────
 
-SYSTEM_PROMPT = """你是"流光"办公助手，基于员工的数据资产回答问题。
+SYSTEM_PROMPT = """你是"流光"个人数据助手，帮助用户从自己的数据资产（文档、会议纪要、聊天记录等）中获取精准答案。
 
-## 规则
-1. 仅基于以下检索到的上下文回答问题，不要编造信息
-2. 如果上下文中没有相关信息，明确告知"未找到相关数据"
-3. 回答时引用数据来源（标注来源类型和ID）
-4. 使用简洁、专业的中文回答
-5. 如果涉及多条数据，请分点说明
+## 回答规则
+1. **必须基于检索上下文回答**，严禁编造信息
+2. **强制引用来源**：每个关键信息点后标注来源编号，格式为 [来源编号]
+   例如："项目计划已在周三确认 [1]，预算审批通过 [3]"
+3. 如果上下文不足以回答，明确说"我在你的数据中未找到相关信息"，并建议用户换个关键词或检查数据是否已同步
+4. 回答要**具体**：引用具体的日期、人名、数字、结论，不要泛泛而谈
+5. 多条数据时，按时间或重要性分点归纳，不要简单罗列原文
+6. 对于会议纪要类内容，重点提取决策结论和行动项
 
 ## 检索上下文
 {context}
@@ -46,6 +48,42 @@ SOURCE_TABLE_LABELS = {
 }
 
 
+QUERY_REWRITE_PROMPT = """请将用户的口语化问题改写为更适合搜索的关键词查询。
+要求：
+1. 提取核心意图和关键词
+2. 去掉口语化表达（如"那个"、"来着"、"啥"）
+3. 补充可能的同义词
+4. 只输出改写后的查询文本，不要解释
+
+用户问题：{question}
+改写查询："""
+
+
+async def _rewrite_query(question: str) -> str:
+    """用 LLM 将口语化问题改写为精准搜索查询。"""
+    # 如果问题已经很简短明确（少于 10 个字且无口语词），直接返回
+    casual_markers = ["吗", "呢", "啥", "来着", "那个", "怎么", "什么时候", "有没有"]
+    if len(question) < 10 and not any(m in question for m in casual_markers):
+        return question
+
+    try:
+        client = _get_agent_client()
+        response = await client.chat.completions.create(
+            model=settings.agent_llm_model,
+            messages=[{"role": "user", "content": QUERY_REWRITE_PROMPT.format(question=question)}],
+            temperature=0.0,
+            max_tokens=100,
+        )
+        rewritten = response.choices[0].message.content.strip()
+        if rewritten:
+            logger.info("查询改写: '%s' -> '%s'", question, rewritten)
+            return rewritten
+    except Exception as e:
+        logger.warning("查询改写失败，使用原始问题: %s", e)
+
+    return question
+
+
 def _build_context(results: list[SearchResult], attachment_context: str | None = None) -> str:
     """构建检索上下文文本。"""
     if not results and not attachment_context:
@@ -54,7 +92,7 @@ def _build_context(results: list[SearchResult], attachment_context: str | None =
     for i, r in enumerate(results, 1):
         title = r.title or "无标题"
         label = SOURCE_TABLE_LABELS.get(r.source_table, r.source_table)
-        parts.append(f"[{i}] 类型: {label}\n标题: {title}\nID: {r.source_table}:{r.id}\n内容: {r.content_text[:500]}")
+        parts.append(f"[{i}] 类型: {label}\n标题: {title}\nID: {r.source_table}:{r.id}\n内容: {r.content_text[:1500]}")
     if attachment_context:
         parts.append(f"\n## 用户上传附件内容\n{attachment_context[:2000]}")
     return "\n\n".join(parts) if parts else "（未检索到相关数据）"
@@ -72,10 +110,11 @@ def _build_messages(
     return messages
 
 
-def _get_agent_client() -> AsyncOpenAI:
-    return AsyncOpenAI(
+def _get_agent_client():
+    return create_openai_client(
         api_key=settings.agent_llm_api_key,
         base_url=settings.agent_llm_base_url,
+        timeout=120.0,
     )
 
 
@@ -85,7 +124,7 @@ async def _save_messages(
     owner_id: str,
     user_content: str,
     assistant_content: str,
-    source_ids: list[str],
+    source_ids: list,
     attachments: list | None = None,
 ):
     """保存用户和助手消息到 conversation_messages 表。"""
@@ -127,6 +166,9 @@ async def chat_stream(
     """SSE 流式问答接口。"""
     visible_ids = await get_visible_owner_ids(current_user, db)
 
+    # 查询改写：将口语化问题转为精准搜索查询
+    search_query = await _rewrite_query(body.question)
+
     # Graph-RAG 增强：从问题提取实体，找到关联内容
     graph_source_ids = await graph_rag_enhancer.enhance_search(
         body.question, current_user.feishu_open_id, db,
@@ -137,7 +179,7 @@ async def chat_stream(
         merged_source_ids = list(set((merged_source_ids or []) + graph_source_ids))
 
     results = await hybrid_searcher.search(
-        query_text=body.question,
+        query_text=search_query,
         visible_ids=visible_ids,
         db=db,
         source_tables=body.source_tables,
@@ -148,7 +190,10 @@ async def chat_stream(
     history = [{"role": m.role, "content": m.content} for m in body.history]
     messages = _build_messages(body.question, history, context)
 
-    source_id_list = [f"{r.source_table}:{r.id}" for r in results]
+    source_id_list = [
+        {"type": r.source_table, "id": r.id, "title": r.title or "无标题"}
+        for r in results
+    ]
 
     async def _event_generator():
         client = _get_agent_client()
@@ -204,6 +249,9 @@ async def chat_ask(
     """普通 JSON 问答接口。"""
     visible_ids = await get_visible_owner_ids(current_user, db)
 
+    # 查询改写
+    search_query = await _rewrite_query(body.question)
+
     # Graph-RAG 增强
     graph_source_ids = await graph_rag_enhancer.enhance_search(
         body.question, current_user.feishu_open_id, db,
@@ -213,7 +261,7 @@ async def chat_ask(
         merged_source_ids = list(set((merged_source_ids or []) + graph_source_ids))
 
     results = await hybrid_searcher.search(
-        query_text=body.question,
+        query_text=search_query,
         visible_ids=visible_ids,
         db=db,
         source_tables=body.source_tables,
@@ -235,7 +283,10 @@ async def chat_ask(
         logger.error("问答异常: %s", e)
         answer = "生成回答时出错，请稍后重试"
 
-    source_id_list = [f"{r.source_table}:{r.id}" for r in results]
+    source_id_list = [
+        {"type": r.source_table, "id": r.id, "title": r.title or "无标题"}
+        for r in results
+    ]
 
     # 保存消息
     if body.conversation_id and answer:

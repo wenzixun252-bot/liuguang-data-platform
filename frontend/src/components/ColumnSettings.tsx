@@ -14,13 +14,13 @@ export interface ColumnDef {
 export function useColumnSettings(storageKey: string, columns: ColumnDef[]) {
   const lsKey = `columns:${storageKey}`
 
-  const [visible, setVisible] = useState<Set<string>>(() => {
+  const buildVisible = () => {
+    const allKeys = new Set(columns.map((c) => c.key))
     const defaults = new Set(columns.filter((c) => c.defaultVisible !== false).map((c) => c.key))
     try {
       const saved = localStorage.getItem(lsKey)
       if (saved) {
-        const savedSet = new Set(JSON.parse(saved) as string[])
-        // 把新增的默认可见列也加进去（用户之前保存时还没有这些列）
+        const savedSet = new Set((JSON.parse(saved) as string[]).filter((k) => allKeys.has(k)))
         for (const key of defaults) {
           if (!savedSet.has(key)) savedSet.add(key)
         }
@@ -28,7 +28,14 @@ export function useColumnSettings(storageKey: string, columns: ColumnDef[]) {
       }
     } catch { /* ignore */ }
     return defaults
-  })
+  }
+
+  const [visible, setVisible] = useState<Set<string>>(buildVisible)
+
+  // storageKey 或 columns 变化时重新初始化
+  useEffect(() => {
+    setVisible(buildVisible())
+  }, [storageKey])
 
   const toggle = (key: string) => {
     setVisible((prev) => {

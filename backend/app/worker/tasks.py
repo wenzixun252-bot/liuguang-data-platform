@@ -1,5 +1,6 @@
 """ETL 定时任务定义。"""
 
+import asyncio
 import logging
 from datetime import datetime, timedelta
 
@@ -58,6 +59,61 @@ async def _try_refresh_token(owner_id: str, db) -> str | None:
         return None
 
 
+async def _reset_sync_time_if_target_empty(
+    app_token: str, table_id: str, owner_id: str | None, asset_type: str, db,
+) -> None:
+    """如果目标表中该数据源的记录为 0，则重置 last_sync_time 以强制全量拉取。
+
+    解决场景：用户删除所有沟通/文档记录后重新同步，但 ETLSyncState 仍保留旧的
+    last_sync_time，导致增量过滤认为"无新数据"而跳过。
+    """
+    from sqlalchemy import text as sa_text
+
+    result = await db.execute(
+        select(ETLSyncState).where(
+            ETLSyncState.source_app_token == app_token,
+            ETLSyncState.source_table_id == table_id,
+        )
+    )
+    state = result.scalar_one_or_none()
+    if not state or not state.last_sync_time:
+        return  # 没有旧状态或从未同步过，不需要重置
+
+    # 判断上次同步时间是否为有意义的值（大于 epoch）
+    epoch = datetime(1970, 1, 2)
+    if state.last_sync_time <= epoch:
+        return  # 已经是初始状态
+
+    # 检查目标表中是否有该数据源的记录
+    target_table = "communications" if asset_type in ("communication", "meeting", "chat_message") else "documents"
+    if owner_id:
+        cnt_result = await db.execute(
+            sa_text(
+                f"SELECT COUNT(*) FROM {target_table} "
+                f"WHERE owner_id = :oid AND source_app_token = :app AND source_table_id = :tid"
+            ),
+            {"oid": owner_id, "app": app_token, "tid": table_id},
+        )
+    else:
+        cnt_result = await db.execute(
+            sa_text(
+                f"SELECT COUNT(*) FROM {target_table} "
+                f"WHERE source_app_token = :app AND source_table_id = :tid"
+            ),
+            {"app": app_token, "tid": table_id},
+        )
+    count = cnt_result.scalar() or 0
+
+    if count == 0:
+        logger.warning(
+            "目标表 %s 中数据源 %s/%s 记录为 0 但 last_sync_time=%s，重置为全量拉取",
+            target_table, app_token, table_id, state.last_sync_time,
+        )
+        state.last_sync_time = datetime(1970, 1, 1)
+        state.records_synced = 0
+        await db.commit()
+
+
 async def _mark_failed(app_token: str, table_id: str, error: str) -> None:
     """将同步状态标记为失败。"""
     async with async_session() as db:
@@ -79,11 +135,36 @@ async def etl_sync_job() -> None:
     """定时任务入口：遍历注册中心 → 逐表增量抽取 → Transform → Load。"""
     logger.info("ETL 同步任务开始")
 
+    # 清理卡住的同步状态（超过 10 分钟仍为 running 的标记为 failed）
+    stale_cutoff = datetime.utcnow() - timedelta(minutes=10)
+    try:
+        async with async_session() as db:
+            stale_result = await db.execute(
+                select(ETLSyncState).where(
+                    ETLSyncState.last_sync_status == "running",
+                    ETLSyncState.updated_at < stale_cutoff,
+                )
+            )
+            stale_count = 0
+            for state in stale_result.scalars().all():
+                state.last_sync_status = "failed"
+                state.error_message = "同步超时，已自动标记为失败"
+                state.last_sync_time = datetime.utcnow()
+                stale_count += 1
+            if stale_count:
+                logger.warning("清理了 %d 个卡住的同步状态", stale_count)
+            await db.commit()
+    except Exception as e:
+        logger.error("清理 stale running 状态失败: %s", e)
+
     try:
         entries = await registry_reader.read()
     except Exception as e:
         logger.error("读取数据源列表失败: %s", e)
         return
+
+    # 结构化数据源由 structured_table_sync_job 单独处理，ETL 管道跳过
+    entries = [e for e in entries if e.asset_type != "structured"]
 
     if not entries:
         logger.info("数据源为空，跳过本轮同步")
@@ -119,6 +200,11 @@ async def etl_sync_job() -> None:
                 # 获取数据源 owner 的 user_access_token（用户级权限读取多维表格）
                 user_token = await _resolve_user_token(entry.owner_id, db)
 
+                # 检测目标表是否为空，如果为空则重置同步时间强制全量拉取
+                await _reset_sync_time_if_target_empty(
+                    entry.app_token, entry.table_id, entry.owner_id, entry.asset_type, db,
+                )
+
                 # 1. Extract — 增量抽取（如果 token 过期会自动尝试刷新重试）
                 extraction = await incremental_extractor.extract(entry, db, user_access_token=user_token)
 
@@ -128,6 +214,13 @@ async def etl_sync_job() -> None:
                     if refreshed_token and refreshed_token != user_token:
                         logger.info("Token 已刷新，重试抽取: %s/%s", entry.app_token, entry.table_id)
                         extraction = await incremental_extractor.extract(entry, db, user_access_token=refreshed_token)
+                        user_token = refreshed_token
+
+                # 用户 token 和刷新 token 都失败时，回退到 tenant token
+                if not extraction.records and user_token:
+                    logger.warning("用户 token 提取失败，回退到 tenant token: %s/%s", entry.app_token, entry.table_id)
+                    extraction = await incremental_extractor.extract(entry, db, user_access_token=None)
+                    user_token = None
 
                 count = len(extraction.records)
                 total_extracted += count
@@ -145,6 +238,23 @@ async def etl_sync_job() -> None:
                         state.last_sync_status = "success"
                         state.last_sync_time = datetime.utcnow()
                         state.error_message = None
+                        # 更新实际总记录数
+                        if entry.owner_id:
+                            try:
+                                from sqlalchemy import text
+                                if entry.asset_type == "communication":
+                                    cnt = await db.execute(
+                                        text("SELECT COUNT(*) FROM communications WHERE owner_id = :oid AND source_app_token = :app AND source_table_id = :tid"),
+                                        {"oid": entry.owner_id, "app": entry.app_token, "tid": entry.table_id},
+                                    )
+                                else:
+                                    cnt = await db.execute(
+                                        text("SELECT COUNT(*) FROM documents WHERE owner_id = :oid AND source_app_token = :app AND source_table_id = :tid"),
+                                        {"oid": entry.owner_id, "app": entry.app_token, "tid": entry.table_id},
+                                    )
+                                state.records_synced = cnt.scalar() or state.records_synced
+                            except Exception:
+                                await db.rollback()
                         await db.commit()
                     continue
 
@@ -210,6 +320,18 @@ async def etl_sync_single_source(app_token: str, table_id: str, owner_id: str | 
         await db.commit()
 
     try:
+        await asyncio.wait_for(_do_single_source_sync(app_token, table_id, owner_id, asset_type), timeout=600)
+    except asyncio.TimeoutError:
+        logger.error("单源同步 %s/%s 超时 (10分钟)", app_token, table_id)
+        await _mark_failed(app_token, table_id, "同步超时 (10分钟)")
+    except Exception as e:
+        logger.error("单源同步 %s/%s 失败: %s", app_token, table_id, e, exc_info=True)
+        await _mark_failed(app_token, table_id, str(e))
+
+
+async def _do_single_source_sync(app_token: str, table_id: str, owner_id: str | None, asset_type: str) -> None:
+    """单源同步的实际执行逻辑（手动触发，全量拉取 + upsert 去重）。"""
+    try:
         async with async_session() as db:
             user_token = await _resolve_user_token(owner_id, db)
 
@@ -220,13 +342,28 @@ async def etl_sync_single_source(app_token: str, table_id: str, owner_id: str | 
                 asset_type=asset_type,
             )
 
-            extraction = await incremental_extractor.extract(entry, db, user_access_token=user_token)
+            # 手动触发的同步一律全量拉取（force_full=True），
+            # 靠 loader 的 ON CONFLICT upsert 去重：已有记录更新、新记录插入。
+            extraction = await incremental_extractor.extract(
+                entry, db, user_access_token=user_token, force_full=True,
+            )
 
+            # 用户 token 失败时，尝试刷新 token 重试
             if not extraction.records and owner_id and user_token:
                 refreshed_token = await _try_refresh_token(owner_id, db)
                 if refreshed_token and refreshed_token != user_token:
-                    extraction = await incremental_extractor.extract(entry, db, user_access_token=refreshed_token)
+                    extraction = await incremental_extractor.extract(
+                        entry, db, user_access_token=refreshed_token, force_full=True,
+                    )
                     user_token = refreshed_token
+
+            # 用户 token 和刷新 token 都失败时，回退到 tenant token
+            if not extraction.records and user_token:
+                logger.warning("用户 token 提取失败，回退到 tenant token: %s/%s", app_token, table_id)
+                extraction = await incremental_extractor.extract(
+                    entry, db, user_access_token=None, force_full=True,
+                )
+                user_token = None
 
             if not extraction.records:
                 logger.info("单源同步 %s/%s 无增量数据", app_token, table_id)
@@ -241,6 +378,23 @@ async def etl_sync_single_source(app_token: str, table_id: str, owner_id: str | 
                     state.last_sync_status = "success"
                     state.last_sync_time = datetime.utcnow()
                     state.error_message = None
+                    # 更新实际总记录数
+                    if owner_id:
+                        try:
+                            from sqlalchemy import text
+                            if asset_type == "communication":
+                                cnt = await db.execute(
+                                    text("SELECT COUNT(*) FROM communications WHERE owner_id = :oid AND source_app_token = :app AND source_table_id = :tid"),
+                                    {"oid": owner_id, "app": app_token, "tid": table_id},
+                                )
+                            else:
+                                cnt = await db.execute(
+                                    text("SELECT COUNT(*) FROM documents WHERE owner_id = :oid AND source_app_token = :app AND source_table_id = :tid"),
+                                    {"oid": owner_id, "app": app_token, "tid": table_id},
+                                )
+                            state.records_synced = cnt.scalar() or state.records_synced
+                        except Exception:
+                            await db.rollback()
                     await db.commit()
                 return
 
@@ -251,12 +405,26 @@ async def etl_sync_single_source(app_token: str, table_id: str, owner_id: str | 
 
             if transform_result.records:
                 await asset_loader.load(transform_result, db, user_access_token=user_token)
+            else:
+                # 转换后无有效记录，也要将状态标记为 success
+                result = await db.execute(
+                    select(ETLSyncState).where(
+                        ETLSyncState.source_app_token == app_token,
+                        ETLSyncState.source_table_id == table_id,
+                    )
+                )
+                state = result.scalar_one_or_none()
+                if state:
+                    state.last_sync_status = "success"
+                    state.last_sync_time = datetime.utcnow()
+                    state.error_message = f"转换后无有效记录 (丢弃 {transform_result.discarded_count} 条)"
+                    await db.commit()
 
             logger.info("单源同步 %s/%s 完成", app_token, table_id)
 
     except Exception as e:
-        logger.error("单源同步 %s/%s 失败: %s", app_token, table_id, e, exc_info=True)
-        await _mark_failed(app_token, table_id, str(e))
+        logger.error("单源同步执行 %s/%s 失败: %s", app_token, table_id, e, exc_info=True)
+        raise
 
 
 async def cloud_folder_sync_job() -> None:
@@ -560,7 +728,7 @@ async def todo_extract_job() -> None:
     for user in users:
         try:
             async with async_session() as db:
-                items = await extract_and_save(db, user.feishu_open_id, days=3)
+                items = await extract_and_save(db, user.feishu_open_id, user.name, days=3)
                 total_extracted += len(items)
                 if items:
                     logger.info("用户 %s 自动提取 %d 条待办", user.name, len(items))

@@ -1,8 +1,8 @@
 """领导洞察 Pydantic 模型。"""
 
-from datetime import datetime
-
 from pydantic import BaseModel
+
+from app.schemas.types import UTCDatetime
 
 
 class InsightGenerateRequest(BaseModel):
@@ -20,8 +20,8 @@ class InsightOut(BaseModel):
     report_markdown: str | None = None
     dimensions: dict = {}
     data_coverage: dict = {}
-    generated_at: datetime
-    created_at: datetime
+    generated_at: UTCDatetime
+    created_at: UTCDatetime
 
     model_config = {"from_attributes": True}
 

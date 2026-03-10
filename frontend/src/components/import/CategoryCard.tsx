@@ -1,4 +1,4 @@
-import { AudioWaveform, FileText, Table2 } from 'lucide-react'
+import { AudioWaveform, FileText, Table2, Upload } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { ImportCategory } from './importUtils'
 import { CATEGORY_CONFIG } from './importUtils'
@@ -40,7 +40,8 @@ export default function CategoryCard({ category, isActive = false, onClick }: Ca
         `}>
           <IconComponent className="w-5 h-5" />
         </div>
-        <span className="font-medium text-gray-900">{config.categoryName}</span>
+        <span className="font-medium text-gray-900 flex-1">{config.categoryName}</span>
+        <Upload className={`w-4 h-4 ${isActive ? 'text-indigo-400' : 'text-gray-300'}`} />
       </div>
 
       {/* 描述 */}

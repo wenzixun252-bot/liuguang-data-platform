@@ -1,8 +1,8 @@
 """对话会话相关的 Pydantic 模型。"""
 
-from datetime import datetime
-
 from pydantic import BaseModel
+
+from app.schemas.types import UTCDatetime
 
 
 class ConversationCreate(BaseModel):
@@ -21,7 +21,7 @@ class ConversationMessageOut(BaseModel):
     content: str
     sources: list | None = None
     attachments: list | None = None
-    created_at: datetime
+    created_at: UTCDatetime
 
     model_config = {"from_attributes": True}
 
@@ -31,8 +31,8 @@ class ConversationOut(BaseModel):
     owner_id: str
     title: str
     scene: str
-    created_at: datetime
-    updated_at: datetime
+    created_at: UTCDatetime
+    updated_at: UTCDatetime
 
     model_config = {"from_attributes": True}
 

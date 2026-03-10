@@ -1,13 +1,36 @@
 import { useEffect, useRef } from 'react'
-import { Sparkles } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Sparkles, FileText, MessageSquare } from 'lucide-react'
 import { motion } from 'framer-motion'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
+export interface SourceRef {
+  type: string
+  id: number
+  title: string
+}
+
 export interface Message {
   role: 'user' | 'assistant'
   content: string
-  sources?: string[]
+  sources?: (SourceRef | string)[]
+}
+
+function normalizeSource(s: SourceRef | string): SourceRef {
+  if (typeof s === 'string') {
+    const [type, idStr] = s.split(':')
+    return { type, id: Number(idStr), title: s }
+  }
+  return s
+}
+
+function getSourceUrl(source: SourceRef): string {
+  switch (source.type) {
+    case 'document': return `/documents?highlight=${source.id}`
+    case 'communication': return `/communications?highlight=${source.id}`
+    default: return '#'
+  }
 }
 
 interface Props {
@@ -17,6 +40,7 @@ interface Props {
 }
 
 export default function ChatMessages({ messages, promptTemplates, onTemplateClick }: Props) {
+  const navigate = useNavigate()
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -88,14 +112,19 @@ export default function ChatMessages({ messages, promptTemplates, onTemplateClic
                   <div className="mt-3 pt-3 border-t border-black/[0.06]">
                     <p className="text-xs mb-1" style={{ color: 'var(--color-text-quaternary)' }}>引用来源:</p>
                     <div className="flex flex-wrap gap-1.5">
-                      {msg.sources.map((s) => (
-                        <span
-                          key={s}
-                          className="px-2.5 py-1 bg-[var(--color-accent-subtle)] text-[var(--color-accent)] text-xs rounded-lg font-medium cursor-pointer hover:bg-indigo-100 transition-colors"
-                        >
-                          {s}
-                        </span>
-                      ))}
+                      {msg.sources.map((s) => {
+                        const ref = normalizeSource(s)
+                        return (
+                          <span
+                            key={`${ref.type}:${ref.id}`}
+                            onClick={() => navigate(getSourceUrl(ref))}
+                            className="px-2.5 py-1 bg-[var(--color-accent-subtle)] text-[var(--color-accent)] text-xs rounded-lg font-medium cursor-pointer hover:bg-indigo-100 transition-colors inline-flex items-center gap-1"
+                          >
+                            {ref.type === 'document' ? <FileText size={10} /> : <MessageSquare size={10} />}
+                            {ref.title}
+                          </span>
+                        )
+                      })}
                     </div>
                   </div>
                 )}

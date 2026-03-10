@@ -2,7 +2,9 @@
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
+
+from app.schemas.types import UTCDatetime, UTCDatetimeOpt
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -11,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, get_user_feishu_token, refresh_user_feishu_token
-from app.models.asset import ETLDataSource, ETLSyncState, CloudFolderSource
+from app.models.asset import ETLDataSource, ETLSyncState, CloudFolderSource, ImportTask, SchemaMappingCache
 from app.models.document import Document
 from app.models.user import User
 from app.schemas.etl import DataSourceOut, DataSourceWithSyncOut
@@ -50,8 +52,8 @@ async def add_feishu_source(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> DataSourceOut:
     """用户添加自己的飞书多维表格数据源。"""
-    if body.asset_type not in ("document", "communication"):
-        raise HTTPException(400, "asset_type 必须是 document / communication")
+    if body.asset_type not in ("document", "communication", "structured"):
+        raise HTTPException(400, "asset_type 必须是 document / communication / structured")
 
     existing = await db.execute(
         select(ETLDataSource).where(
@@ -151,6 +153,20 @@ async def trigger_my_sync(
     if not sources:
         raise HTTPException(400, "没有已启用的数据源")
 
+    # 清理超过 10 分钟仍为 running 的卡住状态
+    stale_cutoff = datetime.utcnow() - timedelta(minutes=10)
+    stale_result = await db.execute(
+        select(ETLSyncState).where(
+            ETLSyncState.last_sync_status == "running",
+            ETLSyncState.updated_at < stale_cutoff,
+        )
+    )
+    for state in stale_result.scalars().all():
+        state.last_sync_status = "failed"
+        state.error_message = "同步超时，已自动标记为失败"
+        state.last_sync_time = datetime.utcnow()
+    await db.commit()
+
     asyncio.create_task(etl_sync_job())
     return {"message": "同步任务已触发", "sources_count": len(sources)}
 
@@ -168,9 +184,102 @@ async def trigger_single_sync(
     if ds.owner_id != current_user.feishu_open_id and current_user.role != "admin":
         raise HTTPException(403, "无权操作此数据源")
 
-    from app.worker.tasks import etl_sync_single_source
-    asyncio.create_task(etl_sync_single_source(ds.app_token, ds.table_id, ds.owner_id, ds.asset_type))
+    if ds.asset_type == "structured":
+        # 结构化数据源走专用的 structured_table_import 服务
+        asyncio.create_task(_sync_structured_source(ds, current_user.feishu_access_token))
+    else:
+        from app.worker.tasks import etl_sync_single_source
+        asyncio.create_task(etl_sync_single_source(ds.app_token, ds.table_id, ds.owner_id, ds.asset_type))
     return {"message": "同步任务已触发", "source_id": source_id}
+
+
+async def _sync_structured_source(ds: ETLDataSource, user_access_token: str | None) -> None:
+    """后台同步结构化数据源（多维表格/飞书表格）到 StructuredTable。"""
+    from app.database import async_session
+    from app.services.structured_table_import import import_from_bitable, import_from_spreadsheet
+
+    async with async_session() as db:
+        try:
+            # 更新同步状态为 running
+            result = await db.execute(
+                select(ETLSyncState).where(
+                    ETLSyncState.source_app_token == ds.app_token,
+                    ETLSyncState.source_table_id == ds.table_id,
+                )
+            )
+            state = result.scalar_one_or_none()
+            if state:
+                state.last_sync_status = "running"
+                state.error_message = None
+            else:
+                state = ETLSyncState(
+                    source_app_token=ds.app_token,
+                    source_table_id=ds.table_id,
+                    last_sync_status="running",
+                )
+                db.add(state)
+            await db.commit()
+
+            # 获取用户 token（如果调用时没传，从用户表查）
+            token = user_access_token
+            if not token and ds.owner_id:
+                from app.worker.tasks import _resolve_user_token
+                token = await _resolve_user_token(ds.owner_id, db)
+
+            # 根据表格类型调用对应的导入函数
+            # 判断方式：尝试先用 bitable API，失败则回滚后用 spreadsheet
+            table_obj = None
+            try:
+                table_obj = await import_from_bitable(
+                    db, ds.owner_id, ds.app_token, ds.table_id, user_access_token=token,
+                )
+            except Exception as bitable_err:
+                logger.warning("bitable 导入失败，尝试 spreadsheet: %s", bitable_err)
+                await db.rollback()
+                try:
+                    table_obj = await import_from_spreadsheet(
+                        db, ds.owner_id, ds.app_token, ds.table_id, user_access_token=token,
+                    )
+                except Exception as sheet_err:
+                    raise ValueError(
+                        f"多维表格导入失败: {bitable_err}; 飞书表格导入也失败: {sheet_err}"
+                    ) from sheet_err
+
+            # 更新同步状态为成功
+            result = await db.execute(
+                select(ETLSyncState).where(
+                    ETLSyncState.source_app_token == ds.app_token,
+                    ETLSyncState.source_table_id == ds.table_id,
+                )
+            )
+            state = result.scalar_one_or_none()
+            if state:
+                state.last_sync_status = "success"
+                state.last_sync_time = datetime.utcnow()
+                state.records_synced = table_obj.row_count
+                state.error_message = None
+                await db.commit()
+
+            logger.info("结构化数据源同步成功: %s/%s, %d 行", ds.app_token, ds.table_id, table_obj.row_count)
+
+        except Exception as e:
+            logger.error("结构化数据源同步失败: %s/%s: %s", ds.app_token, ds.table_id, e, exc_info=True)
+            try:
+                await db.rollback()
+                result = await db.execute(
+                    select(ETLSyncState).where(
+                        ETLSyncState.source_app_token == ds.app_token,
+                        ETLSyncState.source_table_id == ds.table_id,
+                    )
+                )
+                state = result.scalar_one_or_none()
+                if state:
+                    state.last_sync_status = "failed"
+                    state.error_message = str(e)[:500]
+                    state.last_sync_time = datetime.utcnow()
+                    await db.commit()
+            except Exception:
+                pass
 
 
 @router.delete("/feishu-source/{source_id}", summary="删除数据源")
@@ -184,6 +293,26 @@ async def delete_my_source(
         raise HTTPException(404, "数据源不存在")
     if ds.owner_id != current_user.feishu_open_id and current_user.role != "admin":
         raise HTTPException(403, "无权删除此数据源")
+
+    # 同时清理对应的同步状态和 Schema 缓存，避免重新添加时残留旧状态
+    sync_result = await db.execute(
+        select(ETLSyncState).where(
+            ETLSyncState.source_app_token == ds.app_token,
+            ETLSyncState.source_table_id == ds.table_id,
+        )
+    )
+    sync_state = sync_result.scalar_one_or_none()
+    if sync_state:
+        await db.delete(sync_state)
+
+    cache_result = await db.execute(
+        select(SchemaMappingCache).where(
+            SchemaMappingCache.source_app_token == ds.app_token,
+            SchemaMappingCache.source_table_id == ds.table_id,
+        )
+    )
+    for cache in cache_result.scalars().all():
+        await db.delete(cache)
 
     await db.delete(ds)
     await db.commit()
@@ -237,10 +366,19 @@ async def discover_feishu_bitables(
 
     async def _collect_all(token: str, name_filter: str = "") -> None:
         """收集所有可访问的表格。name_filter 非空时只保留文件名包含该关键词的。"""
+        import httpx
         kw = name_filter.lower()
 
         def _should_add(name: str) -> bool:
             return not kw or kw in name.lower()
+
+        def _is_auth_error(e: Exception) -> bool:
+            """检查是否是认证错误（401）"""
+            if isinstance(e, httpx.HTTPStatusError):
+                return e.response.status_code == 401
+            if isinstance(e, FeishuAPIError):
+                return "401" in str(e) or "Unauthorized" in str(e) or "token" in str(e).lower()
+            return False
 
         # 1. 自己云空间的多维表格
         try:
@@ -250,6 +388,8 @@ async def discover_feishu_bitables(
                 if _should_add(name):
                     _add(f.get("token", ""), name, "bitable")
         except Exception as e:
+            if _is_auth_error(e):
+                raise FeishuAPIError(f"用户 Token 已过期: {e}")
             logger.warning("列出云空间多维表格失败: %s", e)
 
         # 2. 自己云空间的飞书表格
@@ -260,6 +400,8 @@ async def discover_feishu_bitables(
                 if _should_add(name):
                     _add(f.get("token", ""), name, "spreadsheet")
         except Exception as e:
+            if _is_auth_error(e):
+                raise FeishuAPIError(f"用户 Token 已过期: {e}")
             logger.warning("列出云空间飞书表格失败: %s", e)
 
         # 3. 知识空间中的多维表格和飞书表格
@@ -276,6 +418,8 @@ async def discover_feishu_bitables(
                 if _should_add(name):
                     _add(t, name, doc_type_map.get(obj_type, "bitable"))
         except Exception as e:
+            if _is_auth_error(e):
+                raise FeishuAPIError(f"用户 Token 已过期: {e}")
             logger.warning("列出知识空间表格失败: %s", e)
 
         # 4. 搜索 API 补充（发现他人分享的表格）
@@ -294,6 +438,8 @@ async def discover_feishu_bitables(
                 if _should_add(name):
                     _add(f.get("token", ""), name, doc_type_map.get(raw_type, raw_type))
         except Exception as e:
+            if _is_auth_error(e):
+                raise FeishuAPIError(f"用户 Token 已过期: {e}")
             logger.warning("搜索补充表格失败: %s", e)
 
     async def _action(token: str) -> None:
@@ -352,29 +498,44 @@ async def discover_bitable_tables(
     app_token: str,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    doc_type: str = Query("bitable", alias="type", description="bitable 或 spreadsheet"),
 ) -> list[BitableTableInfo]:
-    """按需加载指定多维表格下的数据表列表。"""
+    """按需加载指定多维表格/飞书表格下的数据表列表。"""
     user_token = await _get_user_token(current_user, db)
     if not user_token:
         raise HTTPException(401, "飞书授权已失效，请重新登录")
 
+    async def _fetch(token: str) -> list[dict]:
+        if doc_type == "spreadsheet":
+            return await feishu_client.get_spreadsheet_sheets(
+                app_token, user_access_token=token
+            )
+        else:
+            return await feishu_client.get_bitable_tables(
+                app_token, user_access_token=token
+            )
+
     try:
-        tables_raw = await feishu_client.get_bitable_tables(
-            app_token, user_access_token=user_token
-        )
+        tables_raw = await _fetch(user_token)
     except FeishuAPIError:
         user_token = await _refresh_and_retry(current_user, db)
         if not user_token:
             raise HTTPException(401, "飞书授权已过期，请重新登录")
         try:
-            tables_raw = await feishu_client.get_bitable_tables(
-                app_token, user_access_token=user_token
-            )
+            tables_raw = await _fetch(user_token)
         except Exception as e:
             raise HTTPException(500, f"获取数据表列表失败: {e}")
     except Exception as e:
         raise HTTPException(500, f"获取数据表列表失败: {e}")
 
+    if doc_type == "spreadsheet":
+        return [
+            BitableTableInfo(
+                table_id=t.get("sheet_id", ""),
+                name=t.get("title", "未命名"),
+            )
+            for t in tables_raw
+        ]
     return [
         BitableTableInfo(
             table_id=t.get("table_id", ""),
@@ -394,7 +555,7 @@ async def add_feishu_sources_batch(
     created: list[DataSourceOut] = []
 
     for item in body:
-        if item.asset_type not in ("document", "communication"):
+        if item.asset_type not in ("document", "communication", "structured"):
             continue
 
         existing = await db.execute(
@@ -439,8 +600,8 @@ async def add_feishu_source_from_url(
     """
     import re
 
-    if body.asset_type not in ("document", "communication"):
-        raise HTTPException(400, "asset_type 必须是 document / communication")
+    if body.asset_type not in ("document", "communication", "structured"):
+        raise HTTPException(400, "asset_type 必须是 document / communication / structured")
 
     url = body.url.strip()
 
@@ -648,13 +809,13 @@ async def discover_feishu_docs(
     return docs
 
 
-@router.post("/feishu-docs", response_model=CloudDocImportResponse, summary="批量导入云文档/文件")
+@router.post("/feishu-docs", summary="批量导入云文档/文件（后台执行）")
 async def import_feishu_docs(
     body: CloudDocImportRequest,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> CloudDocImportResponse:
-    """导入选中的飞书云文档和文件。"""
+) -> dict:
+    """导入选中的飞书云文档和文件 — 提交后立即返回，后台异步执行。"""
     if not body.items:
         raise HTTPException(400, "请选择要导入的文档")
 
@@ -662,18 +823,167 @@ async def import_feishu_docs(
     if not user_token:
         raise HTTPException(401, "飞书授权已失效，请重新登录")
 
-    result = await cloud_doc_import_service.batch_import(
-        file_infos=body.items,
-        owner_id=current_user.feishu_open_id,
-        db=db,
-        user_access_token=user_token,
-        uploader_name=current_user.name,
+    owner_id = current_user.feishu_open_id
+    uploader_name = current_user.name
+    items = body.items
+
+    # 创建任务记录
+    task = ImportTask(
+        task_type="cloud_doc",
+        status="pending",
+        owner_id=owner_id,
+        total_count=len(items),
+        details={"files": [{"token": i.get("token"), "name": i.get("name")} for i in items[:10]]},
     )
-    return CloudDocImportResponse(
-        imported=result.imported,
-        skipped=result.skipped,
-        failed=result.failed,
+    db.add(task)
+    await db.commit()
+    await db.refresh(task)
+    task_id = task.id
+
+    async def _bg_import():
+        from app.database import async_session
+        async with async_session() as session:
+            try:
+                # 更新状态为 running
+                task_in_session = await session.get(ImportTask, task_id)
+                if task_in_session:
+                    task_in_session.status = "running"
+                    task_in_session.started_at = datetime.utcnow()
+                    await session.commit()
+
+                # 不限总时长，让后台慢慢跑；单文件超时由 batch_import 内部控制（90s/文件）
+                result = await cloud_doc_import_service.batch_import(
+                    file_infos=items,
+                    owner_id=owner_id,
+                    db=session,
+                    user_access_token=user_token,
+                    uploader_name=uploader_name,
+                )
+
+                # 检查是否已被用户取消
+                task_in_session = await session.get(ImportTask, task_id)
+                if task_in_session and task_in_session.status == "cancelled":
+                    logger.info("导入任务已被用户取消: task_id=%d", task_id)
+                    return
+
+                # 更新任务结果
+                if task_in_session:
+                    task_in_session.status = "completed"
+                    task_in_session.imported_count = result.imported
+                    task_in_session.skipped_count = result.skipped
+                    task_in_session.failed_count = result.failed
+                    task_in_session.completed_at = datetime.utcnow()
+                    await session.commit()
+
+                logger.info(
+                    "后台云文档导入完成: imported=%d, skipped=%d, failed=%d",
+                    result.imported, result.skipped, result.failed,
+                )
+            except Exception as e:
+                logger.error("后台云文档导入异常: %s", e)
+                try:
+                    task_in_session = await session.get(ImportTask, task_id)
+                    if task_in_session and task_in_session.status not in ("cancelled", "timeout"):
+                        task_in_session.status = "failed"
+                        task_in_session.error_message = str(e)[:500]
+                        task_in_session.completed_at = datetime.utcnow()
+                        await session.commit()
+                except Exception:
+                    pass
+
+    asyncio.create_task(_bg_import())
+    return {"message": f"已提交 {len(items)} 个文档到后台导入", "count": len(items), "task_id": task_id}
+
+
+class CommDocImportRequest(BaseModel):
+    """沟通资产云文档导入请求。"""
+    items: list[dict]  # [{token, name, type}, ...]
+
+
+@router.post("/feishu-docs/communication", summary="批量导入云文档为沟通资产（后台执行）")
+async def import_feishu_docs_as_communication(
+    body: CommDocImportRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """将会议纪要、文字记录等云文档导入为沟通资产，使用 LLM 智能提取字段。后台异步执行。"""
+    if not body.items:
+        raise HTTPException(400, "请选择要导入的文档")
+
+    user_token = await _get_user_token(current_user, db)
+    if not user_token:
+        raise HTTPException(401, "飞书授权已失效，请重新登录")
+
+    owner_id = current_user.feishu_open_id
+    uploader_name = current_user.name
+    items = body.items
+
+    # 创建任务记录
+    task = ImportTask(
+        task_type="communication",
+        status="pending",
+        owner_id=owner_id,
+        total_count=len(items),
+        details={"files": [{"token": i.get("token"), "name": i.get("name")} for i in items[:10]]},
     )
+    db.add(task)
+    await db.commit()
+    await db.refresh(task)
+    task_id = task.id
+
+    async def _bg_import():
+        from app.database import async_session
+        async with async_session() as session:
+            try:
+                # 更新状态为 running
+                task_in_session = await session.get(ImportTask, task_id)
+                if task_in_session:
+                    task_in_session.status = "running"
+                    task_in_session.started_at = datetime.utcnow()
+                    await session.commit()
+
+                # 不限总时长，让后台慢慢跑；单文件超时由 batch_import_as_communication 内部控制（90s/文件）
+                result = await cloud_doc_import_service.batch_import_as_communication(
+                    file_infos=items,
+                    owner_id=owner_id,
+                    db=session,
+                    user_access_token=user_token,
+                    uploader_name=uploader_name,
+                )
+
+                # 检查是否已被用户取消
+                task_in_session = await session.get(ImportTask, task_id)
+                if task_in_session and task_in_session.status == "cancelled":
+                    logger.info("沟通资产导入任务已被用户取消: task_id=%d", task_id)
+                    return
+
+                # 更新任务结果
+                if task_in_session:
+                    task_in_session.status = "completed"
+                    task_in_session.imported_count = result.imported
+                    task_in_session.skipped_count = result.skipped
+                    task_in_session.failed_count = result.failed
+                    task_in_session.completed_at = datetime.utcnow()
+                    await session.commit()
+
+                logger.info(
+                    "后台沟通资产导入完成: imported=%d, skipped=%d, failed=%d",
+                    result.imported, result.skipped, result.failed,
+                )
+            except Exception as e:
+                logger.error("后台沟通资产导入异常: %s", e)
+                try:
+                    task_in_session = await session.get(ImportTask, task_id)
+                    if task_in_session and task_in_session.status not in ("cancelled", "timeout"):
+                        task_in_session.status = "failed"
+                        task_in_session.error_message = str(e)[:500]
+                        task_in_session.completed_at = datetime.utcnow()
+                        await session.commit()
+                except Exception:
+                    pass
+
+    asyncio.create_task(_bg_import())
+    return {"message": f"已提交 {len(items)} 个文档到后台导入为沟通资产", "count": len(items), "task_id": task_id}
 
 
 @router.post(
@@ -720,6 +1030,22 @@ async def reimport_feishu_doc(
 
 
 # ── 云文件夹同步 ─────────────────────────────────────────
+
+
+@router.get("/cloud-folders/discover", summary="自动发现用户的飞书文件夹")
+async def discover_user_folders(
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    """列出用户飞书云空间根目录下的所有文件夹，用于快速添加同步源。"""
+    user_token = getattr(current_user, "feishu_access_token", None)
+    try:
+        folders = await feishu_client.list_root_folders(user_access_token=user_token)
+        return folders
+    except FeishuAPIError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    except Exception:
+        raise HTTPException(status_code=502, detail="获取飞书文件夹列表失败")
+
 
 @router.get("/cloud-folders", response_model=list[CloudFolderOut], summary="查看我的云文件夹源")
 async def list_cloud_folders(
@@ -845,3 +1171,97 @@ async def trigger_cloud_folder_sync(
 
     asyncio.create_task(_sync_all())
     return {"message": "文件夹同步已触发", "folders_count": len(folders)}
+
+
+# ── 导入任务状态 ─────────────────────────────────────────
+
+class ImportTaskOut(BaseModel):
+    """导入任务输出。"""
+    id: int
+    task_type: str
+    status: str
+    total_count: int
+    imported_count: int
+    skipped_count: int
+    failed_count: int
+    error_message: str | None = None
+    details: dict
+    started_at: UTCDatetimeOpt = None
+    completed_at: UTCDatetimeOpt = None
+    created_at: UTCDatetime
+
+    model_config = {"from_attributes": True}
+
+
+@router.get("/tasks", response_model=list[ImportTaskOut], summary="查询我的导入任务")
+async def list_import_tasks(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: int = Query(default=20, le=100),
+) -> list[ImportTaskOut]:
+    """获取当前用户的导入任务列表，按创建时间倒序。"""
+    result = await db.execute(
+        select(ImportTask)
+        .where(ImportTask.owner_id == current_user.feishu_open_id)
+        .order_by(ImportTask.id.desc())
+        .limit(limit)
+    )
+    tasks = result.scalars().all()
+    return [ImportTaskOut.model_validate(t) for t in tasks]
+
+
+@router.get("/tasks/{task_id}", response_model=ImportTaskOut, summary="查询单个导入任务")
+async def get_import_task(
+    task_id: int,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> ImportTaskOut:
+    """获取指定导入任务的详情。"""
+    task = await db.get(ImportTask, task_id)
+    if not task:
+        raise HTTPException(404, "任务不存在")
+    if task.owner_id != current_user.feishu_open_id and current_user.role != "admin":
+        raise HTTPException(403, "无权查看此任务")
+    return ImportTaskOut.model_validate(task)
+
+
+@router.post("/tasks/{task_id}/cancel", summary="取消导入任务")
+async def cancel_import_task(
+    task_id: int,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """取消进行中的导入任务。"""
+    task = await db.get(ImportTask, task_id)
+    if not task:
+        raise HTTPException(404, "任务不存在")
+    if task.owner_id != current_user.feishu_open_id and current_user.role != "admin":
+        raise HTTPException(403, "无权取消此任务")
+    if task.status not in ("pending", "running"):
+        raise HTTPException(400, "只能取消等待中或运行中的任务")
+
+    task.status = "cancelled"
+    task.error_message = "用户手动取消"
+    task.completed_at = datetime.utcnow()
+    await db.commit()
+    return {"message": "任务已取消"}
+
+
+@router.delete("/tasks/{task_id}", summary="删除导入任务记录")
+async def delete_import_task(
+    task_id: int,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """删除已完成/失败/超时/取消的导入任务记录。"""
+    task = await db.get(ImportTask, task_id)
+    if not task:
+        raise HTTPException(404, "任务不存在")
+    if task.owner_id != current_user.feishu_open_id and current_user.role != "admin":
+        raise HTTPException(403, "无权删除此任务")
+    if task.status in ("pending", "running"):
+        raise HTTPException(400, "不能删除进行中的任务，请先取消")
+
+    await db.delete(task)
+    await db.commit()
+    return {"message": "任务记录已删除"}

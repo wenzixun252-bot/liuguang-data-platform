@@ -16,6 +16,15 @@ from app.services.llm import llm_client
 
 logger = logging.getLogger(__name__)
 
+REPORT_SYSTEM_PROMPT = """你是一位资深的商业分析师，擅长从零散的工作数据中提炼洞察、发现趋势。
+
+## 写作风格
+- 数据驱动：每个结论必须引用具体数据（日期、人名、事件、数字）
+- 重点突出：最重要的内容放在最前面
+- 言之有物：严禁使用模板套话（如"取得了显著成果"、"进展顺利"）
+- 诚实客观：如果某个版块数据不足，直接写"本周期该领域无相关数据"，不要凑字数
+- 使用专业简洁的中文，Markdown 格式输出"""
+
 # 预设系统模板
 SYSTEM_TEMPLATES = [
     {
@@ -28,20 +37,23 @@ SYSTEM_TEMPLATES = [
 
 ## 输出结构
 ### 本周工作总结
-（汇总本周主要工作成果）
+（用 3-5 个要点汇总本周最重要的工作成果，每个要点引用具体事件和日期）
 
 ### 重点会议与决策
-（列出重要会议及关键决策）
+（列出关键会议的主题、参与人、核心决策和后续行动，跳过无实质内容的会议）
 
 ### 产出成果
-（具体产出物、文档、成果）
+（列出具体的产出物：文档名称、方案版本、交付件等）
 
 ### 下周计划
-（基于当前进展推断下周重点）
+（基于当前未完成事项和会议决策，推断下周 2-3 个重点方向）
 
+## 写作要求
+- 每个结论必须引用具体数据（日期、人名、事件）
+- 如果某版块数据不足，写"本周期无相关数据"，不要编造内容
+- 最重要的 3 件事放在总结最前面
 {extra_instructions}
-
-请用专业简洁的中文撰写，使用 Markdown 格式。""",
+""",
         "output_structure": {
             "sections": ["本周工作总结", "重点会议与决策", "产出成果", "下周计划"]
         },
@@ -56,20 +68,23 @@ SYSTEM_TEMPLATES = [
 
 ## 输出结构
 ### 月度目标回顾
-（本月主要目标和完成情况）
+（从数据中提炼本月实际完成的主要事项，用事实说明完成情况）
 
 ### 重点项目进展
-（各项目的进展状态和成果）
+（按项目分组，列出每个项目的关键里程碑、参与人、当前状态）
 
 ### 关键会议决策
-（重要会议及其决策和影响）
+（仅列出有实质决策的会议，说明决策内容和影响范围）
 
 ### 数据分析
-（关键数据指标和趋势分析）
+（统计本月文档产出数量、会议频次等可量化指标，发现趋势）
 
+## 写作要求
+- 每个结论必须引用具体数据（日期、人名、事件）
+- 如果某版块数据不足，写"本周期无相关数据"，不要编造内容
+- 最重要的 3 件事放在总结最前面
 {extra_instructions}
-
-请用专业简洁的中文撰写，使用 Markdown 格式。""",
+""",
         "output_structure": {
             "sections": ["月度目标回顾", "重点项目进展", "关键会议决策", "数据分析"]
         },
@@ -84,20 +99,23 @@ SYSTEM_TEMPLATES = [
 
 ## 输出结构
 ### 项目背景
-（项目的背景和目标）
+（从数据中提取项目名称、启动时间、核心目标）
 
 ### 完成情况
-（各阶段的完成状态和成果）
+（按时间线列出各阶段的关键成果和交付件，引用具体文档和会议）
 
 ### 经验教训
-（过程中的问题、挑战和解决方案）
+（从会议讨论和沟通记录中提炼实际遇到的问题和解决方案）
 
 ### 后续计划
-（未完成事项和后续安排）
+（基于未完成的行动项和最近的会议决策，列出后续安排）
 
+## 写作要求
+- 每个结论必须引用具体数据（日期、人名、事件）
+- 如果某版块数据不足，写"本周期无相关数据"，不要编造内容
+- 最重要的 3 件事放在总结最前面
 {extra_instructions}
-
-请用专业简洁的中文撰写，使用 Markdown 格式。""",
+""",
         "output_structure": {
             "sections": ["项目背景", "完成情况", "经验教训", "后续计划"]
         },
@@ -167,7 +185,7 @@ async def gather_data(
         )
         docs = result.scalars().all()
         data["documents"] = [
-            {"title": d.title, "content": d.content_text[:500], "created": str(d.created_at)}
+            {"title": d.title, "content": d.content_text[:1500], "created": str(d.created_at)}
             for d in docs
         ]
 
@@ -189,7 +207,7 @@ async def gather_data(
                 "time": str(c.comm_time or c.created_at),
                 "initiator": c.initiator,
                 "conclusions": c.conclusions,
-                "content": c.content_text[:500],
+                "content": c.content_text[:1500],
             }
             for c in comms
         ]
@@ -326,8 +344,11 @@ async def generate_report(
 
     try:
         response = await llm_client.chat_client.chat.completions.create(
-            model=settings.llm_model,
-            messages=[{"role": "user", "content": prompt}],
+            model=settings.agent_llm_model,
+            messages=[
+                {"role": "system", "content": REPORT_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
             temperature=0.3,
         )
         content = response.choices[0].message.content
@@ -402,14 +423,18 @@ async def generate_report_stream(
 
     full_content = []
     try:
-        from openai import AsyncOpenAI
-        client = AsyncOpenAI(
+        from app.services.llm import create_openai_client
+        client = create_openai_client(
             api_key=settings.agent_llm_api_key,
             base_url=settings.agent_llm_base_url,
+            timeout=120.0,
         )
         stream = await client.chat.completions.create(
             model=settings.agent_llm_model,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[
+                {"role": "system", "content": REPORT_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
             stream=True,
         )
         async for chunk in stream:

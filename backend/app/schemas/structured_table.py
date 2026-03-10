@@ -1,8 +1,8 @@
 """结构化数据表 Pydantic 模型。"""
 
-from datetime import datetime
-
 from pydantic import BaseModel
+
+from app.schemas.types import UTCDatetime, UTCDatetimeOpt
 
 
 class StructuredTableOut(BaseModel):
@@ -23,10 +23,10 @@ class StructuredTableOut(BaseModel):
     quality_score: float | None = None
     duplicate_of: int | None = None
     parse_status: str = "done"
-    processed_at: datetime | None = None
-    synced_at: datetime | None = None
-    created_at: datetime
-    updated_at: datetime
+    processed_at: UTCDatetimeOpt = None
+    synced_at: UTCDatetimeOpt = None
+    created_at: UTCDatetime
+    updated_at: UTCDatetime
 
     model_config = {"from_attributes": True}
 
@@ -55,10 +55,10 @@ class StructuredTableDetail(BaseModel):
     duplicate_of: int | None = None
     extra_fields: dict = {}
     parse_status: str = "done"
-    processed_at: datetime | None = None
-    synced_at: datetime | None = None
-    created_at: datetime
-    updated_at: datetime
+    processed_at: UTCDatetimeOpt = None
+    synced_at: UTCDatetimeOpt = None
+    created_at: UTCDatetime
+    updated_at: UTCDatetime
 
     model_config = {"from_attributes": True}
 

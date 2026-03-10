@@ -1,7 +1,9 @@
 """知识图谱构建服务 — LLM提取实体和关系。"""
 
+import asyncio
 import json
 import logging
+from collections.abc import Callable
 from datetime import datetime
 
 from sqlalchemy import select, and_, func, or_
@@ -16,19 +18,17 @@ from app.services.llm import llm_client
 
 logger = logging.getLogger(__name__)
 
-EXTRACT_KG_PROMPT = """你是一个知识图谱构建专家。请从以下文本中提取实体和关系。
+EXTRACT_KG_PROMPT = """你是一个知识图谱构建专家。请从以下文本中提取**有意义的**实体和关系。
 
 ## 文本内容
 {content}
 
-## 实体类型
-- person: 人物
-- project: 项目
-- topic: 主题/话题
-- organization: 组织/部门
-- event: 事件
-- document: 文档
-- community: 社群/群组/团队
+## 实体类型（仅以下5种，不要提取其他类型）
+- person: 具体的人物（必须是明确的人名，如"张明"、"李娜"）
+- project: 具体的项目（必须有明确名称，如"流光项目"、"V2改版"）
+- topic: 具体的主题/话题（如"数据安全"、"Q3预算"）
+- organization: 具体的组织/部门（如"产品部"、"XX公司"）
+- event: 具体的事件（如"产品评审会"、"Q3述职"）
 
 ## 关系类型
 - collaborates_with: 合作关系（person ↔ person）
@@ -37,23 +37,40 @@ EXTRACT_KG_PROMPT = """你是一个知识图谱构建专家。请从以下文本
 - belongs_to: 隶属（person → organization）
 - related_to: 通用关联
 
-## 输出格式（JSON）
+## 不要提取
+- 代词（如"大家"、"他们"、"我们"、"这个"、"那个"）
+- 泛化词（如"工作"、"项目"、"问题"、"方案"，除非有具体名称修饰）
+- 单个字的实体
+- 动词或形容词（如"讨论"、"重要"）
+- 角色描述（如"负责人"、"开发者"，除非是具体人名）
+
+## 示例
+输入："周三的产品评审会上，张明和李娜讨论了流光项目的V2方案，决定下周启动开发。"
+
+输出：
 {{
   "entities": [
-    {{"name": "实体名", "type": "person", "properties": {{}}}}
+    {{"name": "张明", "type": "person", "properties": {{}}}},
+    {{"name": "李娜", "type": "person", "properties": {{}}}},
+    {{"name": "流光项目", "type": "project", "properties": {{"phase": "V2"}}}},
+    {{"name": "产品评审会", "type": "event", "properties": {{}}}}
   ],
   "relations": [
-    {{"source": "实体名1", "target": "实体名2", "type": "collaborates_with"}}
+    {{"source": "张明", "target": "流光项目", "type": "works_on"}},
+    {{"source": "李娜", "target": "流光项目", "type": "works_on"}},
+    {{"source": "张明", "target": "李娜", "type": "collaborates_with"}}
   ]
 }}
 
-只输出 JSON，不要输出其他内容。"""
+## 输出格式（JSON）
+只输出 JSON，不要输出其他内容。如果文本中没有有意义的实体，返回 {{"entities": [], "relations": []}}"""
 
 
 async def build_knowledge_graph(
     db: AsyncSession,
     owner_id: str,
     incremental: bool = True,
+    on_progress: "Callable[[int, int], None] | None" = None,
 ) -> dict:
     """构建或增量更新知识图谱。"""
     # 获取需要处理的数据
@@ -69,20 +86,35 @@ async def build_knowledge_graph(
     # 跟踪实体名 -> 来源内容，用于创建锚定链接
     entity_content_map: dict[str, list[dict]] = {}
 
-    for text_chunk in texts:
-        extracted = await _llm_extract_kg(text_chunk["content"])
-        for e in extracted.get("entities", []):
-            e["_source_time"] = text_chunk.get("time")
-            # 记录实体来源
-            ename = e.get("name", "").strip()
-            if ename and text_chunk.get("content_type"):
-                entity_content_map.setdefault(ename, []).append({
-                    "content_type": text_chunk["content_type"],
-                    "content_id": text_chunk["content_id"],
-                    "snippet": text_chunk["content"][:200],
-                })
-        all_entities.extend(extracted.get("entities", []))
-        all_relations.extend(extracted.get("relations", []))
+    # 并发调用 LLM，每批 5 个
+    BATCH_SIZE = 5
+    total = len(texts)
+    processed = 0
+
+    for i in range(0, total, BATCH_SIZE):
+        batch = texts[i:i + BATCH_SIZE]
+        tasks = [_llm_extract_kg(t["content"]) for t in batch]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for text_chunk, extracted in zip(batch, results):
+            if isinstance(extracted, Exception):
+                logger.warning("LLM提取失败: %s", extracted)
+                extracted = {"entities": [], "relations": []}
+            for e in extracted.get("entities", []):
+                e["_source_time"] = text_chunk.get("time")
+                ename = e.get("name", "").strip()
+                if ename and text_chunk.get("content_type"):
+                    entity_content_map.setdefault(ename, []).append({
+                        "content_type": text_chunk["content_type"],
+                        "content_id": text_chunk["content_id"],
+                        "snippet": text_chunk["content"][:200],
+                    })
+            all_entities.extend(extracted.get("entities", []))
+            all_relations.extend(extracted.get("relations", []))
+
+        processed += len(batch)
+        if on_progress:
+            on_progress(processed, total)
 
     # 去重合并实体
     entities_added = await _merge_entities(db, owner_id, all_entities)
@@ -170,7 +202,7 @@ async def _llm_extract_kg(content: str) -> dict:
 
     try:
         response = await llm_client.chat_client.chat.completions.create(
-            model=settings.llm_model,
+            model=settings.agent_llm_model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.0,
         )
@@ -230,6 +262,26 @@ async def _create_entity_links(
     return added
 
 
+# 实体名停用词表：这些词不应作为实体存储
+_ENTITY_STOPWORDS = {
+    "大家", "他们", "我们", "你们", "这个", "那个", "所有人", "团队", "负责人",
+    "工作", "项目", "问题", "方案", "内容", "情况", "部分", "方面", "东西",
+    "讨论", "会议", "事情", "任务", "目标", "计划", "进展", "结果", "总结",
+}
+
+
+def _is_valid_entity(name: str) -> bool:
+    """检查实体名是否有效。"""
+    if len(name) <= 1:
+        return False
+    if name in _ENTITY_STOPWORDS:
+        return False
+    # 过滤纯数字、纯标点
+    if name.isdigit():
+        return False
+    return True
+
+
 async def _merge_entities(
     db: AsyncSession,
     owner_id: str,
@@ -240,7 +292,7 @@ async def _merge_entities(
     for e in entities:
         name = e.get("name", "").strip()
         entity_type = e.get("type", "topic")
-        if not name:
+        if not name or not _is_valid_entity(name):
             continue
 
         # 查找已存在的实体

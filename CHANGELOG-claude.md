@@ -140,3 +140,93 @@
 - **2026-03-09 20:30:19** [前端组件] `frontend/src/components/ChatMessages.tsx` — 新建文件 `ChatMessages`，包含 ChatMessages, bottomRef
 - **2026-03-09 20:30:20** [前端组件] `frontend/src/components/ChatInput.tsx` — 新建文件 `ChatInput`，包含 ChatInput, inputRef, fileRef, handleSend, question
 - **2026-03-09 20:30:58** [前端组件] `frontend/src/components/HeaderSearch.tsx` — 新建文件 `HeaderSearch`，包含 HeaderSearch, panelRef, handleKey
+- **2026-03-09 21:02:01** [前端组件] `frontend/src/components/import/importUtils.ts` — 修改逻辑 (+1/-1行)
+- **2026-03-09 21:02:09** [前端组件] `frontend/src/components/import/importUtils.ts` — 修改逻辑 (+1/-1行)
+- **2026-03-09 21:02:16** [前端组件] `frontend/src/components/import/importUtils.ts` — 修改逻辑 (+1/-1行)
+- **2026-03-09 21:02:49** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 新建文件 `LocalImportSection`，包含 CATEGORY_ACCEPT, LocalImportSection, categoryInputRef, handleFilesDetected, handleCategoryClick
+- **2026-03-09 21:03:03** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 新增 1 行代码
+- **2026-03-09 21:03:11** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-09 21:09:07** [前端组件] `frontend/src/components/import/SmartDropZone.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-09 21:16:39** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 添加依赖引用
+- **2026-03-09 21:16:51** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 删除 1 行代码
+- **2026-03-09 21:52:23** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 新增 msg
+- **2026-03-09 21:53:39** [数据库迁移] `backend/alembic/versions/u1k2l3m4n5o6_add_structured_asset_type.py` — 新建文件 `u1k2l3m4n5o6_add_structured_asset_type`，包含 upgrade, downgrade
+- **2026-03-09 22:42:42** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 修改逻辑 (+1/-3行)
+- **2026-03-09 22:42:57** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 调整UI组件
+- **2026-03-09 22:43:06** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 调整UI组件
+- **2026-03-09 22:43:14** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 新增 1 行代码
+- **2026-03-09 22:43:23** [前端组件] `frontend/src/components/import/ImportConfirmModal.tsx` — 新增 2 行代码
+- **2026-03-09 22:43:31** [前端组件] `frontend/src/components/import/ImportConfirmModal.tsx` — 新增 effectiveCategory
+- **2026-03-09 22:43:38** [前端组件] `frontend/src/components/import/ImportConfirmModal.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-09 22:43:57** [前端组件] `frontend/src/components/import/ImportConfirmModal.tsx` — 新增 IconComp
+- **2026-03-09 22:44:15** [前端组件] `frontend/src/components/import/CategoryCard.tsx` — 添加依赖引用
+- **2026-03-09 22:44:25** [前端组件] `frontend/src/components/import/CategoryCard.tsx` — 调整UI组件
+- **2026-03-09 23:00:26** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 新增 result, doUpload, url, timeoutId
+- **2026-03-09 23:17:15** [前端组件] `frontend/src/components/import/importUtils.ts` — 修改逻辑 (+1/-1行)
+- **2026-03-09 23:17:16** [前端组件] `frontend/src/components/import/importUtils.ts` — 修改逻辑 (+1/-1行)
+- **2026-03-09 23:17:31** [前端组件] `frontend/src/components/import/SmartDropZone.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-09 23:17:33** [前端组件] `frontend/src/components/Layout.tsx` — 修改逻辑 (+2/-2行)
+- **2026-03-10 00:11:22** [前端页面] `frontend/src/pages/DataInsights.tsx` — 修改逻辑 (+2/-2行)
+- **2026-03-10 00:38:05** [数据库迁移] `backend/alembic/versions/4ff9b601031c_add_import_task_table.py` — 新建文件 `4ff9b601031c_add_import_task_table`，包含 upgrade, downgrade
+- **2026-03-10 10:25:51** [数据库迁移] `backend/alembic/versions/a7b8c9d0e1f2_update_import_task_status.py` — 修改逻辑 (+4/-4行)
+- **2026-03-10 10:43:40** [数据库迁移] `backend/alembic/versions/w3m4n5o6p7q8_fix_comm_vector_dim_1024.py` — 新建文件 `w3m4n5o6p7q8_fix_comm_vector_dim_1024`，包含 upgrade, downgrade
+- **2026-03-10 10:49:24** [前端页面] `frontend/src/pages/DataInsights.tsx` — 添加依赖引用
+- **2026-03-10 10:49:31** [前端页面] `frontend/src/pages/DataInsights.tsx` — 删除 11 行代码
+- **2026-03-10 10:49:45** [前端页面] `frontend/src/pages/DataInsights.tsx` — 移除 pending, navigate, PRIORITY_STYLES, inProgress
+- **2026-03-10 10:49:53** [前端页面] `frontend/src/pages/DataInsights.tsx` — 移除 updateTodoStatus
+- **2026-03-10 10:50:13** [前端页面] `frontend/src/pages/DataInsights.tsx` — 调整UI组件
+- **2026-03-10 10:50:19** [前端页面] `frontend/src/pages/DataInsights.tsx` — 添加依赖引用
+- **2026-03-10 10:56:36** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 新增 1 行代码
+- **2026-03-10 10:56:46** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-10 10:58:03** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-10 10:58:09** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 删除 1 行代码
+- **2026-03-10 11:24:25** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 新增 structuredLatestTime
+- **2026-03-10 11:24:39** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-10 11:24:45** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-10 11:25:02** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 新增 latestSync
+- **2026-03-10 11:25:18** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 调整UI组件
+- **2026-03-10 11:25:41** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 移除 structuredLatestTime
+- **2026-03-10 11:25:59** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 新增 structuredLatestTime
+- **2026-03-10 11:26:29** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 调整UI组件
+- **2026-03-10 11:26:49** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 新增 latestFolderTime
+- **2026-03-10 13:20:51** [其他] `C:/Users/ljadmin/.claude/plans/greedy-moseying-snowglobe.md` — 新建文件 `greedy-moseying-snowglobe`，包含 _serialize_utc
+- **2026-03-10 13:40:29** [其他] `restart-backend.bat` — 新建文件 `restart-backend` (66行)
+- **2026-03-10 13:41:44** [其他] `restart-backend.bat` — 新建文件 `restart-backend` (69行)
+- **2026-03-10 14:02:11** [其他] `C:/Users/ljadmin/.claude/plans/vivid-swinging-wave.md` — 新建文件 `vivid-swinging-wave` (106行)
+- **2026-03-10 14:13:16** [开发工具配置] `.claude/restart-backend.sh` — 新建文件 `restart-backend` (25行)
+- **2026-03-10 14:14:22** [开发工具配置] `.claude/settings.local.json` — 新增 2 行代码
+- **2026-03-10 14:42:35** [数据库迁移] `backend/alembic/versions/x4n5o6p7q8r9_kg_importance_score_and_types.py` — 新建文件 `x4n5o6p7q8r9_kg_importance_score_and_types`，包含 upgrade, downgrade
+- **2026-03-10 14:43:04** [前端组件] `frontend/src/components/ChatMessages.tsx` — 新增 normalizeSource, getSourceUrl
+- **2026-03-10 14:43:12** [前端组件] `frontend/src/components/ChatMessages.tsx` — 新增 navigate
+- **2026-03-10 14:43:23** [前端组件] `frontend/src/components/ChatMessages.tsx` — 新增 ref
+- **2026-03-10 14:43:37** [前端页面] `frontend/src/pages/Chat.tsx` — 添加依赖引用
+- **2026-03-10 14:43:44** [前端页面] `frontend/src/pages/Chat.tsx` — 调整UI组件
+- **2026-03-10 14:43:51** [前端页面] `frontend/src/pages/Chat.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-10 14:44:44** [前端组件] `frontend/src/components/KGSidebar.tsx` — 新增 label, navigate, ENTITY_TYPE_LABELS, getContentUrl；移除 TYPE_ICONS
+- **2026-03-10 14:44:56** [前端组件] `frontend/src/components/KGSidebar.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-10 14:45:07** [前端页面] `frontend/src/pages/Chat.tsx` — 新增 1 行代码
+- **2026-03-10 14:45:21** [前端页面] `frontend/src/pages/Chat.tsx` — 新增 1 行代码
+- **2026-03-10 14:48:44** [数据库迁移] `backend/alembic/versions/x4n5o6p7q8r9_kg_importance_score_and_types.py` — 修改逻辑 (+2/-2行)
+- **2026-03-10 14:58:04** [前端组件] `frontend/src/components/ColumnSettings.tsx` — 新增 allKeys, buildVisible
+- **2026-03-10 15:45:46** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-10 15:47:42** [前端组件] `frontend/src/components/import/ImportConfirmModal.tsx` — 添加依赖引用
+- **2026-03-10 15:47:56** [前端组件] `frontend/src/components/import/ImportConfirmModal.tsx` — 新增 handleParticipantKeyDown, removeParticipant, metadata, addParticipant
+- **2026-03-10 15:48:55** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 添加依赖引用
+- **2026-03-10 15:49:11** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 修改逻辑 (+5/-2行)
+- **2026-03-10 15:49:17** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-10 15:49:33** [后端] `backend/app/config.py` — 修改逻辑 (+7/-2行)
+- **2026-03-10 15:50:09** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 添加依赖引用
+- **2026-03-10 15:50:29** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 新增 1 行代码
+- **2026-03-10 15:50:36** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 新增 deleteTaskMutation
+- **2026-03-10 15:50:44** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-10 15:51:20** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 新增 files, isExpanded, isFinished
+- **2026-03-10 15:56:30** [后端] `backend/app/config.py` — 修改逻辑 (+3/-3行)
+- **2026-03-10 15:58:36** [项目配置] `backend/.env` — 新增 5 行代码
+- **2026-03-10 16:22:01** [项目配置] `backend/.env` — 修改逻辑 (+14/-14行)
+- **2026-03-10 16:24:38** [项目配置] `backend/.env` — 修改逻辑 (+1/-1行)
+- **2026-03-10 16:51:53** [前端页面] `frontend/src/pages/ETLAdmin.tsx` — 新增 timer；移除 poll
+- **2026-03-10 16:52:12** [前端组件] `frontend/src/components/insights/DataGraphWidget.tsx` — 新增 res, pollBuildStatus, startRes
+- **2026-03-10 16:52:49** [前端组件] `frontend/src/components/Layout.tsx` — 添加依赖引用
+- **2026-03-10 16:52:59** [前端组件] `frontend/src/components/Layout.tsx` — 新增 runningTaskCount, res, res
+- **2026-03-10 16:53:08** [前端组件] `frontend/src/components/Layout.tsx` — 调整UI组件
+- **2026-03-10 16:53:21** [前端组件] `frontend/src/components/Layout.tsx` — 新增 1 行代码

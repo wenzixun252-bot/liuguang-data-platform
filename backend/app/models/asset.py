@@ -56,7 +56,7 @@ class ETLDataSource(Base):
     __tablename__ = "etl_data_sources"
     __table_args__ = (
         CheckConstraint(
-            "asset_type IN ('document', 'communication')",
+            "asset_type IN ('document', 'communication', 'structured')",
             name="ck_etl_ds_asset_type",
         ),
         Index("uq_etl_ds", "app_token", "table_id", unique=True),
@@ -97,5 +97,38 @@ class CloudFolderSource(Base):
     last_sync_status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="idle")
     files_synced: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     error_message: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class ImportTask(Base):
+    """导入任务 — 跟踪后台导入任务的进度和结果。"""
+
+    __tablename__ = "import_tasks"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'running', 'completed', 'failed', 'cancelled', 'timeout')",
+            name="ck_import_task_status",
+        ),
+        CheckConstraint(
+            "task_type IN ('cloud_doc', 'communication', 'folder_sync', 'bitable_sync')",
+            name="ck_import_task_type",
+        ),
+        Index("idx_import_task_owner", "owner_id"),
+        Index("idx_import_task_status", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    task_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="pending")
+    owner_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    total_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    imported_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    skipped_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    failed_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    error_message: Mapped[str | None] = mapped_column(Text)
+    details: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")  # 存储额外信息如文件名列表
+    started_at: Mapped[datetime | None] = mapped_column()
+    completed_at: Mapped[datetime | None] = mapped_column()
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now(), onupdate=func.now())

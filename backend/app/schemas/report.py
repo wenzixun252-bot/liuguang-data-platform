@@ -4,6 +4,8 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+from app.schemas.types import UTCDatetime, UTCDatetimeOpt
+
 
 class ReportTemplateOut(BaseModel):
     """报告模板输出。"""
@@ -14,7 +16,7 @@ class ReportTemplateOut(BaseModel):
     prompt_template: str
     output_structure: dict = {}
     description: str | None = None
-    created_at: datetime
+    created_at: UTCDatetime
 
     model_config = {"from_attributes": True}
 
@@ -46,14 +48,14 @@ class ReportOut(BaseModel):
     title: str
     content_markdown: str | None = None
     status: str
-    time_range_start: datetime | None = None
-    time_range_end: datetime | None = None
+    time_range_start: UTCDatetimeOpt = None
+    time_range_end: UTCDatetimeOpt = None
     data_sources_used: dict = {}
     target_readers: list | None = None
     feishu_doc_token: str | None = None
     feishu_doc_url: str | None = None
-    created_at: datetime
-    updated_at: datetime
+    created_at: UTCDatetime
+    updated_at: UTCDatetime
 
     model_config = {"from_attributes": True}
 

@@ -106,6 +106,35 @@ export default function ETLAdmin() {
     }
   }
 
+  const [syncPolling, setSyncPolling] = useState(false)
+
+  // 同步轮询（useEffect 管理，组件卸载自动清理）
+  useEffect(() => {
+    if (!syncPolling) return
+    const timer = setInterval(() => {
+      api.get('/etl/sources-with-status').then((r) => {
+        setSources(r.data)
+        const anyRunning = r.data.some((s: DataSourceWithSync) => s.last_sync_status === 'running')
+        if (!anyRunning) {
+          setSyncPolling(false)
+          toast.success('同步完成')
+        }
+      })
+    }, 3000)
+    return () => clearInterval(timer)
+  }, [syncPolling])
+
+  // 页面加载时检查是否有正在运行的同步
+  useEffect(() => {
+    api.get('/etl/sources-with-status').then((r) => {
+      const anyRunning = r.data.some((s: DataSourceWithSync) => s.last_sync_status === 'running')
+      if (anyRunning) {
+        setSources(r.data)
+        setSyncPolling(true)
+      }
+    }).catch(() => {})
+  }, [])
+
   const handleTrigger = async () => {
     if (sources.filter(s => s.is_enabled).length === 0) {
       toast.error('没有已启用的数据源，请先添加')
@@ -115,15 +144,7 @@ export default function ETLAdmin() {
     try {
       const res = await api.post('/etl/trigger')
       toast.success(`${res.data.message}，共 ${res.data.sources_count} 个数据源`)
-      // 轮询刷新状态
-      const poll = setInterval(() => {
-        api.get('/etl/sources-with-status').then((r) => {
-          setSources(r.data)
-          const anyRunning = r.data.some((s: DataSourceWithSync) => s.last_sync_status === 'running')
-          if (!anyRunning) clearInterval(poll)
-        })
-      }, 3000)
-      setTimeout(() => clearInterval(poll), 120000)
+      setSyncPolling(true)
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail || '触发同步失败'
       toast.error(msg)

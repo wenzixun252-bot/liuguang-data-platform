@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Search, ChevronLeft, ChevronRight, X, Paperclip, ExternalLink, Download, Image, User, Trash2, Upload, Cloud, FileUp } from 'lucide-react'
+import { Search, ChevronLeft, ChevronRight, X, Paperclip, ExternalLink, Download, Image, User, Trash2, Table2 } from 'lucide-react'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
 import { ColumnSettingsButton, useColumnSettings, type ColumnDef } from '../components/ColumnSettings'
 import { getUser } from '../lib/auth'
-import CloudDocSync from '../components/CloudDocSync'
+
 import { TagChips, TagFilter, BatchTagBar, useContentTags, InlineTagEditor } from '../components/TagManager'
 
 const DOC_COLUMNS: ColumnDef[] = [
@@ -82,8 +82,6 @@ export default function Documents() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [refreshKey, setRefreshKey] = useState(0)
   const { isVisible, toggle, columns: colDefs } = useColumnSettings('documents', DOC_COLUMNS)
-  const [showLocalUpload, setShowLocalUpload] = useState(false)
-  const [showFeishuSync, setShowFeishuSync] = useState(false)
   const [tagFilter, setTagFilter] = useState<number[]>([])
   const [tagRefreshKey, setTagRefreshKey] = useState(0)
 
@@ -154,26 +152,41 @@ export default function Documents() {
     }
   }
 
+  const handleDelete = async (id: number) => {
+    if (!confirm('确定要删除这条数据吗？')) return
+    try {
+      await api.delete(`/documents/${id}`)
+      toast.success('已删除')
+      if (selected?.id === id) setSelected(null)
+      setRefreshKey((k) => k + 1)
+    } catch {
+      toast.error('删除失败')
+    }
+  }
+
+  const handleDownload = async (id: number, title: string | null) => {
+    try {
+      const resp = await api.get(`/documents/${id}/download`, { responseType: 'blob' })
+      const disposition = resp.headers['content-disposition'] || ''
+      const match = disposition.match(/filename="?([^"]+)"?/)
+      const filename = match ? match[1] : title || 'download'
+      const url = URL.createObjectURL(resp.data)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      toast.error('下载失败')
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <h1 className="text-2xl font-bold text-gray-800">文档数据</h1>
 
         <div className="flex items-center gap-3 w-full sm:w-auto flex-wrap">
-          <button
-            onClick={() => setShowLocalUpload(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 transition-colors"
-          >
-            <Upload size={16} />
-            导入本地数据
-          </button>
-          <button
-            onClick={() => setShowFeishuSync(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 transition-colors"
-          >
-            <Cloud size={16} />
-            同步飞书数据
-          </button>
           <div className="relative flex-1 sm:flex-initial">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
@@ -271,6 +284,7 @@ export default function Documents() {
                     {isVisible('file_type') && <th className="text-left py-3 px-4 text-gray-500 font-medium">类型</th>}
                     {isVisible('author') && <th className="text-left py-3 px-4 text-gray-500 font-medium">作者</th>}
                     {isVisible('time') && <th className="text-left py-3 px-4 text-gray-500 font-medium">时间</th>}
+                    <th className="text-left py-3 px-4 text-gray-500 font-medium">操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -347,6 +361,28 @@ export default function Documents() {
                       {isVisible('file_type') && <td className="py-3 px-4 text-gray-500">{item.file_type ? item.file_type.toUpperCase() : '-'}</td>}
                       {isVisible('author') && <td className="py-3 px-4 text-gray-500">{item.author || '-'}</td>}
                       {isVisible('time') && <td className="py-3 px-4 text-gray-500 whitespace-nowrap">{new Date(item.synced_at || item.created_at).toLocaleString('zh-CN')}</td>}
+                      <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-1">
+                          {item.source_type === 'local' && (
+                            <button onClick={() => handleDownload(item.id, item.title)} className="p-1.5 hover:bg-green-50 rounded text-green-600" title="下载文件">
+                              <Download size={14} />
+                            </button>
+                          )}
+                          {item.source_url && (
+                            <a href={item.source_url} target="_blank" rel="noopener noreferrer" className="p-1.5 hover:bg-blue-50 rounded text-blue-600" title="跳转源文档">
+                              <ExternalLink size={14} />
+                            </a>
+                          )}
+                          {item.bitable_url && (
+                            <a href={item.bitable_url} target="_blank" rel="noopener noreferrer" className="p-1.5 hover:bg-purple-50 rounded text-purple-600" title="跳转源多维表格">
+                              <Table2 size={14} />
+                            </a>
+                          )}
+                          <button onClick={() => handleDelete(item.id)} className="p-1.5 hover:bg-red-50 rounded text-red-500" title="删除">
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -372,21 +408,6 @@ export default function Documents() {
         )}
       </div>
 
-      {/* 本地上传弹窗 */}
-      {showLocalUpload && (
-        <DocLocalUploadModal
-          onClose={() => setShowLocalUpload(false)}
-          onSuccess={() => { setShowLocalUpload(false); setRefreshKey((k) => k + 1) }}
-        />
-      )}
-
-      {/* 飞书文档同步弹窗 */}
-      {showFeishuSync && (
-        <CloudDocSync
-          onClose={() => setShowFeishuSync(false)}
-          onImportComplete={() => setRefreshKey((k) => k + 1)}
-        />
-      )}
 
       {/* Detail panel */}
       {selected && <DocumentDetail doc={selected} onClose={() => setSelected(null)} onDelete={async (id) => {
@@ -398,72 +419,6 @@ export default function Documents() {
           setRefreshKey((k) => k + 1)
         } catch { toast.error('删除失败') }
       }} />}
-    </div>
-  )
-}
-
-function DocLocalUploadModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
-  const [uploading, setUploading] = useState(false)
-  const [dragOver, setDragOver] = useState(false)
-
-  const handleUpload = async (file: File) => {
-    setUploading(true)
-    const formData = new FormData()
-    formData.append('file', file)
-    try {
-      await api.post('/upload/file', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
-      toast.success(`${file.name} 上传成功`)
-      onSuccess()
-    } catch (e: any) {
-      toast.error(e.response?.data?.detail || '上传失败')
-    } finally {
-      setUploading(false)
-    }
-  }
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault()
-    setDragOver(false)
-    const file = e.dataTransfer.files[0]
-    if (file) handleUpload(file)
-  }
-
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (file) handleUpload(file)
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={onClose}>
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg mx-4" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-          <h3 className="text-lg font-semibold text-gray-800">导入本地数据</h3>
-          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded"><X size={20} /></button>
-        </div>
-        <div className="p-6">
-          <div
-            onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={handleDrop}
-            className={`border-2 border-dashed rounded-xl p-10 text-center transition-colors ${
-              dragOver ? 'border-indigo-400 bg-indigo-50' : 'border-gray-300 bg-white'
-            }`}
-          >
-            <Upload size={36} className="mx-auto text-gray-400 mb-3" />
-            <p className="text-gray-600 mb-2">
-              {uploading ? '上传中...' : '拖拽文件到此处，或点击选择文件'}
-            </p>
-            <p className="text-xs text-gray-400 mb-4">支持 PDF、DOCX、TXT、图片、PPT、音视频等格式，最大 50MB</p>
-            <label className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm cursor-pointer hover:bg-indigo-700">
-              <FileUp size={16} />
-              选择文件
-              <input type="file" className="hidden" onChange={handleFileSelect} disabled={uploading} />
-            </label>
-          </div>
-        </div>
-      </div>
     </div>
   )
 }

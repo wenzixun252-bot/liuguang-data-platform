@@ -1,0 +1,16 @@
+Step 0: importing...
+Step 1: resolving token...
+  token: True
+Step 2: extracting...
+  extracted 4 in 7.8s
+Step 3: manual mapping test...
+  raw type: <class 'dict'>
+  fields type: <class 'dict'>
+  field [会议ID] = 7615060114601839816
+  field [会议分析] = [{'text': '📝 本次例会是**中等质量会议**，原因如下\n- 进展同步：会议中各成员对自身工作进展有一定阐述，如王雪琳介绍了小组各成员在 Openw
+  field [会议名称] = cc生态探索项目路演
+  field [会议开始时间] = 1773019573000
+  field [会议录屏链接] = {'link': 'https://vzyjg03bu3.feishu.cn/minutes/obcnbu784h4rf5tqj872b4t6', 'text'
+  title mapping: 会议名称 -> cc生态探索项目路演
+  comm_time mapping: 会议时间 -> 1773019573000 -> 2026-03-09 01:26:13
+DONE

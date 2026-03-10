@@ -214,16 +214,55 @@ export default function DataGraphWidget({ onClose }: { onClose?: () => void }) {
     }
   }
 
-  // 生成最新图谱
-  const handleBuildAndAnalyze = async () => {
+  // 轮询图谱构建进度（复用 KnowledgeGraph 页面相同模式）
+  const pollBuildStatus = useCallback(async () => {
     setBuilding(true)
     try {
-      await api.post('/knowledge-graph/build-and-analyze')
-      toast.success('图谱生成完成')
-      fetchData()
+      let done = false
+      while (!done) {
+        const res = await api.get('/knowledge-graph/build-status')
+        const { status } = res.data
+        if (status === 'done') {
+          toast.success('图谱生成完成')
+          fetchData()
+          done = true
+        } else if (status === 'error') {
+          toast.error('图谱生成失败')
+          done = true
+        } else if (status !== 'running') {
+          done = true
+        } else {
+          await new Promise(r => setTimeout(r, 2000))
+        }
+      }
+    } catch {
+      toast.error('查询构建进度失败')
+    } finally {
+      setBuilding(false)
+    }
+  }, [fetchData])
+
+  // 页面加载时检查是否有正在运行的构建任务
+  useEffect(() => {
+    let cancelled = false
+    api.get('/knowledge-graph/build-status').then(res => {
+      if (!cancelled && res.data.status === 'running') {
+        pollBuildStatus()
+      }
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [pollBuildStatus])
+
+  // 生成最新图谱
+  const handleBuildAndAnalyze = async () => {
+    try {
+      const startRes = await api.post('/knowledge-graph/build-and-analyze')
+      if (startRes.data.status === 'running') {
+        toast('构建任务已在运行中', { icon: 'ℹ️' })
+      }
+      await pollBuildStatus()
     } catch {
       toast.error('图谱生成失败')
-    } finally {
       setBuilding(false)
     }
   }

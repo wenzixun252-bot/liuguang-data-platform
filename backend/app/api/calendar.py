@@ -8,12 +8,12 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from openai import AsyncOpenAI
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, get_visible_owner_ids
 from app.config import settings
+from app.services.llm import create_openai_client
 from app.models.calendar_reminder import CalendarReminderPref
 from app.models.conversation import Conversation, ConversationMessage
 from app.models.user import User
@@ -124,10 +124,11 @@ def _parse_feishu_event(event: dict) -> CalendarEventOut | None:
     )
 
 
-def _get_agent_client() -> AsyncOpenAI:
-    return AsyncOpenAI(
+def _get_agent_client():
+    return create_openai_client(
         api_key=settings.agent_llm_api_key,
         base_url=settings.agent_llm_base_url,
+        timeout=120.0,
     )
 
 

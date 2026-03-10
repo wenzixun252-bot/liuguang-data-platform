@@ -15,6 +15,7 @@ interface KGNode {
   entity_type: string
   mention_count: number
   community_id: number | null
+  importance_score: number
   properties: Record<string, unknown>
   first_seen_at: string | null
   last_seen_at: string | null
@@ -39,6 +40,7 @@ interface CommunityInfo {
   member_count: number
   top_entities: string[]
   label: string
+  domain_label: string
 }
 
 interface InsightItem {
@@ -47,6 +49,9 @@ interface InsightItem {
   type: 'insight' | 'risk'
   severity: 'high' | 'medium' | 'low'
   related_entity_ids: number[]
+  category: string
+  evidence: string
+  suggested_action: string
 }
 
 interface AnalysisResult {
@@ -139,6 +144,7 @@ interface SimNode extends d3.SimulationNodeDatum {
   entity_type: string
   mention_count: number
   community_id: number | null
+  importance_score: number
 }
 
 interface SimLink extends d3.SimulationLinkDatum<SimNode> {
@@ -157,8 +163,6 @@ const ENTITY_COLORS: Record<string, string> = {
   topic: '#10b981',
   organization: '#8b5cf6',
   event: '#ef4444',
-  document: '#3b82f6',
-  community: '#ec4899',
 }
 
 const ENTITY_LABELS: Record<string, string> = {
@@ -167,8 +171,13 @@ const ENTITY_LABELS: Record<string, string> = {
   topic: '主题',
   organization: '组织',
   event: '事件',
-  document: '文档',
-  community: '社群',
+}
+
+const RISK_CATEGORY_CONFIG: Record<string, { label: string; icon: string; color: string }> = {
+  project: { label: '项目风险', icon: '📋', color: 'text-orange-700' },
+  compliance: { label: '合规风险', icon: '📜', color: 'text-red-700' },
+  collaboration: { label: '协作风险', icon: '🤝', color: 'text-blue-700' },
+  resource: { label: '资源风险', icon: '⚡', color: 'text-purple-700' },
 }
 
 const RELATION_LABELS: Record<string, string> = {
@@ -200,6 +209,8 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
   const [stats, setStats] = useState<KGStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [building, setBuilding] = useState(false)
+  const [buildProgress, setBuildProgress] = useState(0)
+  const [buildMessage, setBuildMessage] = useState('')
   const [lastAnalysisAt, setLastAnalysisAt] = useState<string | null>(null)
   const [selectedNode, setSelectedNode] = useState<KGNode | null>(null)
   const [selectedRelations, setSelectedRelations] = useState<KGEdge[]>([])
@@ -209,6 +220,8 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
   const [searchQuery, setSearchQuery] = useState('')
   const [colorMode, setColorMode] = useState<'type' | 'community'>('type')
   const [rightTab, setRightTab] = useState<'insights' | 'risks'>('insights')
+  const [domainTab, setDomainTab] = useState<string>('all')
+  const [nodeLimit, setNodeLimit] = useState<number>(50)
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null)
   const [linkedAssets, setLinkedAssets] = useState<LinkedAsset[]>([])
   const [profileData, setProfileData] = useState<ProfileData | null>(null)
@@ -230,14 +243,17 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
   // ── 获取图谱数据 ──
   const fetchGraph = useCallback(() => {
     setLoading(true)
-    const params: Record<string, unknown> = { limit: 500 }
+    const params: Record<string, unknown> = { limit: nodeLimit }
     if (typeFilter) params.entity_type = typeFilter
-    if (communityFilter) params.community_id = parseInt(communityFilter)
+    // 业务域Tab映射到community_id
+    if (domainTab !== 'all') {
+      params.community_id = parseInt(domainTab)
+    } else if (communityFilter) {
+      params.community_id = parseInt(communityFilter)
+    }
 
-    // 图谱+统计 是核心请求
     const graphPromise = api.get('/knowledge-graph', { params })
     const statsPromise = api.get('/knowledge-graph/stats')
-    // 洞察+风险 独立请求，失败不影响主流程
     const insightsPromise = api.get('/knowledge-graph/insights').catch(() => ({ data: [] }))
     const risksPromise = api.get('/knowledge-graph/risks').catch(() => ({ data: [] }))
 
@@ -257,9 +273,59 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
       })
       .catch(() => toast.error('加载图谱失败'))
       .finally(() => setLoading(false))
-  }, [typeFilter, communityFilter])
+  }, [typeFilter, communityFilter, domainTab, nodeLimit])
 
   useEffect(() => { fetchGraph() }, [fetchGraph])
+
+  // ── 轮询构建进度（抽取为独立函数，页面加载和手动触发均可复用） ──
+  const pollBuildProgress = useCallback(async () => {
+    setBuilding(true)
+    try {
+      let done = false
+      while (!done) {
+        const res = await api.get('/knowledge-graph/build-status')
+        const { status, progress, message } = res.data
+        setBuildProgress(progress || 0)
+        setBuildMessage(message || '')
+
+        if (status === 'done') {
+          if (res.data.result?.analysis) {
+            setAnalysisResult(res.data.result.analysis)
+          }
+          setLastAnalysisAt(new Date().toISOString())
+          fetchGraph()
+          toast.success('知识图谱生成完成')
+          done = true
+        } else if (status === 'error') {
+          toast.error(`知识图谱生成失败: ${message}`)
+          done = true
+        } else if (status !== 'running') {
+          // idle or unknown — stop polling
+          done = true
+        } else {
+          await new Promise(r => setTimeout(r, 2000))
+        }
+      }
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail || err?.message || '未知错误'
+      toast.error(`查询构建进度失败: ${detail}`)
+    } finally {
+      setBuilding(false)
+      setBuildProgress(0)
+      setBuildMessage('')
+    }
+  }, [fetchGraph])
+
+  // ── 页面加载时检查是否有正在运行的构建任务 ──
+  useEffect(() => {
+    let cancelled = false
+    api.get('/knowledge-graph/build-status').then(res => {
+      if (!cancelled && res.data.status === 'running') {
+        pollBuildProgress()
+      }
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [pollBuildProgress])
 
   // ── D3 力模型渲染 ──
   useEffect(() => {
@@ -289,6 +355,7 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
       entity_type: n.entity_type,
       mention_count: n.mention_count,
       community_id: n.community_id,
+      importance_score: n.importance_score ?? 0,
     }))
 
     const nodeMap = new Map(simNodes.map(n => [n.id, n]))
@@ -314,8 +381,8 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
 
     // 力模型
     const simulation = d3.forceSimulation(simNodes)
-      .force('link', d3.forceLink<SimNode, SimLink>(simLinks).id(d => d.id).distance(80).strength(0.3))
-      .force('charge', d3.forceManyBody().strength(-200))
+      .force('link', d3.forceLink<SimNode, SimLink>(simLinks).id(d => d.id).distance(70).strength(0.3))
+      .force('charge', d3.forceManyBody().strength(-120))
       .force('center', d3.forceCenter(width / 2, height / 2))
       .force('collide', d3.forceCollide<SimNode>().radius(d => getNodeRadius(d) + 5))
       .force('communityX', d3.forceX<SimNode>(d =>
@@ -350,6 +417,10 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
       .attr('stroke-width', 1.5)
       .attr('opacity', 0.85)
 
+    // 按重要性排序，只有 Top 15 显示标签，其余悬停时显示
+    const sortedByImportance = [...simNodes].sort((a, b) => b.importance_score - a.importance_score)
+    const topIds = new Set(sortedByImportance.slice(0, 15).map(n => n.id))
+
     node.append('text')
       .text(d => d.name.length > 8 ? d.name.slice(0, 8) + '...' : d.name)
       .attr('text-anchor', 'middle')
@@ -358,6 +429,7 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
       .attr('fill', '#64748b')
       .attr('pointer-events', 'none')
       .attr('user-select', 'none')
+      .attr('opacity', d => topIds.has(d.id) ? 1 : 0)
 
     // 拖拽
     const drag = d3.drag<SVGGElement, SimNode>()
@@ -399,8 +471,9 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
       const connected = connectedMap.get(d.id) ?? new Set()
       node.select('circle')
         .attr('opacity', (n: SimNode) => n.id === d.id || connected.has(n.id) ? 1 : 0.15)
+      // 悬停时显示相关节点标签
       node.select('text')
-        .attr('opacity', (n: SimNode) => n.id === d.id || connected.has(n.id) ? 1 : 0.15)
+        .attr('opacity', (n: SimNode) => n.id === d.id || connected.has(n.id) ? 1 : 0)
       link
         .attr('stroke-opacity', (l: SimLink) => {
           const sid = (l.source as SimNode).id
@@ -417,7 +490,8 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
     node.on('mouseleave', () => {
       setHoveredNodeId(null)
       node.select('circle').attr('opacity', 0.85)
-      node.select('text').attr('opacity', 1)
+      // 恢复：只有 Top 节点显示标签
+      node.select('text').attr('opacity', (n: SimNode) => topIds.has(n.id) ? 1 : 0)
       link.attr('stroke-opacity', 0.5).attr('stroke', '#cbd5e1')
     })
 
@@ -446,24 +520,29 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
   }
 
   function getNodeRadius(d: SimNode | KGNode): number {
-    return Math.max(8, Math.min(30, 8 + d.mention_count * 2))
+    const score = ('importance_score' in d) ? (d as any).importance_score : 0
+    // 基于重要性评分：score 0~1 映射到半径 6~28
+    return Math.max(6, Math.min(28, 6 + score * 22))
   }
 
   // ── 事件处理 ──
 
   const handleBuildAndAnalyze = async () => {
-    setBuilding(true)
+    setBuildProgress(0)
+    setBuildMessage('正在启动构建任务...')
     try {
-      const res = await api.post('/knowledge-graph/build-and-analyze')
-      setAnalysisResult(res.data.analysis)
-      setLastAnalysisAt(new Date().toISOString())
-      toast.success('知识图谱生成完成')
-      fetchGraph()
+      const startRes = await api.post('/knowledge-graph/build-and-analyze')
+      if (startRes.data.status === 'running') {
+        toast('构建任务已在运行中', { icon: 'ℹ️' })
+      }
+      // 复用轮询逻辑
+      await pollBuildProgress()
     } catch (err: any) {
       const detail = err?.response?.data?.detail || err?.message || '未知错误'
       toast.error(`知识图谱生成失败: ${detail}`)
-    } finally {
       setBuilding(false)
+      setBuildProgress(0)
+      setBuildMessage('')
     }
   }
 
@@ -608,131 +687,224 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
     }
   }
 
-  // 获取社群选项
-  const communityOptions = analysisResult?.communities ?? []
+  // 获取社群选项：过滤掉成员数 < 3 的小社群
+  const communityOptions = (analysisResult?.communities ?? []).filter(c => c.member_count >= 3)
+
+  // 当前选中的域名称
+  const activeDomainLabel = domainTab === 'all'
+    ? '全部业务域'
+    : (() => {
+        const c = communityOptions.find(c => String(c.community_id) === domainTab)
+        if (!c) return '全部业务域'
+        const raw = c.domain_label || c.label || `域${c.community_id + 1}`
+        return raw.length > 8 ? raw.slice(0, 8) : raw
+      })()
 
   return (
-    <div className="space-y-4">
-      {/* 顶部工具栏 */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        {!embedded && <h1 className="text-2xl font-bold text-gray-800">数据图谱</h1>}
-        <div className={`flex items-center gap-2 flex-wrap${embedded ? ' w-full' : ''}`}>
-          <div className="relative">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              placeholder="搜索实体..."
-              className="pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm w-44"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-            />
-          </div>
+    <div className="space-y-3">
+      {/* ── 顶部工具栏：紧凑单行 ── */}
+      <div className="bg-white rounded-xl shadow-sm px-4 py-2.5 flex items-center gap-2 flex-wrap">
+        {!embedded && <h1 className="text-lg font-bold text-gray-800 mr-2">数据图谱</h1>}
+
+        {/* 搜索 */}
+        <div className="relative">
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            placeholder="搜索实体..."
+            className="pl-8 pr-3 py-1.5 border border-gray-200 rounded-lg text-sm w-36 focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 transition-all"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+          />
+        </div>
+
+        {/* 分隔线 */}
+        <div className="w-px h-6 bg-gray-200" />
+
+        {/* 类型过滤 */}
+        <select
+          value={typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value)}
+          className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm bg-white hover:border-gray-300 transition-colors"
+        >
+          <option value="">全部类型</option>
+          {Object.entries(ENTITY_LABELS).map(([k, v]) => (
+            <option key={k} value={k}>{v}</option>
+          ))}
+        </select>
+
+        {/* 业务域过滤 — 下拉选择器替代Tab栏 */}
+        {communityOptions.length > 0 && (
           <select
-            value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value)}
-            className="border border-gray-200 rounded-lg px-3 py-2 text-sm"
+            value={domainTab}
+            onChange={(e) => {
+              setDomainTab(e.target.value)
+              setCommunityFilter(e.target.value === 'all' ? '' : e.target.value)
+            }}
+            className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm bg-white hover:border-gray-300 transition-colors"
           >
-            <option value="">全部类型</option>
-            {Object.entries(ENTITY_LABELS).map(([k, v]) => (
-              <option key={k} value={k}>{v}</option>
-            ))}
-          </select>
-          {communityOptions.length > 0 && (
-            <select
-              value={communityFilter}
-              onChange={(e) => setCommunityFilter(e.target.value)}
-              className="border border-gray-200 rounded-lg px-3 py-2 text-sm"
-            >
-              <option value="">全部社群</option>
-              {communityOptions.map(c => (
-                <option key={c.community_id} value={c.community_id}>
-                  {c.label} ({c.member_count}人)
+            <option value="all">全部业务域</option>
+            {communityOptions.map(c => {
+              const label = c.domain_label || c.label || `域${c.community_id + 1}`
+              return (
+                <option key={c.community_id} value={String(c.community_id)}>
+                  {label.length > 10 ? label.slice(0, 10) + '…' : label} ({c.member_count})
                 </option>
-              ))}
-            </select>
+              )
+            })}
+          </select>
+        )}
+
+        {/* 显示数量 */}
+        <select
+          value={nodeLimit}
+          onChange={(e) => setNodeLimit(Number(e.target.value))}
+          className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm bg-white hover:border-gray-300 transition-colors"
+        >
+          <option value={30}>30 个</option>
+          <option value={50}>50 个</option>
+          <option value={100}>100 个</option>
+          <option value={200}>全部</option>
+        </select>
+
+        {/* 着色模式 */}
+        <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
+          <button
+            onClick={() => setColorMode('type')}
+            className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${colorMode === 'type' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            类型
+          </button>
+          <button
+            onClick={() => setColorMode('community')}
+            className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${colorMode === 'community' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+          >
+            域
+          </button>
+        </div>
+
+        {/* 右侧：统计 + 时间 + 操作 */}
+        <div className="flex items-center gap-2 ml-auto">
+          {stats && (
+            <span className="text-xs text-gray-400">
+              {nodes.length}/{stats.total_entities} 实体 · {edges.length} 关系
+            </span>
           )}
           {lastAnalysisAt && (
             <span className="text-xs text-gray-400">
-              上次更新: {new Date(lastAnalysisAt).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })} {new Date(lastAnalysisAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+              更新于 {(() => {
+                const d = new Date(lastAnalysisAt)
+                const now = new Date()
+                const diffMs = now.getTime() - d.getTime()
+                const diffMin = Math.floor(diffMs / 60000)
+                if (diffMin < 1) return '刚刚'
+                if (diffMin < 60) return `${diffMin}分钟前`
+                const diffHr = Math.floor(diffMin / 60)
+                if (diffHr < 24) return `${diffHr}小时前`
+                return d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }) + ' ' + d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+              })()}
             </span>
           )}
-          <button
-            onClick={handleBuildAndAnalyze}
-            disabled={building}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm"
-          >
-            {building ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
-            {building ? '生成中...' : '生成最新知识图谱'}
-          </button>
+          <div className="flex items-center gap-2">
+            {building && (
+              <div className="flex items-center gap-2">
+                <div className="w-24 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-indigo-500 rounded-full transition-all duration-500"
+                    style={{ width: `${buildProgress}%` }}
+                  />
+                </div>
+                <span className="text-xs text-gray-500 whitespace-nowrap">{buildMessage || `${buildProgress}%`}</span>
+              </div>
+            )}
+            <button
+              onClick={handleBuildAndAnalyze}
+              disabled={building}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm font-medium transition-colors"
+            >
+              {building ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+              {building ? '生成中...' : '重新生成'}
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* 统计 + 着色切换 */}
-      {stats && (
-        <div className="flex gap-4 flex-wrap items-center">
-          <div className="bg-white rounded-lg shadow-sm px-4 py-2 text-sm">
-            <span className="text-gray-500">实体:</span>{' '}
-            <span className="font-semibold text-gray-800">{stats.total_entities}</span>
+      {/* ── 主体区域：图谱（含浮动节点详情） + 右侧洞察/风险 ── */}
+      <div className="flex gap-3" style={{ height: embedded ? '600px' : 'calc(100vh - 180px)', minHeight: '500px' }}>
+
+        {/* 图谱区域（含浮动面板） */}
+        <div className="flex-1 bg-white rounded-xl shadow-sm overflow-hidden relative">
+
+          {/* 浮动图例 */}
+          <div className="absolute top-3 left-3 z-10 flex items-center gap-3 bg-white/90 backdrop-blur-sm rounded-lg px-3 py-1.5 shadow-sm border border-gray-100">
+            {Object.entries(ENTITY_LABELS).map(([type, label]) => (
+              <div key={type} className="flex items-center gap-1 text-xs text-gray-500">
+                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: ENTITY_COLORS[type] }} />
+                {label}
+              </div>
+            ))}
+            {domainTab !== 'all' && (
+              <>
+                <div className="w-px h-3 bg-gray-300" />
+                <span className="text-xs font-medium text-indigo-600">{activeDomainLabel}</span>
+                <button
+                  onClick={() => { setDomainTab('all'); setCommunityFilter('') }}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X size={12} />
+                </button>
+              </>
+            )}
           </div>
-          <div className="bg-white rounded-lg shadow-sm px-4 py-2 text-sm">
-            <span className="text-gray-500">关系:</span>{' '}
-            <span className="font-semibold text-gray-800">{stats.total_relations}</span>
-          </div>
-          {Object.entries(stats.entity_type_counts).map(([type, count]) => (
-            <div key={type} className="bg-white rounded-lg shadow-sm px-4 py-2 text-sm flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full" style={{ backgroundColor: ENTITY_COLORS[type] || '#94a3b8' }} />
-              <span className="text-gray-500">{ENTITY_LABELS[type] || type}:</span>{' '}
-              <span className="font-semibold text-gray-800">{count}</span>
+
+          {loading ? (
+            <div className="h-full flex items-center justify-center text-gray-400">
+              <Loader2 size={24} className="animate-spin mr-2" /> 加载中...
             </div>
-          ))}
-          <div className="ml-auto flex items-center gap-1 bg-white rounded-lg shadow-sm p-1">
-            <button
-              onClick={() => setColorMode('type')}
-              className={`px-3 py-1 rounded text-xs font-medium transition-colors ${colorMode === 'type' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-500 hover:text-gray-700'}`}
-            >
-              按类型着色
-            </button>
-            <button
-              onClick={() => setColorMode('community')}
-              className={`px-3 py-1 rounded text-xs font-medium transition-colors ${colorMode === 'community' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-500 hover:text-gray-700'}`}
-            >
-              按社群着色
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* 社群图例（社群着色模式下） */}
-      {colorMode === 'community' && communityOptions.length > 0 && (
-        <div className="flex gap-3 flex-wrap">
-          {communityOptions.map(c => (
-            <div
-              key={c.community_id}
-              className="flex items-center gap-2 bg-white rounded-lg shadow-sm px-3 py-1.5 text-xs cursor-pointer hover:ring-2 ring-indigo-200 transition-all"
-              onClick={() => setCommunityFilter(communityFilter === String(c.community_id) ? '' : String(c.community_id))}
-            >
-              <span
-                className="w-3 h-3 rounded-full"
-                style={{ backgroundColor: COMMUNITY_COLORS[c.community_id % COMMUNITY_COLORS.length] }}
-              />
-              <span className="text-gray-700 font-medium">{c.label}</span>
-              <span className="text-gray-400">{c.member_count}人</span>
+          ) : nodes.length === 0 ? (
+            <div className="h-full flex flex-col items-center justify-center text-gray-400 gap-3">
+              <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center">
+                <Info size={28} className="text-gray-300" />
+              </div>
+              <p className="text-sm">暂无图谱数据</p>
+              <button
+                onClick={handleBuildAndAnalyze}
+                disabled={building}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 transition-colors"
+              >
+                生成知识图谱
+              </button>
             </div>
-          ))}
-        </div>
-      )}
+          ) : (
+            <svg ref={svgRef} className="w-full h-full" />
+          )}
 
-      {/* 主体区域：左侧详情 + 中间图谱 + 右侧洞察/风险 */}
-      <div className="flex gap-4" style={{ height: embedded ? '600px' : 'calc(100vh - 280px)', minHeight: '500px' }}>
+          {/* 缩放控制 */}
+          {nodes.length > 0 && (
+            <div className="absolute bottom-3 right-3 flex flex-col gap-1">
+              <button onClick={handleZoomIn} className="p-1.5 bg-white/90 backdrop-blur-sm rounded-lg shadow-sm border border-gray-200 hover:bg-gray-50 transition-colors" title="放大">
+                <ZoomIn size={15} className="text-gray-600" />
+              </button>
+              <button onClick={handleZoomOut} className="p-1.5 bg-white/90 backdrop-blur-sm rounded-lg shadow-sm border border-gray-200 hover:bg-gray-50 transition-colors" title="缩小">
+                <ZoomOut size={15} className="text-gray-600" />
+              </button>
+              <button onClick={handleResetZoom} className="p-1.5 bg-white/90 backdrop-blur-sm rounded-lg shadow-sm border border-gray-200 hover:bg-gray-50 transition-colors" title="重置视图">
+                <Maximize2 size={15} className="text-gray-600" />
+              </button>
+            </div>
+          )}
 
-        {/* 左侧面板 - 节点详情 */}
-        <div className="w-72 bg-white rounded-xl shadow-sm flex flex-col overflow-hidden shrink-0">
-          <div className="px-4 py-3 border-b border-gray-100">
-            <h3 className="text-sm font-semibold text-gray-700">节点详情</h3>
-          </div>
-          <div className="flex-1 overflow-y-auto p-4">
-            {selectedNode ? (
+          {/* ── 浮动节点详情面板 ── */}
+          {selectedNode && (
+            <div className="absolute top-3 right-14 bottom-3 w-72 bg-white/95 backdrop-blur-md rounded-xl shadow-lg border border-gray-200 flex flex-col overflow-hidden z-20">
+              <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-gray-700">节点详情</h3>
+                <button onClick={() => setSelectedNode(null)} className="p-1 hover:bg-gray-100 rounded-lg transition-colors">
+                  <X size={14} className="text-gray-400" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4">
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <h3 className="font-semibold text-gray-800">{selectedNode.name}</h3>
@@ -749,7 +921,9 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
                       backgroundColor: COMMUNITY_COLORS[selectedNode.community_id % COMMUNITY_COLORS.length] + '22',
                       color: COMMUNITY_COLORS[selectedNode.community_id % COMMUNITY_COLORS.length],
                     }}>
-                      社群 {selectedNode.community_id}
+                      {communityOptions.find(c => c.community_id === selectedNode.community_id)?.domain_label
+                        || communityOptions.find(c => c.community_id === selectedNode.community_id)?.label
+                        || `社群 ${selectedNode.community_id}`}
                     </span>
                   )}
                   <span className="text-sm text-gray-400 ml-auto">提及 {selectedNode.mention_count} 次</span>
@@ -896,132 +1070,147 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
                   </div>
                 )}
               </div>
-            ) : (
-              <div className="h-full flex flex-col items-center justify-center text-gray-400 gap-2">
-                <Info size={24} />
-                <p className="text-sm">点击节点查看详情</p>
-              </div>
-            )}
+            </div>
           </div>
-        </div>
-
-        {/* 中间 - 图谱 */}
-        <div className="flex-1 bg-white rounded-xl shadow-sm overflow-hidden relative">
-          {loading ? (
-            <div className="h-full flex items-center justify-center text-gray-400">
-              <Loader2 size={24} className="animate-spin mr-2" /> 加载中...
-            </div>
-          ) : nodes.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-gray-400 gap-2">
-              <Info size={32} />
-              <p>数据正在自动构建中，请稍候刷新</p>
-            </div>
-          ) : (
-            <>
-              <svg ref={svgRef} className="w-full h-full" />
-              {/* 缩放控制 */}
-              <div className="absolute bottom-4 right-4 flex flex-col gap-1">
-                <button onClick={handleZoomIn} className="p-2 bg-white rounded-lg shadow-md hover:bg-gray-50" title="放大">
-                  <ZoomIn size={16} />
-                </button>
-                <button onClick={handleZoomOut} className="p-2 bg-white rounded-lg shadow-md hover:bg-gray-50" title="缩小">
-                  <ZoomOut size={16} />
-                </button>
-                <button onClick={handleResetZoom} className="p-2 bg-white rounded-lg shadow-md hover:bg-gray-50" title="重置">
-                  <Maximize2 size={16} />
-                </button>
-              </div>
-            </>
           )}
         </div>
 
-        {/* 右侧面板 - 洞察/风险 */}
-        <div className="w-72 bg-white rounded-xl shadow-sm flex flex-col overflow-hidden shrink-0">
+        {/* ── 右侧面板 — 洞察/风险 ── */}
+        <div className="w-80 bg-white rounded-xl shadow-sm flex flex-col overflow-hidden shrink-0">
           {/* Tab 切换 */}
           <div className="flex border-b border-gray-100">
             <button
               onClick={() => setRightTab('insights')}
-              className={`flex-1 py-3 text-sm font-medium transition-colors relative ${rightTab === 'insights' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+              className={`flex-1 py-2.5 text-sm font-medium transition-colors relative ${rightTab === 'insights' ? 'text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
             >
-              洞察
-              {analysisResult && analysisResult.insights.length > 0 && (
-                <span className="ml-1 px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs">{analysisResult.insights.length}</span>
-              )}
+              <div className="flex items-center justify-center gap-1.5">
+                <Lightbulb size={14} />
+                洞察
+                {analysisResult && analysisResult.insights.length > 0 && (
+                  <span className="px-1.5 py-0.5 bg-indigo-100 text-indigo-700 rounded-full text-[10px] font-semibold">{analysisResult.insights.length}</span>
+                )}
+              </div>
+              {rightTab === 'insights' && <div className="absolute bottom-0 left-2 right-2 h-0.5 bg-indigo-600 rounded-full" />}
             </button>
             <button
               onClick={() => setRightTab('risks')}
-              className={`flex-1 py-3 text-sm font-medium transition-colors relative ${rightTab === 'risks' ? 'text-red-600 border-b-2 border-red-600' : 'text-gray-500 hover:text-gray-700'}`}
+              className={`flex-1 py-2.5 text-sm font-medium transition-colors relative ${rightTab === 'risks' ? 'text-red-600' : 'text-gray-400 hover:text-gray-600'}`}
             >
-              风险
-              {analysisResult && analysisResult.risks.length > 0 && (
-                <span className="ml-1 px-1.5 py-0.5 bg-red-100 text-red-700 rounded-full text-xs">{analysisResult.risks.length}</span>
-              )}
+              <div className="flex items-center justify-center gap-1.5">
+                <AlertTriangle size={14} />
+                风险
+                {analysisResult && analysisResult.risks.length > 0 && (
+                  <span className="px-1.5 py-0.5 bg-red-100 text-red-700 rounded-full text-[10px] font-semibold">{analysisResult.risks.length}</span>
+                )}
+              </div>
+              {rightTab === 'risks' && <div className="absolute bottom-0 left-2 right-2 h-0.5 bg-red-500 rounded-full" />}
             </button>
           </div>
 
           {/* Tab 内容 */}
-          <div className="flex-1 overflow-y-auto p-4">
+          <div className="flex-1 overflow-y-auto p-3">
             {/* 洞察 Tab */}
             {rightTab === 'insights' && (
               analysisResult && analysisResult.insights.length > 0 ? (
-                <div className="space-y-3">
+                <div className="space-y-2.5">
                   {analysisResult.insights.map((item, idx) => (
                     <div
                       key={idx}
-                      className="bg-blue-50 border border-blue-200 rounded-lg p-3 cursor-pointer hover:shadow-md transition-shadow"
+                      className="bg-gradient-to-br from-indigo-50 to-blue-50 border border-indigo-100 rounded-lg p-3 cursor-pointer hover:shadow-md hover:border-indigo-200 transition-all group"
                       onClick={() => item.related_entity_ids.length > 0 && highlightEntities(item.related_entity_ids)}
                     >
-                      <div className="flex items-start gap-2">
-                        <Lightbulb size={16} className="text-blue-500 mt-0.5 shrink-0" />
-                        <div>
-                          <p className="text-sm font-medium text-blue-800">{item.title}</p>
-                          <p className="text-xs text-blue-600 mt-1">{item.description}</p>
-                          <span className={`inline-block mt-2 px-2 py-0.5 rounded-full text-xs ${SEVERITY_CONFIG[item.severity]?.text || 'text-gray-500'} ${SEVERITY_CONFIG[item.severity]?.bg || 'bg-gray-50'}`}>
-                            {item.severity === 'high' ? '重要' : item.severity === 'medium' ? '一般' : '参考'}
-                          </span>
-                        </div>
+                      <p className="text-sm font-medium text-gray-800 group-hover:text-indigo-700 transition-colors">{item.title}</p>
+                      <p className="text-xs text-gray-500 mt-1.5 leading-relaxed">{item.description}</p>
+                      <div className="flex items-center justify-between mt-2">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${SEVERITY_CONFIG[item.severity]?.text || 'text-gray-500'} ${SEVERITY_CONFIG[item.severity]?.bg || 'bg-gray-50'} ${SEVERITY_CONFIG[item.severity]?.border || 'border-gray-200'} border`}>
+                          {item.severity === 'high' ? '重要' : item.severity === 'medium' ? '一般' : '参考'}
+                        </span>
+                        {item.related_entity_ids.length > 0 && (
+                          <span className="text-[10px] text-indigo-400">点击定位 →</span>
+                        )}
                       </div>
                     </div>
                   ))}
                 </div>
               ) : (
-                <div className="h-full flex flex-col items-center justify-center text-gray-400 gap-2">
-                  <Lightbulb size={24} />
-                  <p className="text-sm">点击「生成最新知识图谱」按钮生成洞察</p>
+                <div className="h-full flex flex-col items-center justify-center text-gray-400 gap-2 py-12">
+                  <Lightbulb size={24} className="text-gray-300" />
+                  <p className="text-xs text-center">点击「重新生成」<br />生成业务洞察</p>
                 </div>
               )
             )}
 
-            {/* 风险 Tab */}
+            {/* 风险 Tab — 按分类分组 */}
             {rightTab === 'risks' && (
               analysisResult && analysisResult.risks.length > 0 ? (
                 <div className="space-y-3">
-                  {analysisResult.risks.map((item, idx) => {
-                    const config = SEVERITY_CONFIG[item.severity] || SEVERITY_CONFIG.medium
+                  {/* 风险统计摘要 */}
+                  <div className="flex gap-1.5">
+                    {(['high', 'medium', 'low'] as const).map(sev => {
+                      const count = analysisResult.risks.filter(r => r.severity === sev).length
+                      if (count === 0) return null
+                      const cfg = SEVERITY_CONFIG[sev]
+                      return (
+                        <span key={sev} className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${cfg.bg} ${cfg.text} border ${cfg.border}`}>
+                          {sev === 'high' ? '高危' : sev === 'medium' ? '中等' : '低危'} {count}
+                        </span>
+                      )
+                    })}
+                  </div>
+
+                  {/* 按分类分组展示 */}
+                  {Object.entries(
+                    analysisResult.risks.reduce<Record<string, InsightItem[]>>((acc, r) => {
+                      const cat = r.category || 'other'
+                      ;(acc[cat] = acc[cat] || []).push(r)
+                      return acc
+                    }, {})
+                  ).map(([category, risks]) => {
+                    const catCfg = RISK_CATEGORY_CONFIG[category]
                     return (
-                      <div
-                        key={idx}
-                        className={`${config.bg} border ${config.border} rounded-lg p-3 cursor-pointer hover:shadow-md transition-shadow`}
-                        onClick={() => item.related_entity_ids.length > 0 && highlightEntities(item.related_entity_ids)}
-                      >
-                        <div className="flex items-start gap-2">
-                          <AlertTriangle size={16} className={`${config.text} mt-0.5 shrink-0`} />
-                          <div>
-                            <p className={`text-sm font-medium ${config.text}`}>{item.title}</p>
-                            <p className={`text-xs mt-1 opacity-80 ${config.text}`}>{item.description}</p>
-                            <span className={`inline-block mt-2 px-2 py-0.5 rounded-full text-xs ${config.text} ${config.bg} border ${config.border}`}>
-                              {item.severity === 'high' ? '高风险' : item.severity === 'medium' ? '中风险' : '低风险'}
-                            </span>
-                          </div>
+                      <div key={category}>
+                        <p className={`text-xs font-semibold mb-1.5 flex items-center gap-1 ${catCfg?.color || 'text-gray-600'}`}>
+                          <span>{catCfg?.icon || '⚠️'}</span>
+                          {catCfg?.label || '其他风险'}
+                        </p>
+                        <div className="space-y-2">
+                          {risks.map((item, idx) => {
+                            const sevCfg = SEVERITY_CONFIG[item.severity] || SEVERITY_CONFIG.medium
+                            return (
+                              <div
+                                key={idx}
+                                className={`${sevCfg.bg} border ${sevCfg.border} rounded-lg p-2.5 cursor-pointer hover:shadow-md transition-all group`}
+                                onClick={() => item.related_entity_ids.length > 0 && highlightEntities(item.related_entity_ids)}
+                              >
+                                <div className="flex items-start gap-2">
+                                  <AlertTriangle size={13} className={`${sevCfg.text} mt-0.5 shrink-0`} />
+                                  <div className="min-w-0 flex-1">
+                                    <p className={`text-sm font-medium ${sevCfg.text} leading-snug`}>{item.title}</p>
+                                    <p className={`text-xs mt-1 opacity-75 ${sevCfg.text} leading-relaxed`}>{item.description}</p>
+                                    {item.evidence && (
+                                      <p className="text-[11px] text-gray-500 mt-1.5 leading-relaxed">
+                                        <span className="font-medium">证据:</span> {item.evidence}
+                                      </p>
+                                    )}
+                                    {item.suggested_action && (
+                                      <p className="text-[11px] text-indigo-600 mt-1 font-medium leading-relaxed">
+                                        → {item.suggested_action}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            )
+                          })}
                         </div>
                       </div>
                     )
                   })}
                 </div>
               ) : (
-                <div className="h-full flex flex-col items-center justify-center text-gray-400 gap-2">
-                  <AlertTriangle size={24} />
-                  <p className="text-sm">点击「生成最新知识图谱」按钮检测风险</p>
+                <div className="h-full flex flex-col items-center justify-center text-gray-400 gap-2 py-12">
+                  <AlertTriangle size={24} className="text-gray-300" />
+                  <p className="text-xs text-center">点击「重新生成」<br />检测业务风险</p>
                 </div>
               )
             )}

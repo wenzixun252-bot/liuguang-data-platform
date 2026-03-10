@@ -8,7 +8,7 @@ import toast from 'react-hot-toast'
 import ChatSidebar from '../components/ChatSidebar'
 import type { ConversationItem } from '../components/ChatSidebar'
 import ChatMessages from '../components/ChatMessages'
-import type { Message } from '../components/ChatMessages'
+import type { Message, SourceRef } from '../components/ChatMessages'
 import ChatInput from '../components/ChatInput'
 import type { DataSelection } from '../components/DataPicker'
 import ReportPanel from '../components/ReportPanel'
@@ -64,7 +64,7 @@ export default function Chat() {
   }
 
   // KG Sidebar
-  const [sourceRefs, setSourceRefs] = useState<string[]>([])
+  const [sourceRefs, setSourceRefs] = useState<SourceRef[]>([])
   const [showKGSidebar, setShowKGSidebar] = useState(true)
 
   // 关联数据选择
@@ -187,7 +187,7 @@ export default function Chat() {
 
       const decoder = new TextDecoder()
       let assistantContent = ''
-      let sources: string[] = []
+      let sources: SourceRef[] = []
 
       setMessages((prev) => [...prev, { role: 'assistant', content: '', sources: [] }])
 
@@ -221,6 +221,7 @@ export default function Chat() {
             } else if (parsed.type === 'sources') {
               sources = parsed.sources
               setSourceRefs(sources)
+              setShowKGSidebar(true)
               setMessages((prev) => {
                 const updated = [...prev]
                 updated[updated.length - 1] = {
@@ -372,6 +373,7 @@ export default function Chat() {
         <KGSidebar
           sourceRefs={sourceRefs}
           onClose={() => setShowKGSidebar(false)}
+          onEmpty={() => setShowKGSidebar(false)}
         />
       )}
     </div>

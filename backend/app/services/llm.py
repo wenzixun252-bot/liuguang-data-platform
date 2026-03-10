@@ -1,12 +1,138 @@
 """LLM 调用封装 — Schema 映射 & Embedding 生成 & 文件解析。"""
 
+import asyncio
 import base64
 import json
 import logging
 
-from openai import AsyncOpenAI
+import httpx
 
 from app.config import settings
+
+
+# ── 轻量 OpenAI 兼容客户端（替代 openai SDK，解决 Windows HTTP/2 兼容问题） ──
+
+
+class _Obj:
+    """将 dict 转为可用 . 访问的对象。"""
+    def __init__(self, d: dict):
+        for k, v in d.items():
+            if isinstance(v, dict):
+                setattr(self, k, _Obj(v))
+            elif isinstance(v, list):
+                setattr(self, k, [_Obj(i) if isinstance(i, dict) else i for i in v])
+            else:
+                setattr(self, k, v)
+
+    def __getattr__(self, name):
+        return None
+
+
+class _ChatCompletions:
+    def __init__(self, client: "LiteOpenAIClient"):
+        self._c = client
+
+    async def create(self, **kwargs):
+        stream = kwargs.pop("stream", False)
+        resp = await self._c._post("/chat/completions", {**kwargs, "stream": stream})
+        if stream:
+            return self._stream(resp)
+        data = resp.json()
+        return _Obj(data)
+
+    async def _stream(self, resp: httpx.Response):
+        async for line in resp.aiter_lines():
+            if not line.startswith("data: "):
+                continue
+            payload = line[6:].strip()
+            if payload == "[DONE]":
+                return
+            try:
+                yield _Obj(json.loads(payload))
+            except json.JSONDecodeError:
+                continue
+
+
+class _Chat:
+    def __init__(self, client: "LiteOpenAIClient"):
+        self.completions = _ChatCompletions(client)
+
+
+class _Embeddings:
+    def __init__(self, client: "LiteOpenAIClient"):
+        self._c = client
+
+    async def create(self, **kwargs):
+        resp = await self._c._post("/embeddings", kwargs)
+        return _Obj(resp.json())
+
+
+class _AudioTranscriptions:
+    def __init__(self, client: "LiteOpenAIClient"):
+        self._c = client
+
+    async def create(self, *, model: str, file, response_format: str = "json", **kwargs):
+        files = {"file": file}
+        data = {"model": model, "response_format": response_format, **kwargs}
+        resp = await self._c._post_form("/audio/transcriptions", data=data, files=files)
+        if response_format == "text":
+            return _Obj({"text": resp.text})
+        return _Obj(resp.json())
+
+
+class _Audio:
+    def __init__(self, client: "LiteOpenAIClient"):
+        self.transcriptions = _AudioTranscriptions(client)
+
+
+class LiteOpenAIClient:
+    """轻量级 OpenAI 兼容客户端，用 httpx 直连，绕过 openai SDK 的 HTTP/2 问题。"""
+
+    def __init__(self, api_key: str, base_url: str, timeout: float = 60.0):
+        self._base_url = base_url.rstrip("/")
+        self._headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        self._timeout = httpx.Timeout(timeout, connect=10.0)
+        self._client: httpx.AsyncClient | None = None
+        self.chat = _Chat(self)
+        self.embeddings = _Embeddings(self)
+        self.audio = _Audio(self)
+
+    def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                timeout=self._timeout,
+                follow_redirects=True,
+            )
+        return self._client
+
+    async def _post(self, path: str, body: dict) -> httpx.Response:
+        client = self._get_client()
+        stream = body.get("stream", False)
+        url = f"{self._base_url}{path}"
+        if stream:
+            req = client.build_request("POST", url, json=body, headers=self._headers)
+            resp = await client.send(req, stream=True)
+            resp.raise_for_status()
+            return resp
+        resp = await client.post(url, json=body, headers=self._headers)
+        resp.raise_for_status()
+        return resp
+
+    async def _post_form(self, path: str, data: dict, files: dict) -> httpx.Response:
+        client = self._get_client()
+        url = f"{self._base_url}{path}"
+        headers = {"Authorization": self._headers["Authorization"]}
+        resp = await client.post(url, data=data, files=files, headers=headers)
+        resp.raise_for_status()
+        return resp
+
+
+def create_openai_client(api_key: str, base_url: str, timeout: float = 60.0) -> LiteOpenAIClient:
+    """创建轻量 OpenAI 兼容客户端。"""
+    return LiteOpenAIClient(api_key=api_key, base_url=base_url, timeout=timeout)
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +203,29 @@ SCHEMA_MAPPING_PROMPT = """你是一个数据 Schema 映射专家。请将源表
 {{"feishu_record_id": "record_id", "owner_id": "创建人", "title": "标题", "content_text": "内容"}}
 """
 
+PARSE_COMMUNICATION_PROMPT = """你是一个会议纪要/沟通记录分析专家。请从以下飞书云文档内容中提取沟通资产的结构化字段。
+
+## 文档内容
+{content}
+
+## 要求
+请提取以下字段，输出为 JSON 格式：
+1. title: 会议或沟通的标题
+2. comm_type: 沟通类型，从内容推断（"meeting" 表示会议纪要, "chat" 表示群聊摘要, "recording" 表示录音转写）
+3. initiator: 会议组织者或发起人（如果能识别）
+4. participants: 参与人数组（从内容中提取人名）
+5. summary: 内容摘要（100-200字）
+6. conclusions: 会议结论或决议要点
+7. action_items: 待办事项数组，每项包含 {{"assignee": "负责人", "task": "任务描述", "deadline": "截止日期或null"}}
+8. keywords: 关键词标签数组
+9. sentiment: 整体情感倾向（"positive" / "neutral" / "negative"）
+10. duration_minutes: 会议时长（分钟，如果能推断）
+11. comm_time: 沟通发生的时间（ISO 格式字符串，如果能推断）
+
+## 输出格式（仅输出 JSON）
+{{"title": "...", "comm_type": "meeting", "initiator": null, "participants": [], "summary": "...", "conclusions": null, "action_items": [], "keywords": [], "sentiment": "neutral", "duration_minutes": null, "comm_time": null}}
+"""
+
 PARSE_FILE_PROMPT = """你是一个文档内容提取专家。请从以下{file_type}文件内容中提取结构化字段。
 
 ## 文件内容
@@ -115,24 +264,26 @@ class LLMClient:
     """封装对 DeepSeek/Qwen 的 LLM 调用（兼容 OpenAI 格式）。"""
 
     def __init__(self) -> None:
-        self._chat_client: AsyncOpenAI | None = None
-        self._embedding_client: AsyncOpenAI | None = None
+        self._chat_client: LiteOpenAIClient | None = None
+        self._embedding_client: LiteOpenAIClient | None = None
 
     @property
-    def chat_client(self) -> AsyncOpenAI:
+    def chat_client(self) -> LiteOpenAIClient:
         if self._chat_client is None:
-            self._chat_client = AsyncOpenAI(
+            self._chat_client = create_openai_client(
                 api_key=settings.llm_api_key,
                 base_url=settings.llm_base_url,
+                timeout=60.0,
             )
         return self._chat_client
 
     @property
-    def embedding_client(self) -> AsyncOpenAI:
+    def embedding_client(self) -> LiteOpenAIClient:
         if self._embedding_client is None:
-            self._embedding_client = AsyncOpenAI(
+            self._embedding_client = create_openai_client(
                 api_key=settings.embedding_api_key,
                 base_url=settings.embedding_base_url,
+                timeout=30.0,
             )
         return self._embedding_client
 
@@ -222,6 +373,46 @@ class LLMClient:
                     return {"title": None, "summary": None, "author": None, "tags": [], "category": None}
 
         return {"title": None, "summary": None, "author": None, "tags": [], "category": None}
+
+    async def parse_communication_doc(self, content: str) -> dict:
+        """调用 LLM 从云文档文本中提取沟通资产的结构化字段。"""
+        truncated = content[:8000] if len(content) > 8000 else content
+        prompt = PARSE_COMMUNICATION_PROMPT.format(content=truncated)
+        default = {
+            "title": None, "comm_type": "meeting", "initiator": None,
+            "participants": [], "summary": None, "conclusions": None,
+            "action_items": [], "keywords": [], "sentiment": "neutral",
+            "duration_minutes": None, "comm_time": None,
+        }
+
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                response = await self.chat_client.chat.completions.create(
+                    model=settings.llm_model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.0,
+                )
+                result_text = response.choices[0].message.content.strip()
+                if "```" in result_text:
+                    result_text = result_text.split("```")[1]
+                    if result_text.startswith("json"):
+                        result_text = result_text[4:]
+                    result_text = result_text.strip()
+                parsed = json.loads(result_text)
+                logger.info("沟通资产解析成功 (第 %d 次尝试)", attempt)
+                return parsed
+            except (json.JSONDecodeError, IndexError, KeyError) as e:
+                logger.warning("沟通资产解析 JSON 失败 (第 %d/%d 次): %s", attempt, MAX_RETRIES, e)
+                if attempt == MAX_RETRIES:
+                    return default
+                await asyncio.sleep(2)  # 重试前等待，避免立即重试
+            except Exception as e:
+                logger.warning("LLM 调用失败 (第 %d/%d 次): %s", attempt, MAX_RETRIES, e)
+                if attempt == MAX_RETRIES:
+                    return default
+                await asyncio.sleep(3)  # LLM 故障时等稍久一点再重试
+
+        return default
 
     # ── 图片内容识别 ──────────────────────────────────────
 

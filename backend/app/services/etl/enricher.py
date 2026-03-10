@@ -1,5 +1,6 @@
 """ETL Step 2: LLM 智能提取 — 一次调用提取 summary/keywords/sentiment。"""
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass, field
@@ -112,10 +113,13 @@ class ContentEnricher:
         for attempt in range(1, MAX_RETRIES + 1):
             try:
                 from app.services.llm import llm_client
-                response = await llm_client.chat_client.chat.completions.create(
-                    model=settings.llm_model,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.0,
+                response = await asyncio.wait_for(
+                    llm_client.chat_client.chat.completions.create(
+                        model=settings.llm_model,
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0.0,
+                    ),
+                    timeout=30,
                 )
                 result_text = response.choices[0].message.content.strip()
 

@@ -1,5 +1,6 @@
-"""文件上传解析服务 — 校验、存储、提取文本、LLM 解析、写入 documents。"""
+"""文件上传解析服务 — 校验、存储、提取文本、LLM 解析、写入 documents / communications。"""
 
+import hashlib
 import logging
 import os
 import uuid
@@ -10,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.document import Document
+from app.models.communication import Communication
 
 logger = logging.getLogger(__name__)
 
@@ -93,9 +95,14 @@ class FileUploadService:
                 logger.warning("Embedding 生成失败: %s", e)
 
         # 5. 写入 documents 表
-        tags_dict = {}
+        keywords_list = []
         if isinstance(parsed.get("tags"), list):
-            tags_dict = {tag: True for tag in parsed["tags"]}
+            keywords_list = parsed["tags"]
+
+        # doc_category 必须在 CHECK 约束允许的范围内
+        valid_categories = {"report", "proposal", "policy", "technical"}
+        raw_category = parsed.get("category")
+        doc_category = raw_category if raw_category in valid_categories else None
 
         doc = Document(
             owner_id=owner_id,
@@ -104,8 +111,8 @@ class FileUploadService:
             content_text=text_content,
             summary=parsed.get("summary"),
             author=parsed.get("author"),
-            tags=tags_dict,
-            category=parsed.get("category"),
+            keywords=keywords_list,
+            doc_category=doc_category,
             file_type=ext,
             file_size=file_size,
             file_path=file_path,
@@ -177,6 +184,175 @@ class FileUploadService:
             return f"[图片文件: {ext}]"
 
         return content.decode("utf-8", errors="replace")
+
+    # ── 音频文件 → 沟通资产 ──────────────────────────────────
+
+    AUDIO_EXTENSIONS = {"mp3", "wav", "m4a", "aac", "ogg", "flac"}
+
+    async def _transcribe_audio(self, file_path: str) -> str:
+        """调用 ASR API 将音频文件转为文字。"""
+        if not settings.asr_api_key or settings.asr_api_key.startswith("sk-xxx"):
+            raise FileUploadError(
+                "语音转文字功能需要配置 ASR API Key。"
+                "请在 .env 文件中设置 ASR_API_KEY（支持 OpenAI Whisper 或兼容接口）。"
+            )
+
+        from app.services.llm import create_openai_client
+
+        asr_client = create_openai_client(
+            api_key=settings.asr_api_key,
+            base_url=settings.asr_base_url,
+            timeout=300.0,
+        )
+
+        with open(file_path, "rb") as audio_file:
+            response = await asr_client.audio.transcriptions.create(
+                model=settings.asr_model,
+                file=audio_file,
+                language="zh",
+            )
+
+        transcript = response.text.strip()
+        logger.info("ASR 转写完成，文字长度: %d", len(transcript))
+        return transcript
+
+    async def process_communication_upload(
+        self,
+        file: UploadFile,
+        owner_id: str,
+        db: AsyncSession,
+        uploader_name: str | None = None,
+        user_metadata: dict | None = None,
+    ) -> Communication:
+        """处理音频文件上传：存储 → ASR 转文字 → LLM 提取 → 写入 communications 表。"""
+        content_bytes = await file.read()
+        file_size = len(content_bytes)
+        ext = self._validate(file.filename or "unknown", file_size)
+
+        if ext not in self.AUDIO_EXTENSIONS:
+            raise FileUploadError(f"沟通资产仅支持音频文件，不支持 .{ext}")
+
+        meta = user_metadata or {}
+
+        # 1. 存储文件
+        user_dir = os.path.join(settings.upload_dir, owner_id)
+        os.makedirs(user_dir, exist_ok=True)
+        file_id = str(uuid.uuid4())
+        file_path = os.path.join(user_dir, f"{file_id}.{ext}")
+
+        with open(file_path, "wb") as f:
+            f.write(content_bytes)
+
+        logger.info("音频文件已保存: %s (%d bytes)", file_path, file_size)
+
+        # 2. ASR 转文字
+        transcript = await self._transcribe_audio(file_path)
+
+        # 3. 构建用于 LLM 分析的上下文（用户补充 + ASR 转写）
+        context_parts = []
+        if meta.get("title"):
+            context_parts.append(f"标题：{meta['title']}")
+        if meta.get("comm_type"):
+            type_labels = {"meeting": "会议录音", "phone": "电话录音", "interview": "面谈记录", "other": "其他"}
+            context_parts.append(f"类型：{type_labels.get(meta['comm_type'], meta['comm_type'])}")
+        if meta.get("participants"):
+            context_parts.append(f"参与人：{', '.join(meta['participants'])}")
+        if meta.get("context"):
+            context_parts.append(f"背景信息：{meta['context']}")
+
+        enriched_text = ""
+        if context_parts:
+            enriched_text = "【用户补充信息】\n" + "\n".join(context_parts) + "\n\n"
+        enriched_text += "【录音转写内容】\n" + transcript
+
+        # 4. LLM 提取结构化字段
+        parsed = {
+            "title": None, "comm_type": "recording", "initiator": None,
+            "participants": [], "summary": None, "conclusions": None,
+            "action_items": [], "keywords": [], "sentiment": "neutral",
+            "duration_minutes": None, "comm_time": None,
+        }
+        if settings.llm_api_key and not settings.llm_api_key.startswith("sk-xxx"):
+            try:
+                from app.services.llm import llm_client
+                parsed = await llm_client.parse_communication_doc(enriched_text)
+            except Exception as e:
+                logger.warning("LLM 沟通资产解析失败: %s", e)
+
+        # 5. 生成 Embedding
+        embedding = None
+        if settings.embedding_api_key and not settings.embedding_api_key.startswith("sk-xxx"):
+            try:
+                from app.services.llm import llm_client
+                embed_text = f"{parsed.get('title', '')} {transcript}".strip()
+                embedding = await llm_client.generate_embedding(embed_text[:2000])
+            except Exception as e:
+                logger.warning("Embedding 生成失败: %s", e)
+
+        # 6. 合并用户元数据与 LLM 提取结果（用户输入优先）
+        comm_type_map = {"meeting": "meeting", "phone": "recording", "interview": "recording", "other": "recording"}
+        final_comm_type = comm_type_map.get(meta.get("comm_type", ""), "") or parsed.get("comm_type") or "recording"
+
+        participants = meta.get("participants") or parsed.get("participants") or []
+        # 确保 participants 为 [{name: ...}] 格式
+        if participants and isinstance(participants[0], str):
+            participants = [{"name": p} for p in participants]
+
+        comm_time = None
+        if meta.get("comm_time"):
+            try:
+                comm_time = datetime.fromisoformat(meta["comm_time"])
+            except (ValueError, TypeError):
+                pass
+        if not comm_time and parsed.get("comm_time"):
+            try:
+                comm_time = datetime.fromisoformat(parsed["comm_time"])
+            except (ValueError, TypeError):
+                pass
+
+        content_hash = hashlib.md5(content_bytes).hexdigest()
+
+        # 7. 写入 communications 表
+        comm = Communication(
+            owner_id=owner_id,
+            comm_type=final_comm_type,
+            source_platform="local",
+            source_app_token=f"local_{file_id}",
+            feishu_record_id=f"local_{file_id}",
+            title=meta.get("title") or parsed.get("title") or file.filename,
+            comm_time=comm_time,
+            initiator=parsed.get("initiator"),
+            participants=participants,
+            duration_minutes=parsed.get("duration_minutes"),
+            conclusions=parsed.get("conclusions"),
+            action_items=parsed.get("action_items") or [],
+            transcript=transcript,
+            content_text=transcript,
+            summary=parsed.get("summary"),
+            uploader_name=uploader_name,
+            keywords=parsed.get("keywords") or [],
+            sentiment=parsed.get("sentiment"),
+            content_hash=content_hash,
+            extra_fields={
+                "file_path": file_path,
+                "file_size": file_size,
+                "file_type": ext,
+                "user_context": meta.get("context"),
+            },
+            parse_status="done",
+            processed_at=datetime.utcnow(),
+            synced_at=datetime.utcnow(),
+        )
+
+        if embedding:
+            comm.content_vector = embedding
+
+        db.add(comm)
+        await db.commit()
+        await db.refresh(comm)
+
+        logger.info("沟通资产已入库: comm_id=%d, title=%s", comm.id, comm.title)
+        return comm
 
 
 # 模块级单例

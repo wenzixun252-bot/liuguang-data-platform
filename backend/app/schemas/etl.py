@@ -1,8 +1,8 @@
 """ETL 相关的 Pydantic 模型。"""
 
-from datetime import datetime
-
 from pydantic import BaseModel
+
+from app.schemas.types import UTCDatetime, UTCDatetimeOpt
 
 
 class SyncStateOut(BaseModel):
@@ -10,11 +10,11 @@ class SyncStateOut(BaseModel):
     id: int
     source_app_token: str
     source_table_id: str
-    last_sync_time: datetime
+    last_sync_time: UTCDatetime
     last_sync_status: str
     records_synced: int | None = 0
     error_message: str | None = None
-    updated_at: datetime
+    updated_at: UTCDatetime
 
     model_config = {"from_attributes": True}
 
@@ -55,8 +55,8 @@ class DataSourceOut(BaseModel):
     default_tag_ids: list[int] = []
     include_shared: bool = True
     is_enabled: bool
-    created_at: datetime
-    updated_at: datetime
+    created_at: UTCDatetime
+    updated_at: UTCDatetime
 
     model_config = {"from_attributes": True}
 
@@ -82,12 +82,12 @@ class DataSourceWithSyncOut(BaseModel):
     owner_name: str | None = None
     default_tag_ids: list[int] = []
     is_enabled: bool
-    created_at: datetime
-    updated_at: datetime
+    created_at: UTCDatetime
+    updated_at: UTCDatetime
     include_shared: bool = True
     # 同步状态
     last_sync_status: str | None = None
-    last_sync_time: datetime | None = None
+    last_sync_time: UTCDatetimeOpt = None
     records_synced: int | None = 0
     error_message: str | None = None
 
@@ -109,12 +109,12 @@ class CloudFolderOut(BaseModel):
     owner_id: str
     include_shared: bool = True
     is_enabled: bool
-    last_sync_time: datetime | None = None
+    last_sync_time: UTCDatetimeOpt = None
     last_sync_status: str = "idle"
     files_synced: int = 0
     error_message: str | None = None
-    created_at: datetime
-    updated_at: datetime
+    created_at: UTCDatetime
+    updated_at: UTCDatetime
 
     model_config = {"from_attributes": True}
 

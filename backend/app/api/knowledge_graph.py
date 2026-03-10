@@ -1,14 +1,16 @@
 """知识图谱 API 端点。"""
 
+import asyncio
 import logging
 from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, and_, func, or_
+from sqlalchemy import select, and_, func, or_, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
+from app.database import async_session
 from app.models.content_entity_link import ContentEntityLink
 from app.models.communication import Communication
 from app.models.document import Document
@@ -34,6 +36,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/knowledge-graph", tags=["知识图谱"])
 
+# ── 后台任务状态管理（进程内存） ──
+# key: owner_id, value: {status, progress, message, result, error}
+_build_tasks: dict[str, dict] = {}
+
 
 async def _get_latest_analysis(db: AsyncSession, owner_id: str) -> KGAnalysisResult | None:
     """查询最新一条分析结果。"""
@@ -47,7 +53,13 @@ async def _get_latest_analysis(db: AsyncSession, owner_id: str) -> KGAnalysisRes
 
 
 async def _save_analysis(db: AsyncSession, owner_id: str, analysis_result: dict) -> KGAnalysisResult:
-    """将分析结果写入数据库。"""
+    """将分析结果写入数据库（替换旧记录）。"""
+    # 删除该用户的所有旧分析记录，只保留最新一条
+    from sqlalchemy import delete
+    await db.execute(
+        delete(KGAnalysisResult).where(KGAnalysisResult.owner_id == owner_id)
+    )
+
     record = KGAnalysisResult(
         owner_id=owner_id,
         communities=analysis_result.get("communities", []),
@@ -61,38 +73,82 @@ async def _save_analysis(db: AsyncSession, owner_id: str, analysis_result: dict)
     return record
 
 
-@router.post("/build-and-analyze", summary="构建图谱并运行分析")
+async def _run_build_task(owner_id: str):
+    """后台执行知识图谱构建+分析的完整流程。使用独立的数据库会话。"""
+    try:
+        _build_tasks[owner_id] = {"status": "running", "progress": 0, "message": "正在清理旧数据..."}
+
+        async with async_session() as db:
+            # 清空旧数据
+            await db.execute(delete(KGRelation).where(KGRelation.owner_id == owner_id))
+            await db.execute(delete(KGEntity).where(KGEntity.owner_id == owner_id))
+            await db.execute(delete(KGAnalysisResult).where(KGAnalysisResult.owner_id == owner_id))
+            await db.commit()
+
+            # 全量构建图谱（传入进度回调）
+            _build_tasks[owner_id].update(progress=10, message="正在提取实体和关系...")
+
+            def on_progress(current: int, total: int):
+                pct = 10 + int(70 * current / max(total, 1))
+                _build_tasks[owner_id].update(progress=pct, message=f"正在处理文本 {current}/{total}...")
+
+            build_result = await build_knowledge_graph(
+                db=db,
+                owner_id=owner_id,
+                incremental=False,
+                on_progress=on_progress,
+            )
+
+            # 运行分析
+            _build_tasks[owner_id].update(progress=85, message="正在运行图谱分析...")
+            analysis_result = await run_full_analysis(db, owner_id)
+            await _save_analysis(db, owner_id, analysis_result)
+
+            _build_tasks[owner_id] = {
+                "status": "done",
+                "progress": 100,
+                "message": "知识图谱生成完成",
+                "result": {"build": build_result, "analysis": analysis_result},
+            }
+
+    except Exception as e:
+        logger.exception("后台构建知识图谱失败: %s", e)
+        _build_tasks[owner_id] = {
+            "status": "error",
+            "progress": 0,
+            "message": f"构建失败: {e}",
+        }
+
+
+@router.post("/build-and-analyze", summary="构建图谱并运行分析（后台任务）")
 @router.post("/auto-build", summary="构建图谱并运行分析（兼容旧路由）", include_in_schema=False)
 async def build_and_analyze_graph(
     current_user: Annotated[User, Depends(get_current_user)],
-    db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """构建知识图谱并运行分析，结果持久化到数据库。"""
+    """启动后台任务构建知识图谱。立即返回，前端通过 /build-status 轮询进度。"""
     owner_id = current_user.feishu_open_id
 
-    # 检查现有实体数量，决定增量/全量
-    entity_count = await db.execute(
-        select(func.count()).select_from(KGEntity).where(KGEntity.owner_id == owner_id)
-    )
-    total_entities = entity_count.scalar() or 0
-    incremental = total_entities > 0
+    # 如果已有任务在运行，不重复启动
+    existing = _build_tasks.get(owner_id)
+    if existing and existing.get("status") == "running":
+        return {"status": "running", "message": "构建任务已在运行中", "progress": existing.get("progress", 0)}
 
-    # 构建图谱
-    build_result = await build_knowledge_graph(
-        db=db,
-        owner_id=owner_id,
-        incremental=incremental,
-    )
+    # 启动后台任务
+    asyncio.create_task(_run_build_task(owner_id))
 
-    # 构建完成后自动运行分析
-    analysis_result = await run_full_analysis(db, owner_id)
-    await _save_analysis(db, owner_id, analysis_result)
+    return {"status": "started", "message": "构建任务已启动", "progress": 0}
 
-    return {
-        "build": build_result,
-        "analysis": analysis_result,
-        "mode": "incremental" if incremental else "full",
-    }
+
+@router.get("/build-status", summary="查询构建进度")
+async def get_build_status(
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    """查询知识图谱构建任务的进度。"""
+    owner_id = current_user.feishu_open_id
+    task = _build_tasks.get(owner_id)
+    if not task:
+        return {"status": "idle", "progress": 0, "message": "无构建任务"}
+    return task
 
 
 @router.post("/build", summary="触发图谱构建/增量更新")
@@ -154,7 +210,7 @@ async def get_risks(
     record = await _get_latest_analysis(db, current_user.feishu_open_id)
     if not record:
         return []
-    return [InsightItem(**r) for r in record.risks]
+    return [InsightItem(**r) for r in record.risks[:10]]
 
 
 @router.get("", response_model=KGGraphResponse, summary="获取图谱数据")
@@ -163,20 +219,20 @@ async def get_graph(
     db: Annotated[AsyncSession, Depends(get_db)],
     entity_type: str | None = Query(None),
     community_id: int | None = Query(None),
-    limit: int = Query(200, ge=1, le=1000),
+    limit: int = Query(50, ge=1, le=1000),
 ):
-    """获取图谱数据（节点+边+社群）。"""
+    """获取图谱数据（节点+边+社群），按重要性评分降序排列。"""
     conditions = [KGEntity.owner_id == current_user.feishu_open_id]
     if entity_type:
         conditions.append(KGEntity.entity_type == entity_type)
     if community_id is not None:
         conditions.append(KGEntity.community_id == community_id)
 
-    # 获取实体
+    # 获取实体，按重要性评分排序
     entity_result = await db.execute(
         select(KGEntity)
         .where(and_(*conditions))
-        .order_by(KGEntity.mention_count.desc())
+        .order_by(KGEntity.importance_score.desc(), KGEntity.mention_count.desc())
         .limit(limit)
     )
     nodes = entity_result.scalars().all()

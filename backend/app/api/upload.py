@@ -1,6 +1,7 @@
 """文件上传接口。"""
 
 import glob as globmod
+import json
 import logging
 import mimetypes
 import os
@@ -16,6 +17,7 @@ from app.models.document import Document
 from app.models.tag import ContentTag
 from app.models.user import User
 from app.schemas.document import DocumentOut
+from app.schemas.communication import CommunicationOut
 from app.services.file_upload import FileUploadError, file_upload_service
 
 logger = logging.getLogger(__name__)
@@ -57,6 +59,58 @@ async def upload_file(
         return DocumentOut.model_validate(doc)
     except FileUploadError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("文件上传处理异常: %s", e)
+        raise HTTPException(status_code=500, detail=f"文件处理失败: {e}")
+
+
+@router.post("/communication", response_model=CommunicationOut, summary="上传音频文件并解析为沟通资产")
+async def upload_communication(
+    file: UploadFile = File(...),
+    metadata: str | None = Form(None),
+    tag_ids: str | None = Form(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CommunicationOut:
+    """上传音频文件（MP3/WAV/M4A等），自动ASR转文字、LLM提取结构化字段，写入communications表。
+    metadata: JSON字符串，用户补充的元数据，如 {"title":"周会","comm_type":"meeting","participants":["张三"],"comm_time":"2026-03-10T14:00","context":"Q2需求讨论"}
+    """
+    # 解析用户提供的元数据
+    user_metadata = {}
+    if metadata:
+        try:
+            user_metadata = json.loads(metadata)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="metadata 格式不正确，请传入 JSON 字符串")
+
+    try:
+        comm = await file_upload_service.process_communication_upload(
+            file=file,
+            owner_id=current_user.feishu_open_id,
+            db=db,
+            uploader_name=current_user.name,
+            user_metadata=user_metadata,
+        )
+
+        # 写入用户指定的标签
+        if tag_ids:
+            for tid_str in tag_ids.split(","):
+                tid_str = tid_str.strip()
+                if tid_str.isdigit():
+                    db.add(ContentTag(
+                        tag_id=int(tid_str),
+                        content_type="communication",
+                        content_id=comm.id,
+                        tagged_by="user_manual",
+                    ))
+            await db.commit()
+
+        return CommunicationOut.model_validate(comm)
+    except FileUploadError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("音频上传处理异常: %s", e)
+        raise HTTPException(status_code=500, detail=f"音频处理失败: {e}")
 
 
 @router.delete("/file/{doc_id}", summary="删除当前用户上传的文件")

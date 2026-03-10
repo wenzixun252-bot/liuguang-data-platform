@@ -49,10 +49,15 @@ class Settings(BaseSettings):
     agent_llm_base_url: str = "https://api.deepseek.com/v1"
     agent_llm_model: str = "deepseek-chat"
 
+    # ── ASR 语音转文字（默认硅基流动 SenseVoice，免费） ──
+    asr_api_key: str = ""
+    asr_base_url: str = "https://api.siliconflow.cn/v1"
+    asr_model: str = "FunAudioLLM/SenseVoiceSmall"
+
     # ── 文件上传 ──
     upload_dir: str = "uploads"
     max_upload_size_mb: int = 50
-    allowed_file_types: str = "pdf,docx,txt,csv,xlsx,png,jpg,jpeg"
+    allowed_file_types: str = "pdf,docx,txt,csv,xlsx,png,jpg,jpeg,mp3,wav,m4a,aac,ogg,flac"
 
 
 settings = Settings()

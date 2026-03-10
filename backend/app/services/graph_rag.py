@@ -88,7 +88,7 @@ class GraphRAGEnhancer:
             from app.services.llm import llm_client
 
             response = await llm_client.chat_client.chat.completions.create(
-                model=settings.llm_model,
+                model=settings.agent_llm_model,
                 messages=[
                     {
                         "role": "system",

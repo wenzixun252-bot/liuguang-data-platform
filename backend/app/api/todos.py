@@ -88,7 +88,7 @@ async def extract_todos(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """从近N天会议/聊天中AI提取待办候选。"""
-    items = await extract_and_save(db, current_user.feishu_open_id, body.days)
+    items = await extract_and_save(db, current_user.feishu_open_id, current_user.name, body.days)
     return items
 
 

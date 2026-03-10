@@ -1,5 +1,6 @@
 """ETL Transform 模块 — 两表路由 + Schema 映射缓存 + 3步增强工作流。"""
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -12,6 +13,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.asset import SchemaMappingCache
 from app.services.etl.enricher import content_enricher
+from app.services.etl.hardcoded_comm import (
+    CHAT_FIELD_MAPPING,
+    MEETING_FIELD_MAPPING,
+    build_meeting_content,
+    convert_quality_score,
+    convert_sentiment,
+    detect_comm_table_type,
+    extract_chat_info,
+    extract_int,
+    extract_keywords,
+    extract_participants,
+    extract_text,
+    extract_url,
+    extract_user_id,
+    extract_user_name,
+    parse_meeting_action_items,
+    parse_timestamp,
+)
 from app.services.etl.extractor import ExtractionResult
 from app.services.etl.postprocessor import content_postprocessor
 from app.services.etl.preprocessor import content_preprocessor
@@ -154,6 +173,17 @@ COMMUNICATION_CHAT_KEYWORDS: dict[str, list[str]] = {
     "participants": ["提及", "@", "mentions"],
 }
 
+# 合并会议+群聊关键词（communication 同时覆盖两种场景）
+COMMUNICATION_COMBINED_KEYWORDS: dict[str, list[str]] = {}
+for _kw_dict in (COMMUNICATION_MEETING_KEYWORDS, COMMUNICATION_CHAT_KEYWORDS):
+    for _target, _kws in _kw_dict.items():
+        if _target in COMMUNICATION_COMBINED_KEYWORDS:
+            # 合并去重，保留顺序
+            existing = COMMUNICATION_COMBINED_KEYWORDS[_target]
+            COMMUNICATION_COMBINED_KEYWORDS[_target] = existing + [k for k in _kws if k not in existing]
+        else:
+            COMMUNICATION_COMBINED_KEYWORDS[_target] = list(_kws)
+
 # asset_type -> target_table 映射
 ASSET_TYPE_TO_TABLE = {
     "document": "documents",
@@ -166,7 +196,7 @@ ASSET_TYPE_TO_TABLE = {
 # asset_type -> 关键词字典
 ASSET_TYPE_TO_KEYWORDS = {
     "document": DOCUMENT_KEYWORDS,
-    "communication": COMMUNICATION_MEETING_KEYWORDS,  # 默认用会议关键词
+    "communication": COMMUNICATION_COMBINED_KEYWORDS,
     # 兼容旧值
     "meeting": COMMUNICATION_MEETING_KEYWORDS,
     "chat_message": COMMUNICATION_CHAT_KEYWORDS,
@@ -228,30 +258,43 @@ class DataTransformer:
                 continue
 
             # ── Step 1: 规则预处理 ──
+            raw_text = record.content_text
             record.content_text = content_preprocessor.process(record.content_text)
             if not record.content_text:
+                logger.warning(
+                    "记录 %s 预处理后 content_text 为空 (原始长度=%d)，丢弃",
+                    record.feishu_record_id, len(raw_text),
+                )
                 discarded += 1
                 continue
 
-            # ── Step 2: LLM 智能提取 ──
-            enrich_result = await content_enricher.enrich(
-                record.content_text,
-                asset_type,
-                title=getattr(record, "title", None),
-            )
-            record.summary = enrich_result.summary
-            record.keywords = enrich_result.keywords
-            record.sentiment = enrich_result.sentiment
-            if hasattr(record, "doc_category") and enrich_result.doc_category:
-                record.doc_category = enrich_result.doc_category
+            # ── Step 2: LLM 智能提取（communication 类型跳过，字段已由规则映射完成） ──
+            if asset_type in ("communication", "chat_message", "meeting"):
+                # 沟通记录不需要 LLM；硬编码路径下 keywords/sentiment 已从源表获取，保留不覆盖
+                record.summary = record.summary or record.content_text[:100]
+                record.keywords = record.keywords or []
+                # sentiment 保留已有值（会话表源数据已有）
+            else:
+                enrich_result = await content_enricher.enrich(
+                    record.content_text,
+                    asset_type,
+                    title=getattr(record, "title", None),
+                )
+                record.summary = enrich_result.summary
+                record.keywords = enrich_result.keywords
+                record.sentiment = enrich_result.sentiment
+                if hasattr(record, "doc_category") and enrich_result.doc_category:
+                    record.doc_category = enrich_result.doc_category
 
             # ── Step 3: 程序后处理 ──
-            record.quality_score = content_postprocessor.compute_quality_score(
-                record.content_text,
-                title=getattr(record, "title", None),
-                summary=record.summary,
-                keywords=record.keywords,
-            )
+            # 硬编码路径已从源表获取 quality_score，保留不覆盖
+            if record.quality_score is None:
+                record.quality_score = content_postprocessor.compute_quality_score(
+                    record.content_text,
+                    title=getattr(record, "title", None),
+                    summary=record.summary,
+                    keywords=record.keywords,
+                )
             record.content_hash = content_postprocessor.compute_content_hash(record.content_text)
             record.chunks = content_postprocessor.split_chunks(record.content_text)
 
@@ -330,6 +373,17 @@ class DataTransformer:
         db: AsyncSession,
     ) -> dict:
         """获取 Schema 映射，优先从缓存读取，无 LLM 时降级为规则映射。"""
+        # 对 communication 类型，先尝试识别标准配方表结构
+        if asset_type in ("communication", "chat_message", "meeting"):
+            field_names = [f.get("field_name", "") for f in schema_fields]
+            detected = detect_comm_table_type(field_names)
+            if detected == "chat":
+                logger.info("检测到标准会话表结构，使用硬编码映射: %s/%s", app_token, table_id)
+                return CHAT_FIELD_MAPPING
+            elif detected == "meeting":
+                logger.info("检测到标准会议表结构，使用硬编码映射: %s/%s", app_token, table_id)
+                return MEETING_FIELD_MAPPING
+
         schema_json = json.dumps(schema_fields, sort_keys=True, ensure_ascii=False)
         schema_md5 = hashlib.md5(schema_json.encode()).hexdigest()
 
@@ -349,11 +403,18 @@ class DataTransformer:
         rule_mapping = self._rule_based_mapping(schema_fields, asset_type)
         logger.info("规则映射结果: %s", rule_mapping)
 
-        if settings.llm_api_key and not settings.llm_api_key.startswith("sk-xxx"):
+        # communication 类型字段明确，纯规则映射即可，跳过 LLM
+        if asset_type in ("communication", "chat_message", "meeting"):
+            logger.info("沟通记录使用纯规则映射，跳过 LLM: %s/%s", app_token, table_id)
+            mapping = rule_mapping
+        elif settings.llm_api_key and not settings.llm_api_key.startswith("sk-xxx"):
             try:
                 from app.services.llm import llm_client
                 logger.info("Schema 映射缓存未命中，调用 LLM 补充: %s/%s", app_token, table_id)
-                llm_mapping = await llm_client.schema_mapping(schema_fields, target_table=asset_type)
+                llm_mapping = await asyncio.wait_for(
+                    llm_client.schema_mapping(schema_fields, target_table=asset_type),
+                    timeout=30,
+                )
                 mapping = {**llm_mapping, **rule_mapping}
                 logger.info("合并映射结果 (规则优先): %s", mapping)
             except Exception as e:
@@ -407,6 +468,26 @@ class DataTransformer:
             if original_owner_id or original_owner_name:
                 original_owner_info = {"id": original_owner_id, "name": original_owner_name}
         content_text = self._extract_text(mapped_values.get("content_text", ""))
+
+        # 对 communication 类型，content_text 为空时尝试从其他字段兜底
+        if not content_text and asset_type in ("communication", "chat_message", "meeting"):
+            fallback_fields = ["reply_to", "title", "transcript", "conclusions", "agenda"]
+            for fb in fallback_fields:
+                fb_text = self._extract_text(mapped_values.get(fb, ""))
+                if fb_text:
+                    content_text = fb_text
+                    logger.info("记录 %s content_text 为空，使用 %s 字段兜底", record_id, fb)
+                    break
+            # 如果所有文本字段都为空，用 extra_fields 中的文本拼接
+            if not content_text:
+                text_parts = []
+                for _fn, _val in fields.items():
+                    t = self._extract_text(_val)
+                    if t and len(t) > 2:
+                        text_parts.append(t)
+                if text_parts:
+                    content_text = " | ".join(text_parts[:3])
+                    logger.info("记录 %s content_text 为空，拼接其余字段兜底", record_id)
 
         if not feishu_record_id or not owner_id or not content_text:
             logger.warning(
@@ -501,7 +582,74 @@ class DataTransformer:
                 attachments=attachments,
             )
         elif asset_type == "communication":
-            # 自动判断 comm_type：mapping 中有会议特征字段则为 meeting，否则为 chat
+            # ── 硬编码路径：标准会议表 ──
+            if "_meeting_summary" in mapping:
+                summary_text = extract_text(fields.get(mapping.get("_meeting_summary", ""), ""))
+                analysis_text = extract_text(fields.get(mapping.get("_meeting_analysis", ""), ""))
+                hc_content = build_meeting_content(summary_text, analysis_text)
+                hc_action_items = parse_meeting_action_items(analysis_text)
+                hc_participants = extract_participants(fields.get(mapping.get("participants", ""), ""))
+                hc_quality = convert_quality_score(extract_text(fields.get(mapping.get("quality_score", ""), "")))
+                hc_meeting_extra = {}
+                meeting_id = extract_text(fields.get("会议ID", ""))
+                related_docs = extract_text(fields.get("会议有关文档", ""))
+                if meeting_id:
+                    hc_meeting_extra["meeting_id"] = meeting_id
+                if related_docs:
+                    hc_meeting_extra["related_docs"] = related_docs
+                # 合并 extra_fields
+                hc_meeting_extra.update(extra_fields)
+                return TransformedCommunication(
+                    feishu_record_id=feishu_record_id,
+                    owner_id=owner_id,
+                    source_app_token=app_token,
+                    source_table_id=table_id,
+                    comm_type="meeting",
+                    title=extract_text(fields.get(mapping.get("title", ""), "")),
+                    comm_time=parse_timestamp(fields.get(mapping.get("comm_time", ""))),
+                    duration_minutes=extract_int(fields.get(mapping.get("duration_minutes", ""))),
+                    initiator=extract_user_name(fields.get(mapping.get("initiator", ""))),
+                    participants=hc_participants,
+                    action_items=hc_action_items,
+                    content_text=hc_content or content_text,
+                    source_url=extract_url(fields.get(mapping.get("source_url", ""))),
+                    recording_url=extract_url(fields.get(mapping.get("recording_url", ""))),
+                    quality_score=hc_quality,
+                    extra_fields=hc_meeting_extra,
+                    attachments=attachments,
+                )
+
+            # ── 硬编码路径：标准会话表 ──
+            if mapping.get("content_text") == "聊天记录":
+                chat_name, chat_id = extract_chat_info(fields.get(mapping.get("chat_id", ""), ""))
+                hc_sentiment = convert_sentiment(extract_text(fields.get(mapping.get("sentiment", ""), "")))
+                hc_keywords = extract_keywords(fields.get(mapping.get("keywords", ""), []))
+                hc_chat_extra = {}
+                msg_id = extract_text(fields.get("消息ID", ""))
+                if msg_id:
+                    hc_chat_extra["message_id"] = msg_id
+                hc_chat_extra.update(extra_fields)
+                return TransformedCommunication(
+                    feishu_record_id=feishu_record_id,
+                    owner_id=owner_id,
+                    source_app_token=app_token,
+                    source_table_id=table_id,
+                    comm_type="chat",
+                    content_text=content_text,
+                    initiator=extract_user_name(fields.get(mapping.get("initiator", ""))),
+                    comm_time=parse_timestamp(fields.get(mapping.get("comm_time", ""))),
+                    chat_name=chat_name or None,
+                    chat_id=chat_id or None,
+                    message_type=extract_text(fields.get(mapping.get("message_type", ""), "")),
+                    source_url=extract_url(fields.get(mapping.get("source_url", ""), "")),
+                    reply_to=extract_text(fields.get(mapping.get("reply_to", ""), "")),
+                    keywords=hc_keywords,
+                    sentiment=hc_sentiment,
+                    extra_fields=hc_chat_extra,
+                    attachments=attachments,
+                )
+
+            # ── 通用路径：非标准表结构，走原有自动判断逻辑 ──
             has_meeting_fields = "comm_time" in mapping and any(
                 kw in mapping.get("comm_time", "")
                 for kw in ["会议时间", "meeting_time", "start_time"]

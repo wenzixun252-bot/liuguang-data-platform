@@ -1,54 +1,48 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Search, ChevronLeft, ChevronRight, X, Clock, MapPin, Users, Paperclip, ExternalLink, Download, Image, FileText, User, Trash2, Settings, MessageSquare, Video, Mic } from 'lucide-react'
+import { Search, ChevronLeft, ChevronRight, X, Clock, MapPin, Users, Paperclip, ExternalLink, Download, Image, FileText, User, Trash2, MessageSquare, Video, Mic, Table2 } from 'lucide-react'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
 import { ColumnSettingsButton, useColumnSettings, type ColumnDef } from '../components/ColumnSettings'
 import { getUser } from '../lib/auth'
-import RecipeSyncConfig from '../components/RecipeSyncConfig'
 import { TagChips, TagFilter, BatchTagBar, useContentTags, InlineTagEditor } from '../components/TagManager'
 
 // ─── 类型切换选项 ───────────────────────────────────────────
-type CommTypeFilter = 'all' | 'meeting' | 'chat'
+type CommTypeFilter = 'meeting' | 'chat'
 
 const COMM_TYPE_OPTIONS: { value: CommTypeFilter; label: string }[] = [
-  { value: 'all', label: '全部' },
   { value: 'meeting', label: '会议（含录音）' },
   { value: 'chat', label: '会话' },
 ]
 
-// ─── 列定义 ────────────────────────────────────────────────
-const COMMON_COLUMNS: ColumnDef[] = [
+// ─── 列定义（会议和会话各自只保留重要字段）─────────────────
+const MEETING_COLUMNS: ColumnDef[] = [
   { key: 'title', label: '主题' },
   { key: 'tags', label: '标签' },
-  { key: 'comm_time', label: '会议时间/发送时间' },
-  { key: 'initiator', label: '组织者/发送者' },
+  { key: 'comm_time', label: '会议时间' },
+  { key: 'initiator', label: '组织者' },
+  { key: 'participants', label: '参与人' },
+  { key: 'content', label: '内容预览' },
+  { key: 'source_url', label: '会议纪要', defaultVisible: false },
+  { key: 'duration', label: '时长', defaultVisible: false },
+  { key: 'location', label: '地点', defaultVisible: false },
   { key: 'keywords', label: '关键词', defaultVisible: false },
   { key: 'uploader_name', label: '上传人', defaultVisible: false },
 ]
 
-const MEETING_EXTRA_COLUMNS: ColumnDef[] = [
-  { key: 'duration', label: '时长', defaultVisible: false },
-  { key: 'location', label: '地点', defaultVisible: false },
-  { key: 'participants', label: '参与人/提及人', defaultVisible: false },
-  { key: 'conclusions', label: '结论', defaultVisible: false },
-  { key: 'source_url', label: '会议纪要', defaultVisible: false },
-]
-
-const CHAT_EXTRA_COLUMNS: ColumnDef[] = [
+const CHAT_COLUMNS: ColumnDef[] = [
+  { key: 'tags', label: '标签' },
+  { key: 'comm_time', label: '发送时间' },
+  { key: 'initiator', label: '发送者' },
   { key: 'chat_name', label: '群组名称' },
-  { key: 'content', label: '内容预览' },
+  { key: 'content', label: '发送内容' },
+  { key: 'attachments', label: '附件' },
+  { key: 'keywords', label: '关键词', defaultVisible: false },
+  { key: 'uploader_name', label: '上传人', defaultVisible: false },
 ]
 
 function getColumnsForType(commType: CommTypeFilter): ColumnDef[] {
-  switch (commType) {
-    case 'meeting':
-      return [...COMMON_COLUMNS, ...MEETING_EXTRA_COLUMNS]
-    case 'chat':
-      return [...COMMON_COLUMNS, ...CHAT_EXTRA_COLUMNS]
-    default:
-      return [...COMMON_COLUMNS, ...MEETING_EXTRA_COLUMNS, ...CHAT_EXTRA_COLUMNS]
-  }
+  return commType === 'meeting' ? MEETING_COLUMNS : CHAT_COLUMNS
 }
 
 // ─── 接口类型 ──────────────────────────────────────────────
@@ -103,6 +97,7 @@ interface CommunicationItem {
   parse_status: string
   processed_at: string | null
   synced_at: string | null
+  bitable_url: string | null
   created_at: string
   updated_at: string
 }
@@ -153,16 +148,15 @@ export default function Communications() {
   const [initiatorFilter, setInitiatorFilter] = useState('')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
-  const [commTypeFilter, setCommTypeFilter] = useState<CommTypeFilter>('all')
+  const [commTypeFilter, setCommTypeFilter] = useState<CommTypeFilter>('meeting')
   const [selected, setSelected] = useState<CommunicationItem | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [refreshKey, setRefreshKey] = useState(0)
-  const [showSyncConfig, setShowSyncConfig] = useState(false)
   const [tagFilter, setTagFilter] = useState<number[]>([])
   const [tagRefreshKey, setTagRefreshKey] = useState(0)
 
   const activeColumns = getColumnsForType(commTypeFilter)
-  const { isVisible, toggle, columns: colDefs } = useColumnSettings('communications', activeColumns)
+  const { isVisible, toggle, columns: colDefs } = useColumnSettings(`comm-${commTypeFilter}`, activeColumns)
 
   const pageSize = 20
 
@@ -176,9 +170,7 @@ export default function Communications() {
     if (endDate) params.end_date = new Date(endDate + 'T23:59:59').toISOString()
     if (tagFilter.length > 0) params.tag_ids = tagFilter
 
-    // 类型筛选：会议（含录音）传 meeting，后端会同时覆盖 recording 类型的处理
-    if (commTypeFilter === 'meeting') params.comm_type = 'meeting'
-    else if (commTypeFilter === 'chat') params.comm_type = 'chat'
+    params.comm_type = commTypeFilter
 
     api.get('/communications/list', { params })
       .then((res) => setData(res.data))
@@ -233,35 +225,22 @@ export default function Communications() {
     }
   }
 
+  const handleDelete = async (id: number) => {
+    if (!confirm('确定要删除这条数据吗？')) return
+    try {
+      await api.delete(`/communications/${id}`)
+      toast.success('已删除')
+      if (selected?.id === id) setSelected(null)
+      setRefreshKey((k) => k + 1)
+    } catch {
+      toast.error('删除失败')
+    }
+  }
+
   const handleCommTypeChange = (type: CommTypeFilter) => {
     setCommTypeFilter(type)
     setPage(1)
   }
-
-  // 导入配置参数：根据当前筛选类型显示不同配置
-  const syncConfigProps = commTypeFilter === 'chat'
-    ? {
-        title: '会话记录导入配置',
-        recipeUrl: 'https://recipes.feishu.cn/recipe?template_id=36&ref=share',
-        assetType: 'chat_message' as const,
-        recipeKeywords: ['群聊摘要', '消息汇总', 'Chat', '聊天记录', '群消息'],
-        steps: [
-          '点击下方按钮打开飞书工作配方页面',
-          '在飞书中启用配方，它会自动把会话记录写入一个多维表格',
-          '回到流光，系统会自动检索到配方创建的表格，确认关联即可',
-        ],
-      }
-    : {
-        title: '会议记录导入配置',
-        recipeUrl: 'https://recipes.feishu.cn/recipe?template_id=32',
-        assetType: 'meeting' as const,
-        recipeKeywords: ['会议纪要', '会议记录', 'Meeting', '会议摘要'],
-        steps: [
-          '点击下方按钮打开飞书工作配方页面',
-          '在飞书中启用配方，它会自动把会议记录写入一个多维表格',
-          '回到流光，系统会自动检索到配方创建的表格，确认关联即可',
-        ],
-      }
 
   return (
     <div className="space-y-4">
@@ -269,13 +248,6 @@ export default function Communications() {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <h1 className="text-2xl font-bold text-gray-800">沟通资产</h1>
         <div className="flex items-center gap-3 flex-wrap">
-          <button
-            onClick={() => setShowSyncConfig(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 transition-colors"
-          >
-            <Settings size={16} />
-            导入配置
-          </button>
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
@@ -369,21 +341,11 @@ export default function Communications() {
                     <th className="py-3 px-4 w-10">
                       <input type="checkbox" checked={allSelected} onChange={toggleSelectAll} className="rounded" />
                     </th>
-                    {/* 全部模式下显示类型标识列 */}
-                    {commTypeFilter === 'all' && <th className="text-left py-3 px-4 text-gray-500 font-medium">类型</th>}
-                    {isVisible('title') && <th className="text-left py-3 px-4 text-gray-500 font-medium">主题</th>}
-                    {isVisible('tags') && <th className="text-left py-3 px-4 text-gray-500 font-medium">标签</th>}
-                    {isVisible('keywords') && <th className="text-left py-3 px-4 text-gray-500 font-medium">关键词</th>}
-                    {isVisible('comm_time') && <th className="text-left py-3 px-4 text-gray-500 font-medium">会议时间/发送时间</th>}
-                    {isVisible('initiator') && <th className="text-left py-3 px-4 text-gray-500 font-medium">组织者/发送者</th>}
-                    {isVisible('uploader_name') && <th className="text-left py-3 px-4 text-gray-500 font-medium">上传人</th>}
-                    {isVisible('duration') && <th className="text-left py-3 px-4 text-gray-500 font-medium">时长</th>}
-                    {isVisible('location') && <th className="text-left py-3 px-4 text-gray-500 font-medium">地点</th>}
-                    {isVisible('participants') && <th className="text-left py-3 px-4 text-gray-500 font-medium">参与人/提及人</th>}
-                    {isVisible('conclusions') && <th className="text-left py-3 px-4 text-gray-500 font-medium">结论</th>}
-                    {isVisible('source_url') && <th className="text-left py-3 px-4 text-gray-500 font-medium">会议纪要</th>}
-                    {isVisible('chat_name') && <th className="text-left py-3 px-4 text-gray-500 font-medium">群组名称</th>}
-                    {isVisible('content') && <th className="text-left py-3 px-4 text-gray-500 font-medium">内容预览</th>}
+                    <th className="text-left py-3 px-4 text-gray-500 font-medium">类型</th>
+                    {colDefs.filter(c => isVisible(c.key)).map(c => (
+                      <th key={c.key} className="text-left py-3 px-4 text-gray-500 font-medium">{c.label}</th>
+                    ))}
+                    <th className="text-left py-3 px-4 text-gray-500 font-medium">操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -396,11 +358,9 @@ export default function Communications() {
                       <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
                         <input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => toggleSelect(item.id)} className="rounded" />
                       </td>
-                      {commTypeFilter === 'all' && (
-                        <td className="py-3 px-4">
-                          <CommTypeBadge type={item.comm_type} />
-                        </td>
-                      )}
+                      <td className="py-3 px-4">
+                        <CommTypeBadge type={item.comm_type} />
+                      </td>
                       {isVisible('title') && <td className="py-3 px-4 text-gray-800 font-medium">{item.title || '无标题'}</td>}
                       {isVisible('tags') && (
                         <td className="py-3 px-4 max-w-[200px]">
@@ -412,37 +372,30 @@ export default function Communications() {
                           />
                         </td>
                       )}
-                      {isVisible('keywords') && (
-                        <td className="py-3 px-4 max-w-[200px]">
-                          <div className="flex flex-wrap gap-1">
-                            {(item.keywords || []).slice(0, 3).map((kw, i) => (
-                              <span key={i} className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">{kw}</span>
-                            ))}
-                            {(item.keywords || []).length > 3 && (
-                              <span className="px-1.5 py-0.5 text-gray-400 text-xs">+{item.keywords.length - 3}</span>
-                            )}
-                          </div>
-                        </td>
-                      )}
                       {isVisible('comm_time') && (
                         <td className="py-3 px-4 text-gray-500 whitespace-nowrap">
                           {item.comm_time ? new Date(item.comm_time).toLocaleString('zh-CN') : '-'}
                         </td>
                       )}
                       {isVisible('initiator') && <td className="py-3 px-4 text-gray-500">{item.initiator || '-'}</td>}
-                      {isVisible('uploader_name') && <td className="py-3 px-4 text-gray-500">{item.uploader_name || '-'}</td>}
-                      {isVisible('duration') && (
-                        <td className="py-3 px-4 text-gray-500">
-                          {item.duration_minutes ? `${item.duration_minutes} 分钟` : '-'}
-                        </td>
-                      )}
-                      {isVisible('location') && <td className="py-3 px-4 text-gray-500 truncate max-w-[200px]">{item.location || '-'}</td>}
                       {isVisible('participants') && (
                         <td className="py-3 px-4 text-gray-500">
-                          {item.participants.length > 0 ? `${item.participants.length} 人` : '-'}
+                          {item.participants.length > 0
+                            ? item.participants.slice(0, 3).map(p => p.name || '未知').join('、') + (item.participants.length > 3 ? ` 等${item.participants.length}人` : '')
+                            : '-'}
                         </td>
                       )}
-                      {isVisible('conclusions') && <td className="py-3 px-4 text-gray-500 max-w-[250px] truncate">{item.conclusions || '-'}</td>}
+                      {isVisible('chat_name') && <td className="py-3 px-4 text-gray-500">{item.chat_name || '个人聊天'}</td>}
+                      {isVisible('content') && (
+                        <td className="py-3 px-4 text-gray-500 max-w-xs truncate">
+                          {item.summary?.slice(0, 60) || item.content_text?.slice(0, 60) || '-'}
+                        </td>
+                      )}
+                      {isVisible('attachments') && (
+                        <td className="py-3 px-4">
+                          <AttachmentBadges extraFields={item.extra_fields} />
+                        </td>
+                      )}
                       {isVisible('source_url') && (
                         <td className="py-3 px-4">
                           {item.source_url ? (
@@ -452,14 +405,46 @@ export default function Communications() {
                               rel="noopener noreferrer"
                               className="text-indigo-600 hover:text-indigo-800 hover:underline"
                               onClick={(e) => e.stopPropagation()}
+                              title="查看会议纪要"
                             >
                               <FileText size={16} />
                             </a>
                           ) : '-'}
                         </td>
                       )}
-                      {isVisible('chat_name') && <td className="py-3 px-4 text-gray-500">{item.chat_name || (item.comm_type === 'chat' ? '个人聊天' : '-')}</td>}
-                      {isVisible('content') && <td className="py-3 px-4 text-gray-500 max-w-xs truncate">{item.content_text?.slice(0, 80)}</td>}
+                      {isVisible('duration') && (
+                        <td className="py-3 px-4 text-gray-500">
+                          {item.duration_minutes ? `${item.duration_minutes} 分钟` : '-'}
+                        </td>
+                      )}
+                      {isVisible('location') && <td className="py-3 px-4 text-gray-500 truncate max-w-[200px]">{item.location || '-'}</td>}
+                      {isVisible('keywords') && (
+                        <td className="py-3 px-4 max-w-[200px]">
+                          <div className="flex flex-wrap gap-1">
+                            {(item.keywords || []).slice(0, 3).map((kw, i) => (
+                              <span key={i} className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">{kw}</span>
+                            ))}
+                          </div>
+                        </td>
+                      )}
+                      {isVisible('uploader_name') && <td className="py-3 px-4 text-gray-500">{item.uploader_name || '-'}</td>}
+                      <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-1">
+                          {item.source_url && (
+                            <a href={item.source_url} target="_blank" rel="noopener noreferrer" className="p-1.5 hover:bg-blue-50 rounded text-blue-600" title="跳转源文档">
+                              <ExternalLink size={14} />
+                            </a>
+                          )}
+                          {item.bitable_url && (
+                            <a href={item.bitable_url} target="_blank" rel="noopener noreferrer" className="p-1.5 hover:bg-purple-50 rounded text-purple-600" title="跳转源多维表格">
+                              <Table2 size={14} />
+                            </a>
+                          )}
+                          <button onClick={() => handleDelete(item.id)} className="p-1.5 hover:bg-red-50 rounded text-red-500" title="删除">
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -485,15 +470,6 @@ export default function Communications() {
           <div className="p-12 text-center text-gray-400">暂无沟通记录</div>
         )}
       </div>
-
-      {/* 导入配置弹窗 */}
-      {showSyncConfig && (
-        <RecipeSyncConfig
-          {...syncConfigProps}
-          onClose={() => setShowSyncConfig(false)}
-          onSyncComplete={() => setRefreshKey((k) => k + 1)}
-        />
-      )}
 
       {/* 详情侧栏 */}
       {selected && (
@@ -611,7 +587,7 @@ function CommunicationDetail({
           {item.uploader_name && <Field label="上传人" value={item.uploader_name} icon={<User size={14} />} />}
 
           {/* 相关链接 */}
-          {(item.source_url || item.recording_url || (item.extra_fields?.bitable_url as string | undefined)) && (
+          {(item.source_url || item.recording_url || item.bitable_url) && (
             <div>
               <p className="text-sm text-gray-500 mb-1">相关链接</p>
               <div className="flex flex-wrap gap-2">
@@ -637,9 +613,9 @@ function CommunicationDetail({
                     查看录音
                   </a>
                 )}
-                {(item.extra_fields?.bitable_url as string | undefined) && (
+                {item.bitable_url && (
                   <a
-                    href={item.extra_fields?.bitable_url as string}
+                    href={item.bitable_url}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-2 px-3 py-2 bg-purple-50 text-purple-700 rounded-lg text-sm hover:bg-purple-100 transition-colors"
@@ -752,6 +728,32 @@ function Field({ label, value, icon }: { label: string; value: string; icon?: Re
     <div>
       <p className="text-sm text-gray-500 flex items-center gap-1">{icon}{label}</p>
       <p className="text-sm text-gray-800 font-medium">{value}</p>
+    </div>
+  )
+}
+
+// ─── 表格内附件缩略展示 ─────────────────────────────────────
+function AttachmentBadges({ extraFields }: { extraFields?: CommunicationItem['extra_fields'] }) {
+  const attachments = extraFields?._attachments || []
+  if (attachments.length === 0) return <span className="text-gray-400">-</span>
+
+  const images = attachments.filter(a => isImage(a.name, a.type))
+  const files = attachments.filter(a => !isImage(a.name, a.type))
+
+  return (
+    <div className="flex items-center gap-1.5">
+      {images.length > 0 && (
+        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded text-xs">
+          <Image size={12} />
+          {images.length}
+        </span>
+      )}
+      {files.length > 0 && (
+        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">
+          <Paperclip size={12} />
+          {files.length}
+        </span>
+      )}
     </div>
   )
 }

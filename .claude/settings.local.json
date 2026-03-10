@@ -67,7 +67,8 @@
       "Bash(grep:*)",
       "Bash(ipconfig:*)",
       "mcp__ide__getDiagnostics",
-      "Bash(bash d:/CC/liuguang-data-platform/.claude/log-change.sh)"
+      "Bash(bash d:/CC/liuguang-data-platform/.claude/log-change.sh)",
+      "Bash(NO_PROXY=localhost,127.0.0.1 docker compose up -d --build backend)"
     ]
   },
   "hooks": {
@@ -78,6 +79,10 @@
           {
             "type": "command",
             "command": "bash d:/CC/liuguang-data-platform/.claude/log-change.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash d:/CC/liuguang-data-platform/.claude/restart-backend.sh"
           }
         ]
       }

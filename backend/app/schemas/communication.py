@@ -1,8 +1,10 @@
 """沟通资产 Schema。"""
 
-from datetime import datetime
+from pydantic import BaseModel, computed_field
 
-from pydantic import BaseModel
+from app.schemas.types import UTCDatetime, UTCDatetimeOpt
+
+from app.config import settings
 
 
 class CommunicationOut(BaseModel):
@@ -15,7 +17,7 @@ class CommunicationOut(BaseModel):
     source_table_id: str | None = None
     feishu_record_id: str
     title: str | None = None
-    comm_time: datetime | None = None
+    comm_time: UTCDatetimeOpt = None
     initiator: str | None = None
     participants: list = []
     duration_minutes: int | None = None
@@ -39,15 +41,26 @@ class CommunicationOut(BaseModel):
     quality_score: float | None = None
     duplicate_of: int | None = None
     extra_fields: dict = {}
-    feishu_created_at: datetime | None = None
-    feishu_updated_at: datetime | None = None
+    feishu_created_at: UTCDatetimeOpt = None
+    feishu_updated_at: UTCDatetimeOpt = None
     parse_status: str = "done"
-    processed_at: datetime | None = None
-    synced_at: datetime | None = None
-    created_at: datetime
-    updated_at: datetime
+    processed_at: UTCDatetimeOpt = None
+    synced_at: UTCDatetimeOpt = None
+    created_at: UTCDatetime
+    updated_at: UTCDatetime
 
     model_config = {"from_attributes": True}
+
+    @computed_field
+    @property
+    def bitable_url(self) -> str | None:
+        """构建源多维表格链接。"""
+        if not self.source_app_token or not settings.feishu_base_domain:
+            return None
+        url = f"https://{settings.feishu_base_domain}/base/{self.source_app_token}"
+        if self.source_table_id:
+            url += f"?table={self.source_table_id}"
+        return url
 
 
 class CommunicationListResponse(BaseModel):

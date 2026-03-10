@@ -223,10 +223,11 @@ async def generate_insight_stream(
 
     full_content = []
     try:
-        from openai import AsyncOpenAI
-        client = AsyncOpenAI(
+        from app.services.llm import create_openai_client
+        client = create_openai_client(
             api_key=settings.agent_llm_api_key,
             base_url=settings.agent_llm_base_url,
+            timeout=120.0,
         )
         stream = await client.chat.completions.create(
             model=settings.agent_llm_model,

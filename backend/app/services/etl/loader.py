@@ -90,65 +90,68 @@ class AssetLoader:
         loaded_count = 0
         for record, embedding in zip(records, embeddings):
             try:
-                vector_str = f"[{','.join(str(v) for v in embedding)}]" if embedding else None
+                # 用 SAVEPOINT 包裹单条操作，失败时只回滚这一条，不影响整个事务
+                async with db.begin_nested():
+                    vector_str = f"[{','.join(str(v) for v in embedding)}]" if embedding else None
 
-                # 去重检测（入库后再检查，因为需要数据库中的 ID）
-                content_type = {
-                    TransformedDocument: "document",
-                    TransformedCommunication: "communication",
-                }.get(type(record), "document")
+                    # 去重检测（入库后再检查，因为需要数据库中的 ID）
+                    content_type = {
+                        TransformedDocument: "document",
+                        TransformedCommunication: "communication",
+                    }.get(type(record), "document")
 
-                if isinstance(record, TransformedDocument):
-                    await self._upsert_document(db, record, vector_str)
-                elif isinstance(record, TransformedCommunication):
-                    await self._upsert_communication(db, record, vector_str)
-                else:
-                    logger.warning("未知记录类型: %s", type(record))
-                    continue
+                    if isinstance(record, TransformedDocument):
+                        await self._upsert_document(db, record, vector_str)
+                    elif isinstance(record, TransformedCommunication):
+                        await self._upsert_communication(db, record, vector_str)
+                    else:
+                        logger.warning("未知记录类型: %s", type(record))
+                        continue
 
-                loaded_count += 1
+                    loaded_count += 1
 
-                # 查询刚 upsert 的记录 ID
-                table_name = {
-                    "document": "documents",
-                    "communication": "communications",
-                }.get(content_type, "documents")
+                    # 查询刚 upsert 的记录 ID
+                    table_name = {
+                        "document": "documents",
+                        "communication": "communications",
+                    }.get(content_type, "documents")
 
-                id_result = await db.execute(
-                    text(f"SELECT id FROM {table_name} WHERE feishu_record_id = :rid"),
-                    {"rid": record.feishu_record_id},
-                )
-                id_row = id_result.fetchone()
-                record_id = id_row[0] if id_row else None
-
-                # 去重标记
-                if record_id and record.content_hash:
-                    dup_of = await content_postprocessor.check_duplicate(
-                        record.content_hash, content_type, record_id, db,
+                    id_result = await db.execute(
+                        text(f"SELECT id FROM {table_name} WHERE feishu_record_id = :rid"),
+                        {"rid": record.feishu_record_id},
                     )
-                    if dup_of:
-                        await db.execute(
-                            text(f"UPDATE {table_name} SET duplicate_of = :dup WHERE id = :id"),
-                            {"dup": dup_of, "id": record_id},
+                    id_row = id_result.fetchone()
+                    record_id = id_row[0] if id_row else None
+
+                    # 去重标记
+                    if record_id and record.content_hash:
+                        dup_of = await content_postprocessor.check_duplicate(
+                            record.content_hash, content_type, record_id, db,
+                        )
+                        if dup_of:
+                            await db.execute(
+                                text(f"UPDATE {table_name} SET duplicate_of = :dup WHERE id = :id"),
+                                {"dup": dup_of, "id": record_id},
+                            )
+
+                    # 写入分块
+                    if record_id and hasattr(record, "chunks") and record.chunks:
+                        await self._write_chunks(
+                            db, content_type, record_id, record.chunks,
                         )
 
-                # 写入分块
-                if record_id and hasattr(record, "chunks") and record.chunks:
-                    await self._write_chunks(
-                        db, content_type, record_id, record.chunks,
-                    )
-
-                # 写入继承标签
-                if default_tag_ids and record_id:
-                    await self._inherit_tags(
-                        db, record.feishu_record_id, content_type, default_tag_ids
-                    )
+                    # 写入继承标签
+                    if default_tag_ids and record_id:
+                        await self._inherit_tags(
+                            db, record.feishu_record_id, content_type, default_tag_ids
+                        )
             except Exception as e:
                 logger.error(
                     "Upsert 失败 (record_id=%s): %s",
                     record.feishu_record_id,
                     e,
                 )
+                # begin_nested() 的 SAVEPOINT 已自动回滚，事务仍可继续
 
         await db.commit()
 
@@ -198,7 +201,7 @@ class AssetLoader:
                     :feishu_created_at, :feishu_updated_at,
                     now(), now(), now()
                 )
-                ON CONFLICT (feishu_record_id) WHERE feishu_record_id IS NOT NULL DO UPDATE SET
+                ON CONFLICT (feishu_record_id, owner_id) WHERE feishu_record_id IS NOT NULL DO UPDATE SET
                     content_text = EXCLUDED.content_text,
                     content_vector = EXCLUDED.content_vector,
                     title = EXCLUDED.title,
@@ -537,8 +540,46 @@ class AssetLoader:
         )
         sync_state = result.scalar_one_or_none()
         if sync_state:
+            # 查找数据源的 asset_type 来确定目标表
+            ds_result = await db.execute(
+                select(ETLDataSource).where(
+                    ETLDataSource.app_token == app_token,
+                    ETLDataSource.table_id == table_id,
+                )
+            )
+            ds = ds_result.scalar_one_or_none()
+
+            # 查询目标表的实际总记录数（累计值，而非仅本次同步数）
+            total_count = records_synced
+            if ds and ds.owner_id:
+                try:
+                    if ds.asset_type == "communication":
+                        count_result = await db.execute(
+                            text(
+                                "SELECT COUNT(*) FROM communications "
+                                "WHERE owner_id = :owner_id "
+                                "AND source_app_token = :app_token "
+                                "AND source_table_id = :table_id"
+                            ),
+                            {"owner_id": ds.owner_id, "app_token": app_token, "table_id": table_id},
+                        )
+                    else:
+                        count_result = await db.execute(
+                            text(
+                                "SELECT COUNT(*) FROM documents "
+                                "WHERE owner_id = :owner_id "
+                                "AND source_app_token = :app_token "
+                                "AND source_table_id = :table_id"
+                            ),
+                            {"owner_id": ds.owner_id, "app_token": app_token, "table_id": table_id},
+                        )
+                    total_count = count_result.scalar() or records_synced
+                except Exception:
+                    await db.rollback()
+                    total_count = (sync_state.records_synced or 0) + records_synced
+
             sync_state.last_sync_status = "success"
-            sync_state.records_synced = records_synced
+            sync_state.records_synced = total_count
             sync_state.last_sync_time = datetime.utcnow()
             sync_state.error_message = None
             await db.commit()

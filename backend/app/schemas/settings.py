@@ -1,8 +1,8 @@
 """个人设置相关的 Pydantic 模型。"""
 
-from datetime import datetime
-
 from pydantic import BaseModel
+
+from app.schemas.types import UTCDatetime, UTCDatetimeOpt
 
 
 # ── 通知偏好 ──
@@ -39,9 +39,9 @@ class KeywordSyncRuleOut(BaseModel):
     include_shared: bool = True
     default_tag_ids: list[int] = []
     is_enabled: bool
-    last_scan_time: datetime | None = None
+    last_scan_time: UTCDatetimeOpt = None
     docs_matched: int = 0
-    created_at: datetime
+    created_at: UTCDatetime
 
     model_config = {"from_attributes": True}
 

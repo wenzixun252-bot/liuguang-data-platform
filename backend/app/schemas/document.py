@@ -1,10 +1,9 @@
 """文档 Pydantic 模型。"""
 
-from datetime import datetime
-
 from pydantic import BaseModel, computed_field
 
 from app.config import settings
+from app.schemas.types import UTCDatetime, UTCDatetimeOpt
 
 
 class DocumentOut(BaseModel):
@@ -30,13 +29,13 @@ class DocumentOut(BaseModel):
     extra_fields: dict = {}
     feishu_record_id: str | None = None
     parse_status: str = "done"
-    processed_at: datetime | None = None
+    processed_at: UTCDatetimeOpt = None
     import_count: int = 1
-    synced_at: datetime | None = None
-    feishu_created_at: datetime | None = None
-    feishu_updated_at: datetime | None = None
-    created_at: datetime
-    updated_at: datetime
+    synced_at: UTCDatetimeOpt = None
+    feishu_created_at: UTCDatetimeOpt = None
+    feishu_updated_at: UTCDatetimeOpt = None
+    created_at: UTCDatetime
+    updated_at: UTCDatetime
 
     model_config = {"from_attributes": True}
 

@@ -487,7 +487,7 @@ class FeishuClient:
         folder_token: str,
         user_access_token: str | None = None,
     ) -> list[dict]:
-        """列出指定文件夹下的所有文件。
+        """列出指定文件夹下的所有文件，包括快捷方式指向的原始文档。
 
         Args:
             folder_token: 飞书文件夹 token（可从文件夹 URL 获取）
@@ -526,8 +526,26 @@ class FeishuClient:
 
                 items = data.get("data", {}).get("files", [])
                 for item in items:
-                    if item.get("type") in supported_types:
+                    file_type = item.get("type")
+                    if file_type in supported_types:
                         all_files.append(item)
+                    elif file_type == "shortcut":
+                        # 快捷方式：解析为原始文件
+                        shortcut_info = item.get("shortcut_info", {})
+                        target_type = shortcut_info.get("target_type")
+                        target_token = shortcut_info.get("target_token")
+                        if target_type in supported_types and target_token:
+                            resolved = {
+                                **item,
+                                "token": target_token,
+                                "type": target_type,
+                                "_from_shortcut": True,
+                            }
+                            all_files.append(resolved)
+                            logger.debug(
+                                "快捷方式 %s -> %s (%s)",
+                                item.get("name"), target_token, target_type,
+                            )
 
                 if not data.get("data", {}).get("has_more"):
                     break
@@ -535,6 +553,53 @@ class FeishuClient:
                 await asyncio.sleep(0.2)
 
         return all_files
+
+    async def list_root_folders(
+        self,
+        user_access_token: str | None = None,
+    ) -> list[dict]:
+        """列出用户云空间根目录下的所有文件夹。
+
+        返回: [{token, name, type: "folder"}]
+        """
+        if user_access_token:
+            token = user_access_token
+        else:
+            token = await self.get_tenant_access_token()
+
+        folders: list[dict] = []
+        async with self._client() as client:
+            page_token: str | None = None
+            while True:
+                params: dict = {"page_size": 50, "folder_token": ""}
+                if page_token:
+                    params["page_token"] = page_token
+
+                resp = await client.get(
+                    f"{FEISHU_BASE_URL}/drive/v1/files",
+                    headers={"Authorization": f"Bearer {token}"},
+                    params=params,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                if data.get("code") != 0:
+                    break
+
+                items = data.get("data", {}).get("files", [])
+                for item in items:
+                    if item.get("type") == "folder":
+                        folders.append({
+                            "token": item.get("token", ""),
+                            "name": item.get("name", ""),
+                            "type": "folder",
+                        })
+
+                if not data.get("data", {}).get("has_more"):
+                    break
+                page_token = data.get("data", {}).get("page_token")
+                await asyncio.sleep(0.2)
+
+        return folders
 
     async def get_document_content(
         self,
@@ -614,11 +679,29 @@ class FeishuClient:
         支持的 block 类型:
         1=page, 2=text, 3=heading1, 4=heading2, 5=heading3,
         6=heading4, 7=heading5, 8=heading6,
-        9=bullet, 10=ordered, 11=code, 12=quote,
-        14=todo, 17=divider, 18=table, 27=image
+        9=bullet, 10=ordered, 11=code, 12=quote_container,
+        14=todo, 17=divider, 18=table, 27=image, 23=callout
         """
         lines: list[str] = []
         ordered_counter = 0
+
+        # 构建 block_id -> block 的索引，以及 child_id -> parent_block 的映射
+        block_map: dict[str, dict] = {}
+        parent_map: dict[str, dict] = {}
+        for block in blocks:
+            bid = block.get("block_id", "")
+            if bid:
+                block_map[bid] = block
+            for child_id in block.get("children", []):
+                parent_map[child_id] = block
+
+        def _is_inside_container(block: dict) -> bool:
+            """判断 block 是否在 quote_container(12) 或 callout(23) 内部。"""
+            bid = block.get("block_id", "")
+            parent = parent_map.get(bid)
+            if parent and parent.get("block_type") in (12, 23):
+                return True
+            return False
 
         for block in blocks:
             block_type = block.get("block_type", 0)
@@ -643,69 +726,69 @@ class FeishuClient:
                         parts.append(f"[文档: {mention_doc.get('title', '')}]")
                 return "".join(parts)
 
+            # quote_container(12) 和 callout(23) 是容器块，
+            # 它们本身没有文字，文字在子块中，跳过容器本身
+            if block_type in (12, 23):
+                ordered_counter = 0
+                continue
+
+            # 判断当前 block 是否在 quote/callout 容器内，是则加 "> " 前缀
+            prefix = "> " if _is_inside_container(block) else ""
+
             if block_type == 2:  # text
                 text = _extract_text("text")
                 if text.strip():
-                    lines.append(text)
+                    lines.append(f"{prefix}{text}")
                     ordered_counter = 0
                 else:
-                    lines.append("")  # 空行
+                    lines.append(f"{prefix}" if prefix else "")
                     ordered_counter = 0
 
             elif block_type == 3:  # heading1
-                lines.append(f"# {_extract_text('heading1')}")
+                lines.append(f"{prefix}# {_extract_text('heading1')}")
                 ordered_counter = 0
             elif block_type == 4:  # heading2
-                lines.append(f"## {_extract_text('heading2')}")
+                lines.append(f"{prefix}## {_extract_text('heading2')}")
                 ordered_counter = 0
             elif block_type == 5:  # heading3
-                lines.append(f"### {_extract_text('heading3')}")
+                lines.append(f"{prefix}### {_extract_text('heading3')}")
                 ordered_counter = 0
             elif block_type in (6, 7, 8):  # heading4-6
                 key = f"heading{block_type - 3}"
-                lines.append(f"{'#' * (block_type - 3)} {_extract_text(key)}")
+                lines.append(f"{prefix}{'#' * (block_type - 3)} {_extract_text(key)}")
                 ordered_counter = 0
 
             elif block_type == 9:  # bullet
-                lines.append(f"- {_extract_text('bullet')}")
+                lines.append(f"{prefix}- {_extract_text('bullet')}")
                 ordered_counter = 0
             elif block_type == 10:  # ordered
                 ordered_counter += 1
-                lines.append(f"{ordered_counter}. {_extract_text('ordered')}")
+                lines.append(f"{prefix}{ordered_counter}. {_extract_text('ordered')}")
 
             elif block_type == 11:  # code
                 code_text = _extract_text("code")
                 lang = block.get("code", {}).get("style", {}).get("language", "")
-                lines.append(f"```{lang}")
-                lines.append(code_text)
-                lines.append("```")
-                ordered_counter = 0
-
-            elif block_type == 12:  # quote
-                lines.append(f"> {_extract_text('quote')}")
+                lines.append(f"{prefix}```{lang}")
+                lines.append(f"{prefix}{code_text}")
+                lines.append(f"{prefix}```")
                 ordered_counter = 0
 
             elif block_type == 14:  # todo
                 done = block.get("todo", {}).get("style", {}).get("done", False)
                 mark = "[x]" if done else "[ ]"
-                lines.append(f"- {mark} {_extract_text('todo')}")
+                lines.append(f"{prefix}- {mark} {_extract_text('todo')}")
                 ordered_counter = 0
 
             elif block_type == 17:  # divider
-                lines.append("---")
+                lines.append(f"{prefix}---")
                 ordered_counter = 0
 
             elif block_type == 27:  # image
-                lines.append("[图片]")
+                lines.append(f"{prefix}[图片]")
                 ordered_counter = 0
 
             elif block_type == 18:  # table
-                # 简单处理：标记为表格区域
-                lines.append("[表格]")
-                ordered_counter = 0
-
-            elif block_type == 23:  # callout
-                lines.append(f"> {_extract_text('callout')}")
+                lines.append(f"{prefix}[表格]")
                 ordered_counter = 0
 
             else:

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.document import Document
+from app.models.communication import Communication
 from app.services.feishu import feishu_client, FeishuAPIError
 
 logger = logging.getLogger(__name__)
@@ -374,30 +375,396 @@ class CloudDocImportService:
         Args:
             tag_ids: 导入成功后自动打上的标签 ID 列表（来自关键词规则的 default_tag_ids）
         """
+        PER_FILE_TIMEOUT = 90  # 单文件超时 90 秒
+
         result = ImportResult()
 
         for info in file_infos:
-            doc, status = await self.import_item(
-                info, owner_id, db, user_access_token, uploader_name,
-            )
+            name = info.get("name", "未命名")
+            token = info.get("token", "")
+            try:
+                doc, status = await asyncio.wait_for(
+                    self.import_item(
+                        info, owner_id, db, user_access_token, uploader_name,
+                    ),
+                    timeout=PER_FILE_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("单文件导入超时（%ds）: %s (%s)", PER_FILE_TIMEOUT, name, token)
+                result.failed += 1
+                continue
+
             if status == "imported":
                 result.imported += 1
                 if doc:
                     result.documents.append(doc)
-                    # 应用默认标签
                     if tag_ids:
                         await self._apply_tags(doc.id, tag_ids, db)
             elif status == "skipped":
                 result.skipped += 1
                 if doc:
                     result.documents.append(doc)
-                    # 跳过的文档也补打标签（可能是新加的标签）
                     if tag_ids:
                         await self._apply_tags(doc.id, tag_ids, db)
             else:
                 result.failed += 1
 
             # QPS 控制
+            await asyncio.sleep(0.5)
+
+        return result
+
+    async def import_cloud_doc_as_communication(
+        self,
+        document_id: str,
+        owner_id: str,
+        db: AsyncSession,
+        user_access_token: str,
+        uploader_name: str | None = None,
+        force: bool = False,
+    ) -> tuple[Communication | None, str]:
+        """导入飞书云文档为沟通资产（会议纪要/文字记录），使用 LLM 智能提取字段。
+
+        Returns:
+            (Communication, status) — status: "imported" | "skipped" | "failed"
+        """
+        try:
+            # 1. 检查是否已导入（通过 feishu_record_id 去重）
+            existing = await self._find_existing_communication(db, document_id, owner_id)
+            if existing and not force:
+                logger.info("云文档已导入为沟通资产，跳过: %s", document_id)
+                return existing, "skipped"
+
+            # 2. 通过 Block API 获取文档内容
+            doc_content = await feishu_client.get_document_content(
+                document_id, user_access_token=user_access_token,
+            )
+            title = doc_content["title"]
+            content_text = doc_content["content_text"]
+
+            if not content_text.strip():
+                content_text = f"[空文档] {title}"
+
+            # 3. LLM 提取沟通资产字段
+            parsed = await self._llm_parse_communication(content_text)
+
+            # 4. 生成 Embedding
+            embedding = await self._generate_embedding(title, content_text)
+
+            # 5. 构建文档 URL（用于从沟通资产跳转回原云文档）
+            domain = settings.feishu_base_domain or "feishu.cn"
+            source_url = f"https://{domain}/docx/{document_id}"
+
+            # 6. 构建时间戳
+            created_time = doc_content.get("created_time")
+            modified_time = doc_content.get("modified_time")
+            feishu_created = datetime.fromtimestamp(int(created_time)) if created_time else None
+            feishu_updated = datetime.fromtimestamp(int(modified_time)) if modified_time else None
+
+            # 7. 解析 comm_time（确保不带时区，兼容数据库字段）
+            comm_time = None
+            if parsed.get("comm_time"):
+                try:
+                    dt = datetime.fromisoformat(parsed["comm_time"])
+                    # 移除时区信息，转换为 naive datetime
+                    if dt.tzinfo is not None:
+                        dt = dt.replace(tzinfo=None)
+                    comm_time = dt
+                except (ValueError, TypeError):
+                    comm_time = feishu_created
+
+            keywords_list = parsed.get("keywords", []) if isinstance(parsed.get("keywords"), list) else []
+            participants = parsed.get("participants", []) if isinstance(parsed.get("participants"), list) else []
+            action_items = parsed.get("action_items", []) if isinstance(parsed.get("action_items"), list) else []
+            comm_type = parsed.get("comm_type", "meeting")
+            if comm_type not in ("meeting", "chat", "recording"):
+                comm_type = "meeting"
+
+            if existing:
+                existing.title = parsed.get("title") or title
+                existing.content_text = content_text
+                existing.summary = parsed.get("summary")
+                existing.initiator = parsed.get("initiator")
+                existing.participants = participants
+                existing.conclusions = parsed.get("conclusions")
+                existing.action_items = action_items
+                existing.keywords = keywords_list
+                existing.sentiment = parsed.get("sentiment")
+                existing.duration_minutes = parsed.get("duration_minutes")
+                existing.comm_time = comm_time
+                existing.source_url = source_url
+                existing.synced_at = datetime.utcnow()
+                if embedding:
+                    existing.content_vector = embedding
+                await db.commit()
+                await db.refresh(existing)
+                logger.info("沟通资产已更新: id=%d, title=%s", existing.id, existing.title)
+                return existing, "imported"
+            else:
+                comm = Communication(
+                    owner_id=owner_id,
+                    comm_type=comm_type,
+                    source_platform="feishu",
+                    source_app_token=f"cloud_doc_{document_id}",
+                    feishu_record_id=f"cloud_{document_id}",
+                    title=parsed.get("title") or title,
+                    comm_time=comm_time or feishu_created,
+                    initiator=parsed.get("initiator"),
+                    participants=participants,
+                    duration_minutes=parsed.get("duration_minutes"),
+                    conclusions=parsed.get("conclusions"),
+                    action_items=action_items,
+                    content_text=content_text,
+                    summary=parsed.get("summary"),
+                    source_url=source_url,
+                    uploader_name=uploader_name,
+                    keywords=keywords_list,
+                    sentiment=parsed.get("sentiment"),
+                    feishu_created_at=feishu_created,
+                    feishu_updated_at=feishu_updated,
+                    synced_at=datetime.utcnow(),
+                )
+                if embedding:
+                    comm.content_vector = embedding
+                db.add(comm)
+                await db.commit()
+                await db.refresh(comm)
+                logger.info("沟通资产已导入: id=%d, title=%s", comm.id, comm.title)
+                return comm, "imported"
+
+        except Exception as e:
+            logger.error("导入云文档为沟通资产失败 [%s]: %s", document_id, e, exc_info=True)
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+            return None, "failed"
+
+    async def import_file_as_communication(
+        self,
+        file_token: str,
+        file_name: str,
+        owner_id: str,
+        db: AsyncSession,
+        user_access_token: str,
+        uploader_name: str | None = None,
+        force: bool = False,
+    ) -> tuple[Communication | None, str]:
+        """导入飞书文件（PDF 等）为沟通资产：下载文件 → 提取文本 → LLM 解析。
+
+        Returns:
+            (Communication, status) — status: "imported" | "skipped" | "failed"
+        """
+        try:
+            # 1. 检查是否已导入
+            existing = await self._find_existing_communication(db, file_token, owner_id)
+            if existing and not force:
+                logger.info("文件已导入为沟通资产，跳过: %s", file_token)
+                return existing, "skipped"
+
+            # 2. 获取扩展名
+            ext = file_name.rsplit(".", 1)[-1].lower() if "." in file_name else ""
+            if ext == file_name.lower() or not ext:
+                ext = ""
+
+            # 3. 下载文件
+            content_bytes = await feishu_client.download_drive_file(
+                file_token, user_access_token=user_access_token,
+            )
+            logger.info("文件已下载: %s (%d bytes)", file_name, len(content_bytes))
+
+            # 4. 提取文本
+            if not ext:
+                ext = self._guess_extension(content_bytes) or "bin"
+
+            is_image = ext in IMAGE_EXTENSIONS
+            if is_image:
+                _, content_text = await self._parse_image(content_bytes, ext, file_name)
+            elif ext in EXTRACTABLE_FILE_EXTENSIONS:
+                content_text = self._extract_text(content_bytes, ext)
+            else:
+                content_text = content_bytes.decode("utf-8", errors="replace")[:10000]
+
+            if not content_text.strip():
+                content_text = f"[{ext} 文件] {file_name}"
+
+            title = file_name
+
+            # 5. LLM 提取沟通资产字段
+            parsed = await self._llm_parse_communication(content_text)
+
+            # 6. 生成 Embedding
+            embedding = await self._generate_embedding(title, content_text)
+
+            # 7. 构建文档 URL
+            domain = settings.feishu_base_domain or "feishu.cn"
+            source_url = f"https://{domain}/file/{file_token}"
+
+            # 8. 解析字段
+            comm_time = None
+            if parsed.get("comm_time"):
+                try:
+                    dt = datetime.fromisoformat(parsed["comm_time"])
+                    if dt.tzinfo is not None:
+                        dt = dt.replace(tzinfo=None)
+                    comm_time = dt
+                except (ValueError, TypeError):
+                    pass
+
+            keywords_list = parsed.get("keywords", []) if isinstance(parsed.get("keywords"), list) else []
+            participants = parsed.get("participants", []) if isinstance(parsed.get("participants"), list) else []
+            action_items = parsed.get("action_items", []) if isinstance(parsed.get("action_items"), list) else []
+            comm_type = parsed.get("comm_type", "meeting")
+            if comm_type not in ("meeting", "chat", "recording"):
+                comm_type = "meeting"
+
+            if existing:
+                existing.title = parsed.get("title") or title
+                existing.content_text = content_text
+                existing.summary = parsed.get("summary")
+                existing.initiator = parsed.get("initiator")
+                existing.participants = participants
+                existing.conclusions = parsed.get("conclusions")
+                existing.action_items = action_items
+                existing.keywords = keywords_list
+                existing.sentiment = parsed.get("sentiment")
+                existing.duration_minutes = parsed.get("duration_minutes")
+                existing.comm_time = comm_time
+                existing.source_url = source_url
+                existing.synced_at = datetime.utcnow()
+                if embedding:
+                    existing.content_vector = embedding
+                await db.commit()
+                await db.refresh(existing)
+                logger.info("文件沟通资产已更新: id=%d, title=%s", existing.id, existing.title)
+                return existing, "imported"
+            else:
+                comm = Communication(
+                    owner_id=owner_id,
+                    comm_type=comm_type,
+                    source_platform="feishu",
+                    source_app_token=f"cloud_file_{file_token}",
+                    feishu_record_id=f"cloud_{file_token}",
+                    title=parsed.get("title") or title,
+                    comm_time=comm_time,
+                    initiator=parsed.get("initiator"),
+                    participants=participants,
+                    duration_minutes=parsed.get("duration_minutes"),
+                    conclusions=parsed.get("conclusions"),
+                    action_items=action_items,
+                    content_text=content_text,
+                    summary=parsed.get("summary"),
+                    source_url=source_url,
+                    uploader_name=uploader_name,
+                    keywords=keywords_list,
+                    sentiment=parsed.get("sentiment"),
+                    synced_at=datetime.utcnow(),
+                )
+                if embedding:
+                    comm.content_vector = embedding
+                db.add(comm)
+                await db.commit()
+                await db.refresh(comm)
+                logger.info("文件沟通资产已导入: id=%d, title=%s", comm.id, comm.title)
+                return comm, "imported"
+
+        except Exception as e:
+            logger.error("导入文件为沟通资产失败 [%s]: %s", file_token, e, exc_info=True)
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+            return None, "failed"
+
+    async def batch_import_as_communication(
+        self,
+        file_infos: list[dict],
+        owner_id: str,
+        db: AsyncSession,
+        user_access_token: str,
+        uploader_name: str | None = None,
+    ) -> ImportResult:
+        """批量导入云文档为沟通资产。
+
+        支持 docx/doc/wiki 类型，wiki 节点会自动解析为实际文档再导入。
+        每个文件有 90 秒的单独超时，避免单个文件卡住拖慢整个批次。
+        """
+        PER_FILE_TIMEOUT = 90  # 单文件超时 90 秒
+
+        result = ImportResult()
+
+        for info in file_infos:
+            token = info.get("token", "")
+            file_type = info.get("type", "docx")
+            name = info.get("name", "未命名")
+            if not token:
+                result.failed += 1
+                continue
+
+            # 根据文件类型路由到正确的 document_id
+            document_id = token
+            try:
+                if file_type == "wiki":
+                    # wiki 节点需要先解析出实际的文档 token
+                    node = await feishu_client.get_wiki_node_info(
+                        token, user_access_token=user_access_token,
+                    )
+                    obj_type = node.get("obj_type", "")
+                    if obj_type in ("docx", "doc"):
+                        document_id = node.get("obj_token", token)
+                    else:
+                        logger.warning(
+                            "wiki 节点实际类型不支持导入为沟通资产: %s (%s → %s)",
+                            name, token, obj_type,
+                        )
+                        result.failed += 1
+                        continue
+                elif file_type == "file":
+                    # 普通文件（PDF 等）走下载 → 提取文本路径
+                    try:
+                        comm, status = await asyncio.wait_for(
+                            self.import_file_as_communication(
+                                token, name, owner_id, db, user_access_token, uploader_name,
+                            ),
+                            timeout=PER_FILE_TIMEOUT,
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning("文件导入超时（%ds）: %s (%s)", PER_FILE_TIMEOUT, name, token)
+                        result.failed += 1
+                        continue
+
+                    if status == "imported":
+                        result.imported += 1
+                    elif status == "skipped":
+                        result.skipped += 1
+                    else:
+                        result.failed += 1
+                    await asyncio.sleep(0.5)
+                    continue
+            except Exception as e:
+                logger.warning("解析文件类型失败 [%s]: %s", token, e)
+                result.failed += 1
+                continue
+
+            try:
+                comm, status = await asyncio.wait_for(
+                    self.import_cloud_doc_as_communication(
+                        document_id, owner_id, db, user_access_token, uploader_name,
+                    ),
+                    timeout=PER_FILE_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("单文件导入超时（%ds）: %s (%s)", PER_FILE_TIMEOUT, name, token)
+                result.failed += 1
+                continue
+
+            if status == "imported":
+                result.imported += 1
+            elif status == "skipped":
+                result.skipped += 1
+            else:
+                result.failed += 1
+
             await asyncio.sleep(0.5)
 
         return result
@@ -445,6 +812,34 @@ class CloudDocImportService:
             except Exception as e:
                 logger.warning("给文档 %d 打标签 %d 失败: %s", doc_id, tag_id, e)
         await db.commit()
+
+    @staticmethod
+    async def _find_existing_communication(db: AsyncSession, document_id: str, owner_id: str) -> Communication | None:
+        """查找已导入为沟通资产的云文档。"""
+        stmt = select(Communication).where(
+            Communication.feishu_record_id == f"cloud_{document_id}",
+            Communication.owner_id == owner_id,
+        )
+        result = await db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def _llm_parse_communication(content_text: str) -> dict:
+        """调用 LLM 解析沟通资产字段。"""
+        default = {
+            "title": None, "comm_type": "meeting", "initiator": None,
+            "participants": [], "summary": None, "conclusions": None,
+            "action_items": [], "keywords": [], "sentiment": "neutral",
+            "duration_minutes": None, "comm_time": None,
+        }
+        if not settings.llm_api_key or settings.llm_api_key.startswith("sk-xxx"):
+            return default
+        try:
+            from app.services.llm import llm_client
+            return await llm_client.parse_communication_doc(content_text)
+        except Exception as e:
+            logger.warning("LLM 沟通资产解析失败: %s", e)
+            return default
 
     @staticmethod
     async def _fetch_doc_content(document_id: str, user_access_token: str) -> dict:

@@ -4,6 +4,8 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+from app.schemas.types import UTCDatetime, UTCDatetimeOpt
+
 
 class TodoExtractRequest(BaseModel):
     """AI提取待办请求。"""
@@ -16,17 +18,17 @@ class TodoOut(BaseModel):
     owner_id: str
     title: str
     description: str | None = None
-    due_date: datetime | None = None
+    due_date: UTCDatetimeOpt = None
     priority: str = "medium"
     source_type: str
     source_id: int | None = None
     source_text: str | None = None
     status: str
     feishu_task_id: str | None = None
-    pushed_at: datetime | None = None
-    completed_at: datetime | None = None
-    created_at: datetime
-    updated_at: datetime
+    pushed_at: UTCDatetimeOpt = None
+    completed_at: UTCDatetimeOpt = None
+    created_at: UTCDatetime
+    updated_at: UTCDatetime
 
     model_config = {"from_attributes": True}
 

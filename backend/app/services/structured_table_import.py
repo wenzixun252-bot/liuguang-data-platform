@@ -56,8 +56,8 @@ def _flatten_bitable_cell(value) -> str:
 async def _generate_summary(rows_sample: list[dict], table_name: str) -> str:
     """用 LLM 生成表级内容总结（取前 20 行数据概述）。"""
     try:
-        from openai import AsyncOpenAI
         from app.config import settings
+        from app.services.llm import create_openai_client
 
         if not settings.llm_api_key:
             return ""
@@ -67,9 +67,10 @@ async def _generate_summary(rows_sample: list[dict], table_name: str) -> str:
             for row in rows_sample[:20]
         )
 
-        client = AsyncOpenAI(
+        client = create_openai_client(
             api_key=settings.llm_api_key,
             base_url=settings.llm_base_url,
+            timeout=60.0,
         )
         resp = await client.chat.completions.create(
             model=settings.llm_model,

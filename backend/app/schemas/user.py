@@ -1,9 +1,10 @@
 """用户与鉴权相关的 Pydantic 模型。"""
 
-from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel
+
+from app.schemas.types import UTCDatetime
 
 
 class FeishuCallbackRequest(BaseModel):
@@ -20,8 +21,8 @@ class UserOut(BaseModel):
     avatar_url: str | None = None
     email: str | None = None
     role: str
-    created_at: datetime
-    updated_at: datetime
+    created_at: UTCDatetime
+    updated_at: UTCDatetime
 
     model_config = {"from_attributes": True}
 

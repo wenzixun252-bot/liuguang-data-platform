@@ -73,12 +73,16 @@ class IncrementalExtractor:
         entry: RegistryEntry,
         db: AsyncSession,
         user_access_token: str | None = None,
+        force_full: bool = False,
     ) -> ExtractionResult:
-        """对指定数据源执行增量拉取。
+        """对指定数据源执行数据拉取。
+
+        force_full=True 时跳过增量过滤，全量拉取所有记录（手动触发同步时使用）。
+        全量拉取后靠 loader 的 ON CONFLICT upsert 去重，已有记录更新、新记录插入。
 
         1. 读取 etl_sync_state 获取 last_sync_time
-        2. 构建 filter: update_time > last_sync_time
-        3. 分页抓取所有增量记录
+        2. 构建 filter: update_time > last_sync_time（force_full 时跳过）
+        3. 分页抓取所有增量/全量记录
         4. 更新状态为 running
         """
         # 获取或创建同步状态
@@ -113,18 +117,20 @@ class IncrementalExtractor:
                 user_access_token=user_access_token,
             )
 
-            # 尝试构建增量过滤条件
-            # 查找 schema 中是否有"最后更新时间"相关的字段
+            # 构建过滤条件：force_full 时跳过增量过滤，全量拉取
             filter_expr = None
-            epoch = datetime(1970, 1, 2)
-            if last_sync_time and last_sync_time > epoch:
-                ts_ms = int(last_sync_time.timestamp() * 1000)
-                time_field = self._find_update_time_field(schema_fields)
-                if time_field:
-                    filter_expr = f'CurrentValue.[{time_field}] > {ts_ms}'
-                    logger.info("使用增量过滤: %s > %d", time_field, ts_ms)
-                else:
-                    logger.info("未找到时间字段，全量拉取: %s/%s", entry.app_token, entry.table_id)
+            if force_full:
+                logger.info("强制全量拉取（手动触发）: %s/%s", entry.app_token, entry.table_id)
+            else:
+                epoch = datetime(1970, 1, 2)
+                if last_sync_time and last_sync_time > epoch:
+                    ts_ms = int(last_sync_time.timestamp() * 1000)
+                    time_field = self._find_update_time_field(schema_fields)
+                    if time_field:
+                        filter_expr = f'CurrentValue.[{time_field}] > {ts_ms}'
+                        logger.info("使用增量过滤: %s > %d", time_field, ts_ms)
+                    else:
+                        logger.info("未找到时间字段，全量拉取: %s/%s", entry.app_token, entry.table_id)
 
             # 拉取记录
             records = await feishu_client.list_all_bitable_records(

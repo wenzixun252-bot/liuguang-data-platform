@@ -1,8 +1,8 @@
 """标签系统 Pydantic 模型。"""
 
-from datetime import datetime
-
 from pydantic import BaseModel
+
+from app.schemas.types import UTCDatetime
 
 
 class TagDefinitionCreate(BaseModel):
@@ -25,7 +25,7 @@ class TagDefinitionOut(BaseModel):
     name: str
     color: str
     is_shared: bool
-    created_at: datetime
+    created_at: UTCDatetime
 
     model_config = {"from_attributes": True}
 

@@ -47,21 +47,21 @@ const EXTENSION_MAP: Record<string, ImportCategory> = {
 export const CATEGORY_CONFIG: Record<ImportCategory, FileClassification> = {
   communication: {
     category: 'communication',
-    categoryName: '沟通记录',
+    categoryName: '沟通资产',
     extensions: ['MP3', 'WAV', 'M4A', '飞书/钉钉导出'],
     icon: 'AudioWaveform',
     description: '将语音或聊天转化为知识',
   },
   document: {
     category: 'document',
-    categoryName: '专业文档',
+    categoryName: '文档资产',
     extensions: ['PDF', 'Word', 'Markdown', 'PPT'],
     icon: 'FileText',
     description: '解析长篇报告与制度文件',
   },
   structured: {
     category: 'structured',
-    categoryName: '结构化表格',
+    categoryName: '表格资产',
     extensions: ['Excel', 'CSV', 'SQL导出'],
     icon: 'Table2',
     description: '精准提取行列数据',

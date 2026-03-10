@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import {
   CheckCircle,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   Send,
   Sparkles,
@@ -49,7 +51,8 @@ const TABS = [
   { key: 'completed', label: '已完成' },
 ]
 
-export default function Todos() {
+export default function Todos({ embedded = false }: { embedded?: boolean } = {}) {
+  const PAGE_SIZE = embedded ? 5 : 20
   const [items, setItems] = useState<TodoItem[]>([])
   const [loading, setLoading] = useState(true)
   const [extracting, setExtracting] = useState(false)
@@ -59,22 +62,34 @@ export default function Todos() {
   const [editTitle, setEditTitle] = useState('')
   const [days, setDays] = useState(7)
   const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
   const fetchTodos = () => {
     setLoading(true)
-    const params: Record<string, unknown> = { status: tab, page_size: 100 }
+    const params: Record<string, unknown> = { status: tab, page_size: PAGE_SIZE, page }
     if (search) params.search = search
     api
       .get('/todos', { params })
-      .then((res) => setItems(res.data.items))
+      .then((res) => {
+        setItems(res.data.items)
+        setTotal(res.data.total ?? res.data.items.length)
+      })
       .catch(() => toast.error('加载待办失败'))
       .finally(() => setLoading(false))
   }
 
   useEffect(() => {
-    fetchTodos()
+    setPage(1)
     setSelected(new Set())
   }, [tab, search])
+
+  useEffect(() => {
+    fetchTodos()
+    setSelected(new Set())
+  }, [tab, search, page])
 
   const handleExtract = async () => {
     setExtracting(true)
@@ -262,7 +277,7 @@ export default function Todos() {
           items.map((item) => (
             <div
               key={item.id}
-              className="bg-white rounded-xl shadow-sm p-4 flex items-start gap-3 hover:shadow-md transition-shadow"
+              className={`bg-white rounded-xl shadow-sm p-4 flex items-start gap-3 hover:shadow-md transition-shadow ${embedded ? 'border border-gray-100' : ''}`}
             >
               <input
                 type="checkbox"
@@ -392,6 +407,53 @@ export default function Todos() {
           ))
         )}
       </div>
+
+      {/* 分页 */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between pt-2">
+          <span className="text-xs text-gray-400">共 {total} 条</span>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            {Array.from({ length: totalPages }, (_, i) => i + 1)
+              .filter((p) => p === 1 || p === totalPages || Math.abs(p - page) <= 1)
+              .reduce<(number | 'dot')[]>((acc, p, idx, arr) => {
+                if (idx > 0 && p - (arr[idx - 1] as number) > 1) acc.push('dot')
+                acc.push(p)
+                return acc
+              }, [])
+              .map((p, idx) =>
+                p === 'dot' ? (
+                  <span key={`dot-${idx}`} className="px-1 text-xs text-gray-400">…</span>
+                ) : (
+                  <button
+                    key={p}
+                    onClick={() => setPage(p as number)}
+                    className={`min-w-[28px] h-7 rounded-lg text-xs font-medium transition-colors ${
+                      page === p
+                        ? 'bg-indigo-600 text-white'
+                        : 'text-gray-600 hover:bg-gray-100'
+                    }`}
+                  >
+                    {p}
+                  </button>
+                )
+              )}
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+              className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
   Search, RefreshCw, Trash2, Plus, ExternalLink, Check,
-  ChevronDown, ChevronRight, Loader2, X, Settings,
+  ChevronDown, ChevronRight, Loader2, X, Settings, AlertTriangle,
 } from 'lucide-react'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
@@ -25,6 +25,7 @@ interface DataSource {
 interface BitableApp {
   app_token: string
   app_name: string
+  type: string  // "bitable" | "spreadsheet" | "wiki"
   tables: { table_id: string; name: string }[]
 }
 
@@ -69,6 +70,9 @@ export default function RecipeSyncConfig({
 
   const existingKeys = new Set(sources.map((s) => `${s.app_token}:${s.table_id}`))
 
+  // 是否为沟通资产配方模式（需要筛选会议/会话表格）
+  const isRecipeMode = assetType === 'communication' && recipeUrl !== ''
+
   /* ── 加载数据源 ─────────────────────────── */
 
   const loadSources = useCallback((silent = false) => {
@@ -80,6 +84,19 @@ export default function RecipeSyncConfig({
   }, [assetType])
 
   useEffect(() => { loadSources() }, [loadSources])
+
+  // mount 时检查：有没有正在运行的数据源同步
+  useEffect(() => {
+    api.get('/import/sync-status', { params: { asset_type: assetType } })
+      .then((res) => {
+        const hasRunning = res.data.some((s: DataSource) => s.last_sync_status === 'running')
+        if (hasRunning) {
+          setSources(res.data)
+          setPolling(true)
+        }
+      })
+      .catch(() => {})
+  }, [assetType])
 
   // 同步轮询
   useEffect(() => {
@@ -152,7 +169,9 @@ export default function RecipeSyncConfig({
   const loadSubTables = async (appToken: string) => {
     setLoadingTables((prev) => new Set(prev).add(appToken))
     try {
-      const res = await api.get(`/import/feishu-discover/${appToken}/tables`)
+      const app = [...matchedApps, ...unmatchedApps, ...bitableApps].find((a) => a.app_token === appToken)
+      const docType = app?.type || 'bitable'
+      const res = await api.get(`/import/feishu-discover/${appToken}/tables`, { params: { type: docType } })
       const updater = (prev: BitableApp[]) =>
         prev.map((a) => a.app_token === appToken ? { ...a, tables: res.data } : a)
       setBitableApps(updater)
@@ -275,14 +294,16 @@ export default function RecipeSyncConfig({
             <Settings size={18} />
             {title}
           </h3>
-          <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded"><X size={20} /></button>
+          <button type="button" onClick={onClose} className="p-1 hover:bg-gray-100 rounded" title="关闭" aria-label="关闭"><X size={20} /></button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 space-y-5">
-          {/* 区域 A: 配置教程（首次无数据源时显示） */}
+          {/* 区域 A: 配方引导教程（首次无数据源时显示） */}
           {hasNoSources && (
             <div className="bg-blue-50 rounded-lg p-4 space-y-3">
-              <h4 className="font-medium text-blue-800 text-sm">配置教程</h4>
+              <h4 className="font-medium text-blue-800 text-sm">
+                {isRecipeMode ? '飞书工作配方配置指南' : '配置教程'}
+              </h4>
               <ol className="space-y-2">
                 {steps.map((step, i) => (
                   <li key={i} className="flex items-start gap-2 text-sm text-blue-700">
@@ -291,13 +312,31 @@ export default function RecipeSyncConfig({
                   </li>
                 ))}
               </ol>
+              {recipeUrl && (
+                <a
+                  href={recipeUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
+                >
+                  <ExternalLink size={14} />
+                  打开飞书工作配方
+                </a>
+              )}
+            </div>
+          )}
+
+          {/* 区域 A2: 配方引导提示（已有数据源时收起显示） */}
+          {!hasNoSources && isRecipeMode && recipeUrl && (
+            <div className="bg-gray-50 rounded-lg p-3 flex items-center justify-between">
+              <span className="text-xs text-gray-500">需要重新配置配方？</span>
               <a
                 href={recipeUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
+                className="text-xs text-indigo-600 hover:text-indigo-700 flex items-center gap-1"
               >
-                <ExternalLink size={14} />
+                <ExternalLink size={12} />
                 打开飞书工作配方
               </a>
             </div>
@@ -306,8 +345,11 @@ export default function RecipeSyncConfig({
           {/* 区域 B: 自动检索配方表格 */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <h4 className="font-medium text-gray-700 text-sm">关联数据表</h4>
+              <h4 className="font-medium text-gray-700 text-sm">
+                {isRecipeMode ? '选择配方创建的多维表格' : '关联数据表'}
+              </h4>
               <button
+                type="button"
                 onClick={doDiscover}
                 disabled={discovering}
                 className="flex items-center gap-1 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs hover:bg-indigo-700 disabled:opacity-50"
@@ -316,6 +358,31 @@ export default function RecipeSyncConfig({
                 {discovering ? '检索中...' : '刷新列表'}
               </button>
             </div>
+
+            {/* 配方模式下的筛选提示 */}
+            {isRecipeMode && !discovering && matchedApps.length > 0 && (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-3 space-y-1">
+                <p className="text-sm text-green-700 font-medium flex items-center gap-1.5">
+                  <Check size={14} />
+                  已自动筛选出包含"会议"或"会话"关键词的多维表格
+                </p>
+                <p className="text-xs text-green-600">请选择配方生成的对应数据表，然后点击"添加数据源"</p>
+              </div>
+            )}
+
+            {/* 配方模式下未找到匹配的提示 */}
+            {isRecipeMode && !discovering && bitableApps.length > 0 && matchedApps.length === 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-1">
+                <p className="text-sm text-amber-700 font-medium flex items-center gap-1.5">
+                  <AlertTriangle size={14} />
+                  未找到包含"会议"或"会话"关键词的多维表格
+                </p>
+                <p className="text-xs text-amber-600">
+                  请确认已在飞书中启用工作配方并等待配方创建多维表格。
+                  如果配方表格名称不同，可从下方完整列表中手动选择。
+                </p>
+              </div>
+            )}
 
             {discovering ? (
               <div className="py-6 text-center text-gray-400">
@@ -328,7 +395,7 @@ export default function RecipeSyncConfig({
                 {matchedApps.length > 0 && (
                   <div className="bg-green-50 border border-green-200 rounded-lg p-3 space-y-2">
                     <p className="text-sm text-green-700 font-medium">
-                      检测到可能的配方表格：
+                      {isRecipeMode ? '推荐关联的配方表格：' : '检测到可能的配方表格：'}
                     </p>
                     {matchedApps.map((app) => (
                       <AppItem
@@ -393,6 +460,7 @@ export default function RecipeSyncConfig({
                       已选择: <span className="font-medium text-indigo-700">{selectedTable.table_name}</span>
                     </span>
                     <button
+                      type="button"
                       onClick={handleAddSource}
                       disabled={submitting}
                       className="flex items-center gap-1 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 disabled:opacity-50"
@@ -409,6 +477,7 @@ export default function RecipeSyncConfig({
           {/* 区域 C: 兜底 — 粘贴链接 */}
           <div className="border-t border-gray-100 pt-3">
             <button
+              type="button"
               onClick={() => setShowPasteUrl(!showPasteUrl)}
               className="flex items-center gap-1 text-sm text-gray-500 hover:text-indigo-600"
             >
@@ -426,6 +495,7 @@ export default function RecipeSyncConfig({
                   onKeyDown={(e) => { if (e.key === 'Enter') handleAddFromUrl() }}
                 />
                 <button
+                  type="button"
                   onClick={handleAddFromUrl}
                   disabled={addingFromUrl}
                   className="flex items-center gap-1 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 disabled:opacity-50 whitespace-nowrap"
@@ -442,33 +512,56 @@ export default function RecipeSyncConfig({
             <div className="space-y-3">
               <h4 className="font-medium text-gray-700 text-sm">已关联数据源</h4>
               <div className="border border-gray-200 rounded-lg divide-y divide-gray-50">
-                {sources.map((s) => (
-                  <div key={s.id} className="flex items-center gap-3 px-4 py-3">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-800 truncate">{s.table_name || s.table_id}</p>
-                      <p className="text-xs text-gray-400">
-                        {s.last_sync_time ? `最后同步: ${new Date(s.last_sync_time).toLocaleString('zh-CN')}` : '从未同步'}
-                        {s.records_synced ? ` · ${s.records_synced} 条记录` : ''}
-                      </p>
+                {sources.map((s) => {
+                  // 构建原表格跳转链接
+                  const sourceUrl = s.app_token
+                    ? `https://feishu.cn/base/${s.app_token}?table=${s.table_id}`
+                    : null
+
+                  return (
+                    <div key={s.id} className="flex items-center gap-3 px-4 py-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <p className="text-sm font-medium text-gray-800 truncate">{s.table_name || s.table_id}</p>
+                          {sourceUrl && (
+                            <a
+                              href={sourceUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-gray-300 hover:text-indigo-500 transition-colors shrink-0"
+                              title="在飞书中查看原表"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <ExternalLink size={12} />
+                            </a>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-400">
+                          {s.last_sync_time ? `最后同步: ${new Date(s.last_sync_time).toLocaleString('zh-CN')}` : '从未同步'}
+                          {s.records_synced ? ` · ${s.records_synced} 条记录` : ''}
+                        </p>
+                      </div>
+                      <SyncStatusBadge status={s.last_sync_status} errorMessage={s.error_message} />
+                      <button
+                        type="button"
+                        onClick={() => handleSyncSingle(s.id)}
+                        disabled={syncingSourceId === s.id || s.last_sync_status === 'running'}
+                        className="p-1.5 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 rounded disabled:opacity-50"
+                        title="同步"
+                      >
+                        <RefreshCw size={14} className={(syncingSourceId === s.id || s.last_sync_status === 'running') ? 'animate-spin' : ''} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteSource(s.id)}
+                        className="p-1.5 text-gray-400 hover:text-red-500 rounded"
+                        title="删除"
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     </div>
-                    <SyncStatusBadge status={s.last_sync_status} errorMessage={s.error_message} />
-                    <button
-                      onClick={() => handleSyncSingle(s.id)}
-                      disabled={syncingSourceId === s.id || s.last_sync_status === 'running'}
-                      className="p-1.5 text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 rounded disabled:opacity-50"
-                      title="同步"
-                    >
-                      <RefreshCw size={14} className={(syncingSourceId === s.id || s.last_sync_status === 'running') ? 'animate-spin' : ''} />
-                    </button>
-                    <button
-                      onClick={() => handleDeleteSource(s.id)}
-                      className="p-1.5 text-gray-400 hover:text-red-500 rounded"
-                      title="删除"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           )}
@@ -510,6 +603,21 @@ function AppItem({
           <ChevronRight size={14} className="text-gray-400" />
         )}
         <span className="text-sm font-medium text-gray-700 flex-1 truncate">{app.app_name}</span>
+        {app.type === 'spreadsheet' ? (
+          <span className="px-1.5 py-0.5 text-[10px] rounded bg-blue-50 text-blue-600 shrink-0">飞书表格</span>
+        ) : (
+          <span className="px-1.5 py-0.5 text-[10px] rounded bg-amber-50 text-amber-600 shrink-0">多维表格</span>
+        )}
+        <a
+          href={`https://feishu.cn/${app.type === 'spreadsheet' ? 'sheets' : 'base'}/${app.app_token}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-gray-300 hover:text-indigo-500 transition-colors shrink-0"
+          title="在飞书中查看"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <ExternalLink size={12} />
+        </a>
         <span className="text-xs text-gray-400">
           {app.tables.length > 0 ? `${app.tables.length} 个表` : '点击展开'}
         </span>
