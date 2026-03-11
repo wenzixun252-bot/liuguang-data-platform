@@ -1,12 +1,11 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { FileText, Loader2, Send, Download, UserSearch, X, ChevronDown, ChevronUp, Database, ExternalLink } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import api from '../lib/api'
-import { getUser } from '../lib/auth'
+import { getUser, getToken } from '../lib/auth'
 import toast from 'react-hot-toast'
-import { useTaskProgress } from '../hooks/useTaskProgress'
 import DataPicker from './DataPicker'
 import type { DataSelection } from './DataPicker'
 import type { ReportItem } from './ReportSidebar'
@@ -35,7 +34,6 @@ interface Props {
 
 export default function ReportPanel({ activeReport, onReportCreated, onClearActive }: Props) {
   const navigate = useNavigate()
-  const { addTask, updateTask, removeTask } = useTaskProgress()
   const [templates, setTemplates] = useState<Template[]>([])
   const [selectedTemplate, setSelectedTemplate] = useState<number | null>(null)
   const [title, setTitle] = useState('')
@@ -46,19 +44,22 @@ export default function ReportPanel({ activeReport, onReportCreated, onClearActi
   const [extraInstructions, setExtraInstructions] = useState('')
   const [generating, setGenerating] = useState(false)
 
+  // 流式输出状态
+  const [streamingContent, setStreamingContent] = useState('')
+  const [streamingReportId, setStreamingReportId] = useState<number | null>(null)
+  const streamContentRef = useRef('')
+  const abortRef = useRef<AbortController | null>(null)
+
   // 阅读者
   const [persons, setPersons] = useState<PersonEntity[]>([])
   const [selectedReaders, setSelectedReaders] = useState<PersonEntity[]>([])
   const [showReaderPicker, setShowReaderPicker] = useState(false)
   const [personsLoading, setPersonsLoading] = useState(false)
 
-  // 轮询 ref
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  // 清理轮询
+  // 清理
   useEffect(() => {
     return () => {
-      if (pollRef.current) clearInterval(pollRef.current)
+      abortRef.current?.abort()
     }
   }, [])
 
@@ -147,39 +148,7 @@ export default function ReportPanel({ activeReport, onReportCreated, onClearActi
     setSelectedReaders((prev) => prev.filter((p) => p.id !== id))
   }
 
-  // 后台生成 + 轮询状态
-  const startPollStatus = useCallback((reportId: number, taskId: string) => {
-    let pollCount = 0
-    pollRef.current = setInterval(async () => {
-      pollCount++
-      try {
-        const res = await api.get(`/reports/${reportId}`)
-        const report = res.data
-        if (report.status === 'completed') {
-          clearInterval(pollRef.current!)
-          pollRef.current = null
-          updateTask(taskId, { status: 'done', progress: 100, message: '已完成' })
-          setGenerating(false)
-          onReportCreated()
-          toast.success('报告生成完成')
-        } else if (report.status === 'failed') {
-          clearInterval(pollRef.current!)
-          pollRef.current = null
-          updateTask(taskId, { status: 'error', progress: 100, message: '生成失败' })
-          setGenerating(false)
-          onReportCreated()
-          toast.error('报告生成失败')
-        } else {
-          // 仍在生成中
-          const progress = Math.min(90, pollCount * 5)
-          updateTask(taskId, { progress, message: '后台生成中...' })
-        }
-      } catch {
-        // 网络错误不中断轮询
-      }
-    }, 3000)
-  }, [updateTask, onReportCreated])
-
+  // SSE 流式生成
   const handleGenerate = async () => {
     if (!selectedTemplate || !title.trim() || !timeStart || !timeEnd) {
       toast.error('请填写完整信息')
@@ -187,40 +156,89 @@ export default function ReportPanel({ activeReport, onReportCreated, onClearActi
     }
 
     setGenerating(true)
+    setStreamingContent('')
+    setStreamingReportId(null)
+    streamContentRef.current = ''
 
-    // 先用临时 ID，拿到后端报告 ID 后切换为 report-{id} 与全局轮询对齐
-    const tempTaskId = `report-gen-${Date.now()}`
-    addTask(tempTaskId, `报告: ${title.trim().slice(0, 15)}`, '/chat?tab=report')
-    updateTask(tempTaskId, { message: '正在提交...', progress: 5 })
+    const body = JSON.stringify({
+      template_id: selectedTemplate,
+      title: title.trim(),
+      time_range_start: new Date(timeStart).toISOString(),
+      time_range_end: new Date(timeEnd).toISOString(),
+      data_sources: dataSelection.source_tables || ['document', 'communication'],
+      extra_instructions: extraInstructions || null,
+      target_reader_ids: selectedReaders.length > 0
+        ? selectedReaders.map((r) => r.name)
+        : null,
+    })
+
+    const abortController = new AbortController()
+    abortRef.current = abortController
 
     try {
-      const res = await api.post('/reports/generate/background', {
-        template_id: selectedTemplate,
-        title: title.trim(),
-        time_range_start: new Date(timeStart).toISOString(),
-        time_range_end: new Date(timeEnd).toISOString(),
-        data_sources: dataSelection.source_tables || ['document', 'communication'],
-        extra_instructions: extraInstructions || null,
-        target_reader_ids: selectedReaders.length > 0
-          ? selectedReaders.map((r) => r.name)
-          : null,
+      const baseUrl = api.defaults.baseURL || '/api'
+      const response = await fetch(`${baseUrl}/reports/generate/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${getToken()}`,
+        },
+        body,
+        signal: abortController.signal,
       })
 
-      const reportId = res.data.id
-      // 移除临时任务，用与全局轮询一致的 ID 重新注册
-      removeTask(tempTaskId)
-      const taskId = `report-${reportId}`
-      addTask(taskId, `报告: ${title.trim().slice(0, 15)}`, '/chat?tab=report')
-      updateTask(taskId, { message: '后台生成中...', progress: 10 })
-      onReportCreated() // 刷新左侧列表
-      toast.success('报告已提交后台生成')
+      if (!response.ok) {
+        const errText = await response.text()
+        throw new Error(errText || `HTTP ${response.status}`)
+      }
 
-      // 开始轮询状态（本页面内也轮询，加快响应）
-      startPollStatus(reportId, taskId)
-    } catch {
-      updateTask(tempTaskId, { status: 'error', progress: 100, message: '提交失败' })
-      toast.error('报告提交失败')
+      const reader = response.body?.getReader()
+      if (!reader) throw new Error('无法读取响应流')
+
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed.startsWith('data: ')) continue
+          const payload = trimmed.slice(6)
+          if (payload === '[DONE]') continue
+
+          try {
+            const msg = JSON.parse(payload)
+            if (msg.type === 'report_id') {
+              setStreamingReportId(msg.id)
+            } else if (msg.type === 'content') {
+              streamContentRef.current += msg.content
+              setStreamingContent(streamContentRef.current)
+            } else if (msg.type === 'done') {
+              toast.success('报告生成完成')
+              onReportCreated()
+            } else if (msg.type === 'error') {
+              toast.error(`生成失败: ${msg.content || '未知错误'}`)
+            }
+          } catch {
+            // 解析失败，忽略
+          }
+        }
+      }
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        toast.error(`报告生成失败: ${err.message || '网络错误'}`)
+      }
+    } finally {
       setGenerating(false)
+      abortRef.current = null
+      // 生成完毕后刷新列表
+      onReportCreated()
     }
   }
 
@@ -247,6 +265,85 @@ export default function ReportPanel({ activeReport, onReportCreated, onClearActi
         toast.error(detail || '推送失败')
       }
     }
+  }
+
+  // 流式生成中：实时显示内容（最高优先级）
+  if (generating || streamingContent) {
+    return (
+      <div className="flex flex-col h-full">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            {generating && <Loader2 size={16} className="animate-spin text-indigo-500" />}
+            <h3 className="text-sm font-medium text-gray-700">{title}</h3>
+            {generating && <span className="text-xs text-gray-400">正在生成...</span>}
+          </div>
+          <div className="flex gap-2 shrink-0">
+            {generating && (
+              <button
+                type="button"
+                onClick={() => abortRef.current?.abort()}
+                className="px-3 py-1.5 text-xs text-red-500 hover:bg-red-50 rounded-lg"
+              >
+                取消
+              </button>
+            )}
+            {!generating && streamingContent && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => { setStreamingContent(''); setStreamingReportId(null); onReportCreated() }}
+                  className="px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-100 rounded-lg"
+                >
+                  新建报告
+                </button>
+                {streamingReportId && (
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/reports/${streamingReportId}`)}
+                    className="flex items-center gap-1 px-3 py-1.5 text-xs text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg"
+                  >
+                    <ExternalLink size={12} />
+                    编辑详情
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => handleDownload(streamingContent, title)}
+                  className="flex items-center gap-1 px-3 py-1.5 text-xs text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg"
+                >
+                  <Download size={12} />
+                  下载
+                </button>
+                {streamingReportId && (
+                  <button
+                    type="button"
+                    onClick={() => handlePushFeishu(streamingReportId)}
+                    className="flex items-center gap-1 px-3 py-1.5 text-xs text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg"
+                  >
+                    <Send size={12} />
+                    推送飞书
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto bg-white rounded-xl border border-gray-200 p-6">
+          <div className="prose prose-sm max-w-none">
+            {streamingContent ? (
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {streamingContent}
+              </ReactMarkdown>
+            ) : (
+              <div className="flex items-center gap-2 text-gray-400 text-sm">
+                <Loader2 size={14} className="animate-spin" />
+                正在收集数据并生成报告...
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    )
   }
 
   // 查看模式：显示选中的报告内容
@@ -311,7 +408,7 @@ export default function ReportPanel({ activeReport, onReportCreated, onClearActi
     )
   }
 
-  // 查看模式：报告正在生成中
+  // 查看模式：报告正在生成中（从侧栏点击的后台任务）
   if (activeReport && activeReport.status === 'generating') {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-4">
@@ -510,17 +607,8 @@ export default function ReportPanel({ activeReport, onReportCreated, onClearActi
           disabled={generating || !selectedTemplate || !title.trim()}
           className="w-full flex items-center justify-center gap-2 py-2.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
         >
-          {generating ? (
-            <>
-              <Loader2 size={16} className="animate-spin" />
-              后台生成中...
-            </>
-          ) : (
-            <>
-              <FileText size={16} />
-              开始生成报告
-            </>
-          )}
+          <FileText size={16} />
+          开始生成报告
         </button>
       </div>
 

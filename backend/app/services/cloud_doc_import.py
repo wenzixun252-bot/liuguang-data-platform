@@ -139,6 +139,22 @@ class CloudDocImportService:
                 if uploader_name and existing.uploader_name != uploader_name:
                     existing.uploader_name = uploader_name
                     changed = True
+                # 回补 feishu_created_at / feishu_updated_at（老数据可能缺失）
+                if not existing.feishu_created_at or not existing.feishu_updated_at:
+                    try:
+                        meta_map = await feishu_client.batch_get_doc_meta(
+                            [{"token": document_id, "type": "docx"}],
+                            user_access_token,
+                        )
+                        meta = meta_map.get(document_id, {})
+                        if meta.get("create_time") and not existing.feishu_created_at:
+                            existing.feishu_created_at = datetime.utcfromtimestamp(int(meta["create_time"]))
+                            changed = True
+                        if meta.get("latest_modify_time") and not existing.feishu_updated_at:
+                            existing.feishu_updated_at = datetime.utcfromtimestamp(int(meta["latest_modify_time"]))
+                            changed = True
+                    except Exception as e:
+                        logger.debug("回补云文档时间戳失败 [%s]: %s", document_id, e)
                 if changed:
                     await db.commit()
                 logger.info("云文档已导入，跳过: %s", document_id)
@@ -158,7 +174,7 @@ class CloudDocImportService:
             if existing and not force:
                 modified_time = doc_content.get("modified_time")
                 if modified_time and existing.feishu_updated_at:
-                    new_ts = datetime.fromtimestamp(int(modified_time))
+                    new_ts = datetime.utcfromtimestamp(int(modified_time))
                     if new_ts <= existing.feishu_updated_at:
                         logger.info("云文档未更新，跳过: %s", document_id)
                         return existing, "skipped"
@@ -173,9 +189,22 @@ class CloudDocImportService:
             domain = settings.feishu_base_domain or "feishu.cn"
             source_url = f"https://{domain}/docx/{document_id}"
 
-            # 7. 构建时间戳
+            # 7. 构建时间戳（Block API 优先，batch_get_doc_meta 兜底）
             created_time = doc_content.get("created_time")
             modified_time = doc_content.get("modified_time")
+            if not created_time or not modified_time:
+                try:
+                    meta_map = await feishu_client.batch_get_doc_meta(
+                        [{"token": document_id, "type": "docx"}],
+                        user_access_token,
+                    )
+                    meta = meta_map.get(document_id, {})
+                    if not created_time and meta.get("create_time"):
+                        created_time = meta["create_time"]
+                    if not modified_time and meta.get("latest_modify_time"):
+                        modified_time = meta["latest_modify_time"]
+                except Exception as e:
+                    logger.debug("batch_get_doc_meta 获取时间失败 [%s]: %s", document_id, e)
             feishu_created = datetime.utcfromtimestamp(int(created_time)) if created_time else None
             feishu_updated = datetime.utcfromtimestamp(int(modified_time)) if modified_time else None
 
@@ -246,6 +275,8 @@ class CloudDocImportService:
         force: bool = False,
         feishu_owner_id: str | None = None,
         source_platform: str = "feishu_cloud_doc",
+        created_time: str | int | None = None,
+        modified_time: str | int | None = None,
     ) -> tuple[Document | None, str]:
         """导入飞书文件（PDF/PPT 等），先下载再本地提取文本。
 
@@ -266,6 +297,24 @@ class CloudDocImportService:
                 if uploader_name and existing.uploader_name != uploader_name:
                     existing.uploader_name = uploader_name
                     changed = True
+                # 回补 feishu_created_at / feishu_updated_at（老数据可能缺失）
+                if not existing.feishu_created_at or not existing.feishu_updated_at:
+                    try:
+                        ext = file_name.rsplit(".", 1)[-1].lower() if "." in file_name else ""
+                        doc_type = ext if ext in ("docx", "doc") else "file"
+                        meta_map = await feishu_client.batch_get_doc_meta(
+                            [{"token": file_token, "type": doc_type}],
+                            user_access_token,
+                        )
+                        meta = meta_map.get(file_token, {})
+                        if meta.get("create_time") and not existing.feishu_created_at:
+                            existing.feishu_created_at = datetime.utcfromtimestamp(int(meta["create_time"]))
+                            changed = True
+                        if meta.get("latest_modify_time") and not existing.feishu_updated_at:
+                            existing.feishu_updated_at = datetime.utcfromtimestamp(int(meta["latest_modify_time"]))
+                            changed = True
+                    except Exception as e:
+                        logger.debug("回补飞书文件时间戳失败 [%s]: %s", file_token, e)
                 if changed:
                     await db.commit()
                 logger.info("飞书文件已导入，跳过: %s", file_token)
@@ -319,7 +368,30 @@ class CloudDocImportService:
             domain = settings.feishu_base_domain or "feishu.cn"
             source_url = f"https://{domain}/file/{file_token}"
 
-            # 7. Upsert
+            # 7. 获取文件创建/修改时间
+            feishu_created = None
+            feishu_updated = None
+            if created_time or modified_time:
+                # 从 file_info 传入的时间戳
+                feishu_created = datetime.utcfromtimestamp(int(created_time)) if created_time else None
+                feishu_updated = datetime.utcfromtimestamp(int(modified_time)) if modified_time else None
+            else:
+                # 调用 batch_get_doc_meta 获取时间
+                try:
+                    doc_type = ext if ext in ("docx", "doc") else "file"
+                    meta_map = await feishu_client.batch_get_doc_meta(
+                        [{"token": file_token, "type": doc_type}],
+                        user_access_token,
+                    )
+                    meta = meta_map.get(file_token, {})
+                    if meta.get("create_time"):
+                        feishu_created = datetime.utcfromtimestamp(int(meta["create_time"]))
+                    if meta.get("latest_modify_time"):
+                        feishu_updated = datetime.utcfromtimestamp(int(meta["latest_modify_time"]))
+                except Exception as e:
+                    logger.debug("获取文件元数据时间失败 [%s]: %s", file_token, e)
+
+            # 8. Upsert
             keywords_list = parsed.get("tags", []) if isinstance(parsed.get("tags"), list) else []
 
             if existing:
@@ -332,6 +404,8 @@ class CloudDocImportService:
                 existing.file_type = ext
                 existing.file_size = file_size
                 existing.source_url = source_url
+                existing.feishu_created_at = feishu_created
+                existing.feishu_updated_at = feishu_updated
                 existing.synced_at = datetime.utcnow()
                 if embedding:
                     existing.content_vector = embedding
@@ -358,6 +432,8 @@ class CloudDocImportService:
                     file_size=file_size,
                     source_url=source_url,
                     uploader_name=uploader_name,
+                    feishu_created_at=feishu_created,
+                    feishu_updated_at=feishu_updated,
                     synced_at=datetime.utcnow(),
                     extra_fields=extra,
                 )
@@ -394,6 +470,9 @@ class CloudDocImportService:
         feishu_owner_id = file_info.get("owner_id", "") or None
         # 飞书资产：优先使用文档原始所有者名称作为资产所有人
         display_owner = file_info.get("owner_name", "") or uploader_name
+        # 飞书文件的创建/修改时间（从 list API 获取）
+        fi_created_time = file_info.get("created_time")
+        fi_modified_time = file_info.get("modified_time")
 
         if file_type in ("docx", "doc"):
             return await self.import_cloud_doc(
@@ -404,6 +483,7 @@ class CloudDocImportService:
             return await self.import_cloud_file(
                 token, name, owner_id, db, user_access_token, display_owner, force=force,
                 feishu_owner_id=feishu_owner_id, source_platform=source_platform,
+                created_time=fi_created_time, modified_time=fi_modified_time,
             )
         elif file_type == "wiki":
             # wiki 节点需要先解析实际类型
@@ -474,6 +554,11 @@ class CloudDocImportService:
         feishu_owner_id = file_info.get("owner_id", "") or None
         # 飞书资产：优先使用文档原始所有者名称作为资产所有人
         display_owner = file_info.get("owner_name", "") or uploader_name
+        # 飞书文件的创建/修改时间
+        fi_created_time = file_info.get("created_time")
+        fi_modified_time = file_info.get("modified_time")
+        feishu_created = datetime.utcfromtimestamp(int(fi_created_time)) if fi_created_time else None
+        feishu_updated = datetime.utcfromtimestamp(int(fi_modified_time)) if fi_modified_time else None
 
         if not token:
             return None, "failed"
@@ -491,6 +576,15 @@ class CloudDocImportService:
                 # 回补 uploader_name（老数据可能是导入者而非文档所有者）
                 if display_owner and existing.uploader_name != display_owner:
                     existing.uploader_name = display_owner
+                    await db.commit()
+                    await db.refresh(existing)
+                # 回补 feishu_created_at / feishu_updated_at（老数据可能缺失）
+                if feishu_created and not existing.feishu_created_at:
+                    existing.feishu_created_at = feishu_created
+                    await db.commit()
+                    await db.refresh(existing)
+                if feishu_updated and not existing.feishu_updated_at:
+                    existing.feishu_updated_at = feishu_updated
                     await db.commit()
                     await db.refresh(existing)
                 if tag_ids:
@@ -516,6 +610,8 @@ class CloudDocImportService:
                 file_type=doc_type,
                 source_url=url,
                 uploader_name=display_owner,
+                feishu_created_at=feishu_created,
+                feishu_updated_at=feishu_updated,
                 parse_status="pending",
                 synced_at=datetime.utcnow(),
                 extra_fields=extra,

@@ -918,16 +918,6 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
     return Math.max(6, Math.min(28, 6 + score * 22))
   }
 
-  // 当前选中的域名称
-  const activeDomainLabel = domainTab === 'all'
-    ? '全部业务域'
-    : (() => {
-        const c = communityOptions.find(c => String(c.community_id) === domainTab)
-        if (!c) return '全部业务域'
-        const raw = c.domain_label || `业务域${c.community_id + 1}`
-        return raw.length > 8 ? raw.slice(0, 8) : raw
-      })()
-
   return (
     <div className="space-y-3">
       {/* ── 顶部工具栏：紧凑单行 ── */}

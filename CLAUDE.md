@@ -12,6 +12,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Start PostgreSQL (pgvector) via Docker
 docker-compose up -d
 
+# Full stack via Docker (postgres + backend + frontend/nginx)
+docker-compose up -d --build
+
 # Install Python dependencies (from backend/)
 cd backend && pip install -r requirements.txt
 
@@ -31,7 +34,10 @@ cd frontend && npm run dev
 cd backend && pytest tests/
 cd backend && pytest tests/test_something.py -v
 
-# Frontend build
+# Frontend lint
+cd frontend && npm run lint
+
+# Frontend build (includes tsc type-check)
 cd frontend && npm run build
 ```
 
@@ -40,14 +46,17 @@ cd frontend && npm run build
 ### Backend (backend/app/)
 
 ```
-api/          -> FastAPI route handlers (22+ routers)
-  deps.py     -> Dependency injection: get_db, get_current_user, get_visible_owner_ids
-models/       -> SQLAlchemy 2.0 async ORM (18+ models)
+main.py       -> FastAPI app entry (21 routers, CORS, lifespan scheduler)
+config.py     -> Pydantic Settings from .env (DB, Feishu, LLM, embedding configs)
+database.py   -> AsyncEngine + AsyncSession (pool_size=10, max_overflow=20)
+api/          -> FastAPI route handlers (24 routers)
+  deps.py     -> Dependency injection: get_db, get_current_user, get_visible_owner_ids, require_role
+models/       -> SQLAlchemy 2.0 async ORM (22 models)
 schemas/      -> Pydantic request/response models
 services/     -> Business logic (feishu.py, llm.py, rag.py, kg_builder.py, graph_rag.py)
-  etl/        -> ETL pipeline: extractor -> transformer -> loader
+  etl/        -> ETL pipeline: extractor -> transformer -> enricher -> loader
 utils/        -> JWT helpers, Feishu webhook alerts
-worker/       -> APScheduler background tasks (ETL cron jobs)
+worker/       -> APScheduler background tasks (ETL cron, default 30min)
 ```
 
 ### Frontend (frontend/src/)
@@ -57,7 +66,7 @@ pages/        -> Route-level page components
 components/   -> Shared UI components (Layout, GlobalSearch, TagManager, ChatMessages...)
   insights/   -> Dashboard widget components (TrendWidget, KGMiniWidget, DataGraphWidget...)
 lib/          -> API client (axios), auth helpers, feishu SDK
-hooks/        -> Custom hooks (useAuth, useWidgetConfig, useColumnSettings)
+hooks/        -> Custom hooks (useAuth, useWidgetConfig, useColumnSettings, useTaskProgress)
 ```
 
 ### Key Architectural Patterns
@@ -65,7 +74,7 @@ hooks/        -> Custom hooks (useAuth, useWidgetConfig, useColumnSettings)
 - **Async-first**: All DB access uses SQLAlchemy async + asyncpg. All external HTTP calls use httpx async.
 - **Config via Pydantic Settings**: `app/config.py` loads from `.env` file. Copy `.env.example` to `.env` for local dev.
 - **Row-Level Security**: Every query filters by `get_visible_owner_ids()` which computes: own data + direct shares (UserVisibilityOverride) + department shares (UserDeptSharing). Admins see all.
-- **Three Core Content Tables**: Document, Meeting, ChatMessage — each with 1536-dim vector embeddings for RAG.
+- **Three Core Content Tables**: Document, Meeting, ChatMessage — each with 1024-dim vector embeddings (BAAI/bge-m3) for RAG.
 - **Hybrid RAG**: Vector cosine similarity + BM25 keyword search + Reciprocal Rank Fusion. Permission-aware. Streams via SSE.
 - **Knowledge Graph**: KGEntity + KGRelation extracted from content, used to enhance RAG context via graph_rag.py.
 - **Tag System**: TagDefinition (project|priority|topic|custom) linked to content via ContentTag. ETL auto-tags via default_tag_ids.
@@ -84,14 +93,38 @@ hooks/        -> Custom hooks (useAuth, useWidgetConfig, useColumnSettings)
 
 | Path | Page | Description |
 |------|------|-------------|
+| `/login` | Login | Feishu OAuth callback |
 | `/data-insights` | DataInsights | Dashboard with configurable widgets, stats cards, todos |
-| `/structured-tables` | StructuredTables | Structured table data view |
+| `/data-import` | DataImport | File upload & ETL trigger |
 | `/documents` | Documents | Document list with search, tags, cloud sync |
-| `/meetings` | Meetings | Meeting records |
-| `/messages` | Messages | Chat message records |
-| `/chat` | Chat | AI assistant with tabs: chat, report, graph, calendar |
+| `/communications` | Communications | Meetings & chat messages (unified) |
+| `/structured-tables` | StructuredTables | Structured table data view |
+| `/chat` | Chat | AI assistant with tabs: chat, todos, graph, calendar |
 | `/search` | SearchPage | Global cross-content search results |
 | `/settings` | Settings | User preferences, ETL admin, permissions |
+| `/reports/:id` | ReportDetail | Report viewer |
+
+Legacy redirects: `/meetings`, `/messages`, `/calendar` redirect to their new locations.
+
+### Key Environment Variables (.env)
+
+Backend (`backend/.env`):
+- `DATABASE_URL` — PostgreSQL async connection string (asyncpg)
+- `FEISHU_APP_ID`, `FEISHU_APP_SECRET` — Feishu app credentials
+- `JWT_SECRET_KEY` — HS256 signing key (24h expiry)
+- `LLM_API_KEY`, `LLM_BASE_URL`, `LLM_MODEL` — OpenAI-compatible LLM for ETL/chat
+- `EMBEDDING_API_KEY`, `EMBEDDING_BASE_URL`, `EMBEDDING_MODEL` — Embedding model (default: BAAI/bge-m3, 1024-dim)
+- `SUPER_ADMIN_OPEN_ID` — Immutable system admin Feishu open_id
+
+Frontend (`frontend/.env`):
+- `VITE_FEISHU_APP_ID`, `VITE_FEISHU_REDIRECT_URI` — Feishu OAuth for frontend
+
+### Docker Deployment
+
+Three-service stack in `docker-compose.yml`:
+- **postgres** (pgvector/pgvector:pg16) — port 5432, database `liuguang`
+- **backend** (FastAPI) — port 8000, runs `alembic upgrade head` then `uvicorn`
+- **frontend** (Nginx) — port 80, serves React SPA with `/api` proxy to backend
 
 ---
 

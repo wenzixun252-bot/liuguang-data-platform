@@ -106,6 +106,7 @@ class FileUploadService:
         raw_category = parsed.get("category")
         doc_category = raw_category if raw_category in valid_categories else None
 
+        now = datetime.utcnow()
         doc = Document(
             owner_id=owner_id,
             source_type="local",
@@ -120,7 +121,9 @@ class FileUploadService:
             file_size=file_size,
             file_path=file_path,
             uploader_name=uploader_name,
-            synced_at=datetime.utcnow(),
+            feishu_created_at=now,
+            feishu_updated_at=now,
+            synced_at=now,
         )
 
         if embedding:

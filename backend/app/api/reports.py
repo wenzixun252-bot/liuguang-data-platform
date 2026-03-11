@@ -101,18 +101,23 @@ async def create_report_stream(
 ):
     """流式生成报告。"""
     async def _event_generator():
-        async for chunk in generate_report_stream(
-            db=db,
-            owner_id=current_user.feishu_open_id,
-            template_id=body.template_id,
-            title=body.title,
-            time_start=body.time_range_start,
-            time_end=body.time_range_end,
-            data_sources=body.data_sources,
-            extra_instructions=body.extra_instructions,
-            target_reader_ids=body.target_reader_ids,
-        ):
-            yield f"data: {chunk}\n\n"
+        try:
+            async for chunk in generate_report_stream(
+                db=db,
+                owner_id=current_user.feishu_open_id,
+                template_id=body.template_id,
+                title=body.title,
+                time_start=body.time_range_start,
+                time_end=body.time_range_end,
+                data_sources=body.data_sources,
+                extra_instructions=body.extra_instructions,
+                target_reader_ids=body.target_reader_ids,
+            ):
+                yield f"data: {chunk}\n\n"
+        except Exception as e:
+            logger.error("流式报告 SSE 异常: %s", e, exc_info=True)
+            err = json.dumps({"type": "error", "content": str(e)}, ensure_ascii=False)
+            yield f"data: {err}\n\n"
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(

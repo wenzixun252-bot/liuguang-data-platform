@@ -27,7 +27,11 @@ export function TaskProgressProvider({ children }: { children: ReactNode }) {
 
   const addTask = useCallback((id: string, label: string, navigateTo?: string) => {
     setTasks(prev => {
-      // 如果已存在同 id 的任务，替换它
+      // 如果已存在同 id 且已完成/出错的任务，不要重置它
+      const existing = prev.find(t => t.id === id)
+      if (existing && (existing.status === 'done' || existing.status === 'error')) {
+        return prev
+      }
       const filtered = prev.filter(t => t.id !== id)
       return [
         { id, label, status: 'running', progress: -1, message: '准备中...', createdAt: Date.now(), navigateTo },

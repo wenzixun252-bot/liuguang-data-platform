@@ -18,6 +18,8 @@ const DOC_COLUMNS: ColumnDef[] = [
   { key: 'source_type', label: '来源' },
   { key: 'uploader_name', label: '资产所有人' },
   { key: 'file_type', label: '类型', defaultVisible: false },
+  { key: 'doc_created_time', label: '创建时间' },
+  { key: 'doc_modified_time', label: '修改时间' },
   { key: 'time', label: '上传时间' },
 ]
 
@@ -59,7 +61,10 @@ interface DocumentItem {
   parse_status: string | null
   import_count: number
   synced_at: string | null
+  feishu_created_at: string | null
+  feishu_updated_at: string | null
   created_at: string
+  updated_at: string
 }
 
 interface DocumentListResponse {
@@ -295,6 +300,8 @@ export default function Documents() {
                     {isVisible('source_type') && <th className="text-left py-3 px-4 text-gray-500 font-medium">来源</th>}
                     {isVisible('uploader_name') && <th className="text-left py-3 px-4 text-indigo-700 font-semibold bg-indigo-50/50">资产所有人</th>}
                     {isVisible('file_type') && <th className="text-left py-3 px-4 text-gray-500 font-medium">类型</th>}
+                    {isVisible('doc_created_time') && <th className="text-left py-3 px-4 text-gray-500 font-medium">创建时间</th>}
+                    {isVisible('doc_modified_time') && <th className="text-left py-3 px-4 text-gray-500 font-medium">修改时间</th>}
                     {isVisible('time') && <th className="text-left py-3 px-4 text-gray-500 font-medium">上传时间</th>}
                     <th className="text-left py-3 px-4 text-gray-500 font-medium">操作</th>
                   </tr>
@@ -401,6 +408,20 @@ export default function Documents() {
                       )}
                       {isVisible('uploader_name') && <td className="py-3 px-4 text-indigo-700 font-medium bg-indigo-50/30">{item.uploader_name || '-'}</td>}
                       {isVisible('file_type') && <td className="py-3 px-4 text-gray-500">{item.file_type ? item.file_type.toUpperCase() : '-'}</td>}
+                      {isVisible('doc_created_time') && (
+                        <td className="py-3 px-4 text-gray-500 whitespace-nowrap">
+                          {item.feishu_created_at
+                            ? new Date(item.feishu_created_at).toLocaleDateString('zh-CN')
+                            : '-'}
+                        </td>
+                      )}
+                      {isVisible('doc_modified_time') && (
+                        <td className="py-3 px-4 text-gray-500 whitespace-nowrap">
+                          {item.feishu_updated_at
+                            ? new Date(item.feishu_updated_at).toLocaleDateString('zh-CN')
+                            : '-'}
+                        </td>
+                      )}
                       {isVisible('time') && <td className="py-3 px-4 text-gray-500 whitespace-nowrap">{new Date(item.synced_at || item.created_at).toLocaleString('zh-CN')}</td>}
                       <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1">

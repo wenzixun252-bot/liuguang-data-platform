@@ -98,6 +98,33 @@ async def list_documents(
         )).all()
         import_count_map = {row.feishu_record_id: row.cnt for row in count_rows}
 
+    # 回补缺失的飞书创建/修改时间（一次性批量查询，仅对当页缺失的云文档）
+    need_time = [r for r in rows if r.source_type == "cloud" and r.feishu_record_id
+                 and (not r.feishu_created_at or not r.feishu_updated_at)]
+    if need_time:
+        try:
+            from datetime import datetime
+            from app.api.deps import refresh_user_feishu_token
+            from app.services.feishu import feishu_client
+            user_token = current_user.feishu_access_token
+            if not user_token:
+                user_token = await refresh_user_feishu_token(current_user, db)
+            doc_tokens = [{"token": r.feishu_record_id, "type": r.file_type or "docx"} for r in need_time]
+            meta_map = await feishu_client.batch_get_doc_meta(doc_tokens, user_token)
+            changed = False
+            for r in need_time:
+                meta = meta_map.get(r.feishu_record_id, {})
+                if meta.get("create_time") and not r.feishu_created_at:
+                    r.feishu_created_at = datetime.utcfromtimestamp(int(meta["create_time"]))
+                    changed = True
+                if meta.get("latest_modify_time") and not r.feishu_updated_at:
+                    r.feishu_updated_at = datetime.utcfromtimestamp(int(meta["latest_modify_time"]))
+                    changed = True
+            if changed:
+                await db.commit()
+        except Exception as e:
+            logger.debug("回补文档时间戳失败: %s", e)
+
     # 将 key_info 中的 field_xxx key 翻译为中文 label
     from app.services.etl.enricher import translate_key_info_batch
     await translate_key_info_batch(rows, db)

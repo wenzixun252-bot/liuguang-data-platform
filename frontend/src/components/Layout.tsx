@@ -67,7 +67,7 @@ const NAV_ITEMS: NavEntry[] = [
 ]
 
 export default function Layout() {
-  const { addTask, updateTask } = useTaskProgress()
+  const { tasks, addTask, updateTask } = useTaskProgress()
   const user = getUser()
   const location = useLocation()
   const navigate = useNavigate()
@@ -192,6 +192,9 @@ export default function Layout() {
   // 同步报告生成状态到任务中心
   const generatingReports = (generatingReportsData as { items?: { id: number; title: string; status: string }[] } | undefined)?.items ?? []
   const generatingReportIdsKey = generatingReports.map(r => r.id).join(',')
+  // 用 ref 保存最新的 generating ID set，给兜底 effect 使用（避免循环依赖）
+  const generatingReportIdSetRef = useRef<Set<string>>(new Set())
+  generatingReportIdSetRef.current = new Set(generatingReports.map(r => String(r.id)))
   useEffect(() => {
     if (generatingReportIdsKey === prevReportIdsRef.current) return
     const prevIds = new Set(prevReportIdsRef.current.split(',').filter(Boolean))
@@ -211,6 +214,21 @@ export default function Layout() {
     })
     prevReportIdsRef.current = generatingReportIdsKey
   }, [generatingReportIdsKey, generatingReports, addTask, updateTask])
+
+  // 兜底：每次轮询到新的 generating 数据时，清理卡在 running 但后端已不在 generating 的 report 任务
+  const tasksRef = useRef(tasks)
+  tasksRef.current = tasks
+  useEffect(() => {
+    const genIds = generatingReportIdSetRef.current
+    tasksRef.current.forEach(t => {
+      if (t.status === 'running' && t.id.startsWith('report-') && !t.id.startsWith('report-gen-')) {
+        const rid = t.id.replace('report-', '')
+        if (rid && !genIds.has(rid)) {
+          updateTask(t.id, { status: 'done', progress: 100, message: '已完成' })
+        }
+      }
+    })
+  }, [generatingReportsData, updateTask])
 
   const handleLogout = () => {
     clearAuth()
@@ -387,7 +405,8 @@ export default function Layout() {
             </button>
           </div>
 
-          {/* 用户反馈入口 */}
+          {/* 右侧功能区：反馈 + 任务中心 + 用户头像 */}
+          <div className="flex items-center gap-1.5 shrink-0">
           <a
             href="https://vzyjg03bu3.feishu.cn/base/ScGfb5sXFatp5IsHfKAcIBf8npd"
             target="_blank"
@@ -477,6 +496,7 @@ export default function Layout() {
                 </motion.div>
               )}
             </AnimatePresence>
+          </div>
           </div>
         </header>
 
