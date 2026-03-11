@@ -240,23 +240,25 @@ async def get_asset_score(
     active_types = 0
     source_labels: list[str] = []
 
-    # 6a. 会话记录
-    comm_etl_stmt = select(func.count()).select_from(ETLDataSource).where(
-        ETLDataSource.is_enabled == True, ETLDataSource.asset_type == "communication"
+    # 6a. 会话记录 — 判断 communications 表中是否有 chat 类型的记录
+    chat_stmt = select(func.count()).select_from(Communication).where(
+        Communication.owner_id.in_(visible_ids),
+        Communication.comm_type == "chat",
     )
-    has_comm = ((await db.execute(comm_etl_stmt)).scalar() or 0) > 0
-    if has_comm:
+    has_chat = ((await db.execute(chat_stmt)).scalar() or 0) > 0
+    if has_chat:
         active_types += 1
-    source_labels.append(f"会话记录 {'✓' if has_comm else '✗'}")
+    source_labels.append(f"会话记录 {'✓' if has_chat else '✗'}")
 
-    # 6b. 会议记录
-    doc_etl_stmt = select(func.count()).select_from(ETLDataSource).where(
-        ETLDataSource.is_enabled == True, ETLDataSource.asset_type == "document"
+    # 6b. 会议记录 — 判断 communications 表中是否有 meeting 类型的记录
+    meeting_stmt = select(func.count()).select_from(Communication).where(
+        Communication.owner_id.in_(visible_ids),
+        Communication.comm_type == "meeting",
     )
-    has_doc = ((await db.execute(doc_etl_stmt)).scalar() or 0) > 0
-    if has_doc:
+    has_meeting = ((await db.execute(meeting_stmt)).scalar() or 0) > 0
+    if has_meeting:
         active_types += 1
-    source_labels.append(f"会议记录 {'✓' if has_doc else '✗'}")
+    source_labels.append(f"会议记录 {'✓' if has_meeting else '✗'}")
 
     # 6c. 云文件夹
     folder_stmt = select(func.count()).select_from(CloudFolderSource).where(

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime
 
@@ -245,20 +244,15 @@ async def gather_meeting_context(
 
         return "\n".join(parts)
 
-    # ── 并行收集所有上下文 ──
-    (
-        participant_profiles,
-        historical_meetings,
-        related_documents,
-        pending_todos,
-        related_chats,
-    ) = await asyncio.gather(
-        _get_participant_profiles(),
-        _get_historical_meetings(),
-        _get_related_documents(),
-        _get_pending_todos(),
-        _get_related_chats(),
-    )
+    # ── 顺序收集所有上下文 ──
+    # 注意：不能用 asyncio.gather 并行，因为所有任务共享同一个
+    # AsyncSession，而 AsyncSession 不支持并发访问，会导致会话
+    # 状态损坏和查询失败。
+    participant_profiles = await _get_participant_profiles()
+    historical_meetings = await _get_historical_meetings()
+    related_documents = await _get_related_documents()
+    pending_todos = await _get_pending_todos()
+    related_chats = await _get_related_chats()
 
     return {
         "participant_profiles": participant_profiles,

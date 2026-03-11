@@ -72,7 +72,8 @@
       "Bash(find \"d:\\\\CC\\\\liuguang-data-platform\\\\backend\" -name \"*.py\" -type f -exec grep -l \"owner\\\\|creator\" {})",
       "Bash(python -c \":*)",
       "Bash(find \"d:\\\\CC\\\\liuguang-data-platform\\\\backend\" -name \"*.py\" -type f -exec grep -l \"TIMESTAMP WITHOUT TIME ZONE\\\\|utc_now\\\\|server_default.*func\" {})",
-      "Bash(xargs -I {} basename {})"
+      "Bash(xargs -I {} basename {})",
+      "Bash(bash --version)"
     ]
   },
   "hooks": {

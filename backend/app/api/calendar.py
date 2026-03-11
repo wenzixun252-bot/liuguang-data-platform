@@ -269,7 +269,11 @@ async def generate_brief(
                 stream=True,
             )
             async for chunk in stream:
+                if not chunk.choices:
+                    continue
                 delta = chunk.choices[0].delta
+                if not delta:
+                    continue
                 if delta.content:
                     full_content += delta.content
                     data = json.dumps({"type": "content", "content": delta.content}, ensure_ascii=False)
@@ -303,7 +307,7 @@ async def generate_brief(
                     logger.warning("保存简报到会话失败: %s", e)
 
         except Exception as e:
-            logger.error("生成会前简报异常: %s", e)
+            logger.error("生成会前简报异常: %s", e, exc_info=True)
             data = json.dumps({"type": "error", "content": "生成简报时出错，请稍后重试"}, ensure_ascii=False)
             yield f"data: {data}\n\n"
             yield "data: [DONE]\n\n"
@@ -377,7 +381,11 @@ async def brief_chat(
                 stream=True,
             )
             async for chunk in stream:
+                if not chunk.choices:
+                    continue
                 delta = chunk.choices[0].delta
+                if not delta:
+                    continue
                 if delta.content:
                     full_content += delta.content
                     data = json.dumps({"type": "content", "content": delta.content}, ensure_ascii=False)

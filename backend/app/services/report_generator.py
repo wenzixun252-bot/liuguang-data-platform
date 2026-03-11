@@ -599,6 +599,64 @@ async def start_report_background(
     return report
 
 
+async def prepare_report_stream(
+    db: AsyncSession,
+    owner_id: str,
+    template_id: int,
+    title: str,
+    time_start: datetime,
+    time_end: datetime,
+    data_sources: list[str],
+    extra_instructions: str | None = None,
+    target_reader_ids: list[str] | None = None,
+) -> tuple["Report", str]:
+    """在 endpoint 函数体内完成所有 DB 查询，返回 (report, prompt)。
+
+    这样 DB 操作在依赖注入的 session 生命周期内完成，
+    避免在 StreamingResponse generator 里使用可能已关闭的 session。
+    """
+    if time_start.tzinfo is not None:
+        time_start = time_start.astimezone(timezone.utc).replace(tzinfo=None)
+    if time_end.tzinfo is not None:
+        time_end = time_end.astimezone(timezone.utc).replace(tzinfo=None)
+
+    template = await db.get(ReportTemplate, template_id)
+    if not template:
+        raise ValueError("模板不存在")
+
+    data = await gather_data(db, owner_id, time_start, time_end, data_sources)
+    reader_context = await _build_reader_context(db, owner_id, target_reader_ids or [])
+
+    data_text = json.dumps(data, ensure_ascii=False, indent=2)
+    prompt = template.prompt_template.format(
+        data=data_text[:8000],
+        extra_instructions=(extra_instructions or "") + reader_context,
+    )
+
+    report = Report(
+        owner_id=owner_id,
+        template_id=template_id,
+        title=title,
+        status="generating",
+        time_range_start=time_start,
+        time_range_end=time_end,
+        target_readers=target_reader_ids or [],
+        data_sources_used={
+            "sources": data_sources,
+            "counts": {
+                "my_documents": len(data["my_documents"]),
+                "reference_documents": len(data["reference_documents"]),
+                "communications": len(data["communications"]),
+            },
+        },
+    )
+    db.add(report)
+    await db.commit()
+    await db.refresh(report)
+
+    return report, prompt
+
+
 async def generate_report_stream(
     db: AsyncSession,
     owner_id: str,
@@ -673,6 +731,8 @@ async def generate_report_stream(
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta
+            if not delta:
+                continue
             if delta.content:
                 full_content.append(delta.content)
                 yield json.dumps({"type": "content", "content": delta.content}, ensure_ascii=False)

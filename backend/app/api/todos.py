@@ -88,8 +88,12 @@ async def extract_todos(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """从近N天会议/聊天中AI提取待办候选。"""
-    items = await extract_and_save(db, current_user.feishu_open_id, current_user.name, body.days)
-    return items
+    try:
+        items = await extract_and_save(db, current_user.feishu_open_id, current_user.name, body.days)
+        return items
+    except Exception as e:
+        logger.exception("待办提取接口异常: %s", e)
+        raise HTTPException(status_code=500, detail=f"待办提取失败: {e}")
 
 
 @router.get("", response_model=TodoListResponse, summary="待办列表")

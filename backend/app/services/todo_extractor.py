@@ -111,6 +111,8 @@ async def extract_todos_from_communications(
         if comm.content_text and len(comm.content_text) > 50:
             llm_todos = await _llm_extract(comm.content_text[:4000], user_name)
             for t in llm_todos:
+                if not isinstance(t, dict) or not t.get("title"):
+                    continue
                 todos.append({
                     **t,
                     "source_type": "communication",

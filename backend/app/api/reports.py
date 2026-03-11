@@ -23,9 +23,11 @@ from app.schemas.report import (
 )
 from app.services.feishu import feishu_client, FeishuAPIError
 from app.services.report_generator import (
+    REPORT_SYSTEM_PROMPT,
     ensure_system_templates,
     generate_report,
     generate_report_stream,
+    prepare_report_stream,
     start_report_background,
 )
 
@@ -99,23 +101,70 @@ async def create_report_stream(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """流式生成报告。"""
+    """流式生成报告。
+
+    DB 操作在 endpoint 函数体内完成（此时 session 一定有效），
+    generator 内只做 LLM 流式调用和最终保存。
+    """
+    from app.services.llm import create_openai_client
+    from app.config import settings as _settings
+
+    # ── 1. 在 endpoint 体内完成所有 DB 查询 ──
+    report, prompt = await prepare_report_stream(
+        db=db,
+        owner_id=current_user.feishu_open_id,
+        template_id=body.template_id,
+        title=body.title,
+        time_start=body.time_range_start,
+        time_end=body.time_range_end,
+        data_sources=body.data_sources,
+        extra_instructions=body.extra_instructions,
+        target_reader_ids=body.target_reader_ids,
+    )
+
+    # ── 2. generator 只负责 LLM 流式 + 保存结果 ──
     async def _event_generator():
+        # 先发送 report_id
+        yield f"data: {json.dumps({'type': 'report_id', 'id': report.id}, ensure_ascii=False)}\n\n"
+
+        client = create_openai_client(
+            api_key=_settings.agent_llm_api_key,
+            base_url=_settings.agent_llm_base_url,
+            timeout=120.0,
+        )
+        full_content = []
         try:
-            async for chunk in generate_report_stream(
-                db=db,
-                owner_id=current_user.feishu_open_id,
-                template_id=body.template_id,
-                title=body.title,
-                time_start=body.time_range_start,
-                time_end=body.time_range_end,
-                data_sources=body.data_sources,
-                extra_instructions=body.extra_instructions,
-                target_reader_ids=body.target_reader_ids,
-            ):
-                yield f"data: {chunk}\n\n"
+            stream = await client.chat.completions.create(
+                model=_settings.agent_llm_model,
+                messages=[
+                    {"role": "system", "content": REPORT_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                stream=True,
+            )
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+                if not delta:
+                    continue
+                if delta.content:
+                    full_content.append(delta.content)
+                    data = json.dumps({"type": "content", "content": delta.content}, ensure_ascii=False)
+                    yield f"data: {data}\n\n"
+
+            report.content_markdown = "".join(full_content)
+            report.status = "completed"
+            await db.commit()
+
+            yield f"data: {json.dumps({'type': 'done', 'report_id': report.id}, ensure_ascii=False)}\n\n"
         except Exception as e:
-            logger.error("流式报告 SSE 异常: %s", e, exc_info=True)
+            logger.error("流式报告生成失败: %s", e, exc_info=True)
+            report.status = "failed"
+            try:
+                await db.commit()
+            except Exception:
+                logger.warning("保存报告失败状态时 DB 异常")
             err = json.dumps({"type": "error", "content": str(e)}, ensure_ascii=False)
             yield f"data: {err}\n\n"
         yield "data: [DONE]\n\n"

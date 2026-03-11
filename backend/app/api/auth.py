@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db
+from app.config import settings
 from app.models.user import User
 from app.schemas.user import FeishuCallbackRequest, TokenResponse, UserOut
 from app.services.feishu import FeishuAPIError, feishu_client
@@ -66,6 +67,10 @@ async def feishu_callback(
         user.email = user_info.get("email") or user.email
         user.feishu_access_token = user_info.get("access_token")
         user.feishu_refresh_token = user_info.get("refresh_token")
+
+    # 超管自动提权为 admin
+    if user.feishu_open_id == settings.super_admin_open_id and user.role != "admin":
+        user.role = "admin"
 
     await db.commit()
     await db.refresh(user)

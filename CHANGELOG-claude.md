@@ -421,3 +421,9 @@
 - **2026-03-11 23:50:34** [数据库迁移] `backend/alembic/versions/l2b3c4d5e6f7_add_unified_content_view.py` — 修改逻辑 (+3/-12行)
 - **2026-03-11 23:53:29** [数据库迁移] `backend/alembic/versions/afb981d9d787_add_original_filename_to_documents.py` — 修改逻辑 (+1/-1行)
 - **2026-03-12 00:19:52** [其他] `build-and-deploy.sh` — 新建文件 `build-and-deploy` (90行)
+- **2026-03-12 00:56:15** [其他] `CLAUDE.md` — 修改逻辑 (+5/-5行)
+- **2026-03-12 00:56:25** [其他] `CLAUDE.md` — 修改逻辑 (+3/-2行)
+- **2026-03-12 00:56:34** [其他] `CLAUDE.md` — 新增 1 行代码
+- **2026-03-12 00:56:46** [其他] `CLAUDE.md` — 修改逻辑 (+9/-2行)
+- **2026-03-12 00:56:54** [其他] `CLAUDE.md` — 新增 1 行代码
+- **2026-03-12 00:57:03** [其他] `CLAUDE.md` — 新增 3 行代码

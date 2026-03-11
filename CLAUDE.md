@@ -46,15 +46,15 @@ cd frontend && npm run build
 ### Backend (backend/app/)
 
 ```
-main.py       -> FastAPI app entry (21 routers, CORS, lifespan scheduler)
+main.py       -> FastAPI app entry (23 routers, CORS, lifespan scheduler)
 config.py     -> Pydantic Settings from .env (DB, Feishu, LLM, embedding configs)
 database.py   -> AsyncEngine + AsyncSession (pool_size=10, max_overflow=20)
-api/          -> FastAPI route handlers (24 routers)
+api/          -> FastAPI route handlers (23 routers + deps.py)
   deps.py     -> Dependency injection: get_db, get_current_user, get_visible_owner_ids, require_role
-models/       -> SQLAlchemy 2.0 async ORM (22 models)
+models/       -> SQLAlchemy 2.0 async ORM (21 model files)
 schemas/      -> Pydantic request/response models
-services/     -> Business logic (feishu.py, llm.py, rag.py, kg_builder.py, graph_rag.py)
-  etl/        -> ETL pipeline: extractor -> transformer -> enricher -> loader
+services/     -> Business logic (feishu.py, llm.py, rag.py, kg_builder.py, graph_rag.py, todo_extractor.py, kg_analyzer.py, leadership_analyzer.py, report_generator.py...)
+  etl/        -> ETL pipeline: preprocessor -> extractor -> transformer -> enricher -> postprocessor -> loader (+ recording_matcher, hardcoded_comm)
 utils/        -> JWT helpers, Feishu webhook alerts
 worker/       -> APScheduler background tasks (ETL cron, default 30min)
 ```
@@ -62,9 +62,10 @@ worker/       -> APScheduler background tasks (ETL cron, default 30min)
 ### Frontend (frontend/src/)
 
 ```
-pages/        -> Route-level page components
+pages/        -> Route-level page components (17 pages)
 components/   -> Shared UI components (Layout, GlobalSearch, TagManager, ChatMessages...)
-  insights/   -> Dashboard widget components (TrendWidget, KGMiniWidget, DataGraphWidget...)
+  insights/   -> Dashboard widget components (TrendWidget, KGMiniWidget, DataGraphWidget, AssetScoreWidget, OrgHealthWidget...)
+  import/     -> Data import components (SmartDropZone, ExtractionRuleEditor, CleaningRuleEditor, DataRuleSection...)
 lib/          -> API client (axios), auth helpers, feishu SDK
 hooks/        -> Custom hooks (useAuth, useWidgetConfig, useColumnSettings, useTaskProgress)
 ```
@@ -78,6 +79,7 @@ hooks/        -> Custom hooks (useAuth, useWidgetConfig, useColumnSettings, useT
 - **Hybrid RAG**: Vector cosine similarity + BM25 keyword search + Reciprocal Rank Fusion. Permission-aware. Streams via SSE.
 - **Knowledge Graph**: KGEntity + KGRelation extracted from content, used to enhance RAG context via graph_rag.py.
 - **Tag System**: TagDefinition (project|priority|topic|custom) linked to content via ContentTag. ETL auto-tags via default_tag_ids.
+- **Extraction/Cleaning Rules**: ExtractionRule and CleaningRule as persistent entities with dedicated API routers, configurable per ETL data source.
 - **Auth**: Feishu OAuth 2.0 SSO -> JWT (HS256, 24h). Roles: employee, admin.
 
 ### Frontend Tech Stack
@@ -87,6 +89,7 @@ hooks/        -> Custom hooks (useAuth, useWidgetConfig, useColumnSettings, useT
 - **Tailwind CSS 4** — utility-first styling, no component library
 - **Axios** with JWT interceptor + 401 auto-redirect
 - **Lucide React** icons, **Recharts** + **D3** for charts, **react-markdown** for content rendering
+- **Framer Motion** for page transitions and animations
 - **react-hot-toast** for notifications (top-right, 3s)
 
 ### Route Structure
@@ -95,16 +98,23 @@ hooks/        -> Custom hooks (useAuth, useWidgetConfig, useColumnSettings, useT
 |------|------|-------------|
 | `/login` | Login | Feishu OAuth callback |
 | `/data-insights` | DataInsights | Dashboard with configurable widgets, stats cards, todos |
-| `/data-import` | DataImport | File upload & ETL trigger |
+| `/data-import` | DataImport | File upload, ETL trigger, extraction/cleaning rules |
 | `/documents` | Documents | Document list with search, tags, cloud sync |
 | `/communications` | Communications | Meetings & chat messages (unified) |
 | `/structured-tables` | StructuredTables | Structured table data view |
 | `/chat` | Chat | AI assistant with tabs: chat, todos, graph, calendar |
 | `/search` | SearchPage | Global cross-content search results |
 | `/settings` | Settings | User preferences, ETL admin, permissions |
+| `/reports` | Reports | Report list |
 | `/reports/:id` | ReportDetail | Report viewer |
+| `/todos` | Todos | Todo management |
+| `/knowledge-graph` | KnowledgeGraph | Full KG visualization |
+| `/leadership-insight` | LeadershipInsight | Leadership analytics |
+| `/department-admin` | DepartmentAdmin | Department management |
+| `/etl-admin` | ETLAdmin | ETL pipeline administration |
+| `/calendar` | CalendarAssistant | Calendar assistant |
 
-Legacy redirects: `/meetings`, `/messages`, `/calendar` redirect to their new locations.
+Legacy redirects: `/meetings`, `/messages` redirect to `/communications`.
 
 ### Key Environment Variables (.env)
 
@@ -125,6 +135,9 @@ Three-service stack in `docker-compose.yml`:
 - **postgres** (pgvector/pgvector:pg16) — port 5432, database `liuguang`
 - **backend** (FastAPI) — port 8000, runs `alembic upgrade head` then `uvicorn`
 - **frontend** (Nginx) — port 80, serves React SPA with `/api` proxy to backend
+
+Deployment script: `build-and-deploy.sh` for automated build and deploy.
+45 Alembic migrations as of latest.
 
 ---
 
