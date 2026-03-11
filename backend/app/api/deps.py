@@ -4,7 +4,7 @@ import logging
 from collections.abc import AsyncGenerator
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
 from sqlalchemy import select
@@ -102,14 +102,16 @@ def is_super_admin(user: User) -> bool:
 async def get_visible_owner_ids(
     user: User,
     db: AsyncSession,
+    request: Request | None = None,
 ) -> list[str] | None:
     """根据用户角色返回可见的 owner_id 列表。
 
-    - admin: 返回 None（看全部）
-    - 普通用户: 返回 [自己] + [直接分享给我的人] + [分享给我所在部门的人]
+    - admin + 管理模式: 返回 None（看全部）
+    - admin + 个人模式 / 普通用户: 返回 [自己] + [直接分享给我的人] + [分享给我所在部门的人]
     """
     if user.role == "admin":
-        return None
+        if request and request.headers.get("X-Admin-Mode", "").lower() == "true":
+            return None
 
     visible_ids: list[str] = [user.feishu_open_id]
 

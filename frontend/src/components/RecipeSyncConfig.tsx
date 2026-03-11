@@ -1,9 +1,11 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import {
   Search, RefreshCw, Trash2, Plus, ExternalLink, Check,
   ChevronDown, ChevronRight, Loader2, X, Settings, AlertTriangle,
+  Sparkles, Video, MessageSquare,
 } from 'lucide-react'
-import api from '../lib/api'
+import { useQuery } from '@tanstack/react-query'
+import api, { getExtractionRules } from '../lib/api'
 import toast from 'react-hot-toast'
 
 /* ── 类型 ─────────────────────────────────── */
@@ -15,11 +17,23 @@ interface DataSource {
   table_name: string
   asset_type: string
   is_enabled: boolean
+  extraction_rule_id?: number | null
   created_at: string
   last_sync_status?: string | null
   last_sync_time?: string | null
   records_synced?: number | null
   error_message?: string | null
+}
+
+// 会议纪要 vs 会话记录的关键词分类
+const MEETING_KEYWORDS = ['会议', '纪要', 'meeting', '会议纪要', '会议记录', '会议摘要']
+const CHAT_KEYWORDS = ['会话', '群聊', '消息', '聊天', 'chat', '群聊摘要', '消息汇总']
+
+function classifySource(tableName: string): 'meeting' | 'chat' | 'unknown' {
+  const lower = tableName.toLowerCase()
+  if (MEETING_KEYWORDS.some(k => lower.includes(k))) return 'meeting'
+  if (CHAT_KEYWORDS.some(k => lower.includes(k))) return 'chat'
+  return 'unknown'
 }
 
 interface BitableApp {
@@ -36,13 +50,17 @@ interface RecipeSyncConfigProps {
   recipeUrl: string
   assetType: string
   recipeKeywords: string[]
+  discoverKeywords?: string[]
   steps: string[]
+  filterType?: 'bitable' | 'spreadsheet'
+  cleaningRuleId?: number | null
+  extractionRuleId?: number | null
   onClose: () => void
   onSyncComplete?: () => void
 }
 
 export default function RecipeSyncConfig({
-  title, recipeUrl, assetType, recipeKeywords, steps, onClose, onSyncComplete,
+  title, recipeUrl, assetType, recipeKeywords, discoverKeywords = [], steps, filterType, cleaningRuleId: externalCleaningRuleId = null, extractionRuleId: externalExtractionRuleId = null, onClose, onSyncComplete,
 }: RecipeSyncConfigProps) {
   // 数据源列表
   const [sources, setSources] = useState<DataSource[]>([])
@@ -58,6 +76,13 @@ export default function RecipeSyncConfig({
   const [selectedTable, setSelectedTable] = useState<{ app_token: string; table_id: string; table_name: string } | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [appSearch, setAppSearch] = useState('')
+
+  // 清洗规则：使用外部传入的
+  const cleaningRuleId = externalCleaningRuleId
+  const extractionRuleId = externalExtractionRuleId
+
+  // 提取规则列表（用于已关联数据源的规则选择器）
+  const { data: extractionRules = [] } = useQuery({ queryKey: ['extraction-rules'], queryFn: getExtractionRules })
 
   // 粘贴链接
   const [showPasteUrl, setShowPasteUrl] = useState(false)
@@ -89,9 +114,10 @@ export default function RecipeSyncConfig({
   useEffect(() => {
     api.get('/import/sync-status', { params: { asset_type: assetType } })
       .then((res) => {
-        const hasRunning = res.data.some((s: DataSource) => s.last_sync_status === 'running')
+        const sources = Array.isArray(res.data) ? res.data : []
+        const hasRunning = sources.some((s: DataSource) => s.last_sync_status === 'running')
         if (hasRunning) {
-          setSources(res.data)
+          setSources(sources)
           setPolling(true)
         }
       })
@@ -103,12 +129,13 @@ export default function RecipeSyncConfig({
     if (!polling) return
     const timer = setInterval(() => {
       api.get('/import/sync-status', { params: { asset_type: assetType } }).then((res) => {
-        setSources(res.data)
-        const hasRunning = res.data.some((s: DataSource) => s.last_sync_status === 'running')
+        const data = Array.isArray(res.data) ? res.data : []
+        setSources(data)
+        const hasRunning = data.some((s: DataSource) => s.last_sync_status === 'running')
         if (!hasRunning) {
           setPolling(false)
           setSyncingSourceId(null)
-          const hasFailed = res.data.some((s: DataSource) => s.last_sync_status === 'failed')
+          const hasFailed = data.some((s: DataSource) => s.last_sync_status === 'failed')
           if (hasFailed) {
             toast.error('部分数据源同步失败')
           } else {
@@ -127,7 +154,15 @@ export default function RecipeSyncConfig({
     setDiscovering(true)
     try {
       const res = await api.get('/import/feishu-discover')
-      const apps: BitableApp[] = res.data
+      let apps: BitableApp[] = res.data
+
+      // 按入口类型过滤：多维表格只看 bitable/wiki，飞书表格只看 spreadsheet
+      if (filterType === 'bitable') {
+        apps = apps.filter(a => a.type === 'bitable' || a.type === 'wiki')
+      } else if (filterType === 'spreadsheet') {
+        apps = apps.filter(a => a.type === 'spreadsheet')
+      }
+
       setBitableApps(apps)
 
       // 关键词匹配
@@ -222,6 +257,8 @@ export default function RecipeSyncConfig({
         table_id: selectedTable.table_id,
         table_name: selectedTable.table_name,
         asset_type: assetType,
+        ...(cleaningRuleId && { cleaning_rule_id: cleaningRuleId }),
+        ...(extractionRuleId && { extraction_rule_id: extractionRuleId }),
       })
       toast.success('数据源已添加')
       setSelectedTable(null)
@@ -242,6 +279,8 @@ export default function RecipeSyncConfig({
       await api.post('/import/feishu-source-from-url', {
         url: pasteUrl.trim(),
         asset_type: assetType,
+        ...(cleaningRuleId && { cleaning_rule_id: cleaningRuleId }),
+        ...(extractionRuleId && { extraction_rule_id: extractionRuleId }),
       })
       toast.success('数据源已添加')
       setPasteUrl('')
@@ -278,9 +317,27 @@ export default function RecipeSyncConfig({
     }
   }
 
+  const handleUpdateSourceRule = async (sourceId: number, ruleId: number | null) => {
+    try {
+      await api.patch(`/import/feishu-source/${sourceId}`, { extraction_rule_id: ruleId })
+      loadSources()
+    } catch {
+      toast.error('更新提取规则失败')
+    }
+  }
+
   /* ── 渲染 ──────────────────────────────── */
 
-  const hasNoSources = sources.length === 0 && !sourcesLoading
+  // 配方模式下，只显示关键词匹配的数据源；非配方模式显示全部
+  const allKeywords = [...recipeKeywords, ...discoverKeywords]
+  const displaySources = isRecipeMode
+    ? sources.filter(s => {
+        const name = s.table_name.toLowerCase()
+        return allKeywords.some(kw => name.includes(kw.toLowerCase()))
+      })
+    : sources
+
+  const hasNoSources = displaySources.length === 0 && !sourcesLoading
 
   const filteredUnmatched = unmatchedApps.filter(a =>
     !appSearch || a.app_name.toLowerCase().includes(appSearch.toLowerCase())
@@ -387,7 +444,7 @@ export default function RecipeSyncConfig({
             {discovering ? (
               <div className="py-6 text-center text-gray-400">
                 <Loader2 size={20} className="animate-spin mx-auto mb-2" />
-                正在检索飞书多维表格...
+                {filterType === 'spreadsheet' ? '正在检索飞书表格...' : '正在检索飞书多维表格...'}
               </div>
             ) : (
               <>
@@ -424,7 +481,7 @@ export default function RecipeSyncConfig({
                         <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
                         <input
                           type="text"
-                          placeholder="搜索多维表格名称..."
+                          placeholder={filterType === 'spreadsheet' ? '搜索飞书表格名称...' : '搜索多维表格名称...'}
                           className="w-full pl-8 pr-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
                           value={appSearch}
                           onChange={(e) => setAppSearch(e.target.value)}
@@ -446,7 +503,7 @@ export default function RecipeSyncConfig({
                       ))}
                       {filteredUnmatched.length === 0 && (
                         <div className="px-3 py-4 text-sm text-gray-400 text-center">
-                          {bitableApps.length === 0 ? '未发现多维表格' : '无匹配结果'}
+                          {bitableApps.length === 0 ? (filterType === 'spreadsheet' ? '未发现飞书表格' : '未发现多维表格') : '无匹配结果'}
                         </div>
                       )}
                     </div>
@@ -482,7 +539,7 @@ export default function RecipeSyncConfig({
               className="flex items-center gap-1 text-sm text-gray-500 hover:text-indigo-600"
             >
               <ChevronDown size={14} className={`transition-transform ${showPasteUrl ? 'rotate-180' : ''}`} />
-              在列表中找不到？粘贴多维表格链接
+              在列表中找不到？粘贴飞书表格链接
             </button>
             {showPasteUrl && (
               <div className="mt-3 flex gap-2">
@@ -508,21 +565,38 @@ export default function RecipeSyncConfig({
           </div>
 
           {/* 区域 D: 已关联数据源管理 */}
-          {sources.length > 0 && (
+          {displaySources.length > 0 && (
             <div className="space-y-3">
               <h4 className="font-medium text-gray-700 text-sm">已关联数据源</h4>
               <div className="border border-gray-200 rounded-lg divide-y divide-gray-50">
-                {sources.map((s) => {
+                {displaySources.map((s) => {
                   // 构建原表格跳转链接
                   const sourceUrl = s.app_token
                     ? `https://feishu.cn/base/${s.app_token}?table=${s.table_id}`
                     : null
+                  const sourceType = isRecipeMode ? classifySource(s.table_name) : 'unknown'
+                  const TypeIcon = sourceType === 'meeting' ? Video : sourceType === 'chat' ? MessageSquare : null
+                  const typeLabel = sourceType === 'meeting' ? '会议纪要' : sourceType === 'chat' ? '会话记录' : null
+                  const matchedRule = extractionRules.find((r: any) => r.id === s.extraction_rule_id)
 
                   return (
                     <div key={s.id} className="flex items-center gap-3 px-4 py-3">
+                      {/* 类型图标 */}
+                      {TypeIcon && (
+                        <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                          sourceType === 'meeting' ? 'bg-purple-50' : 'bg-blue-50'
+                        }`}>
+                          <TypeIcon size={14} className={sourceType === 'meeting' ? 'text-purple-600' : 'text-blue-600'} />
+                        </div>
+                      )}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5">
                           <p className="text-sm font-medium text-gray-800 truncate">{s.table_name || s.table_id}</p>
+                          {typeLabel && (
+                            <span className={`px-1.5 py-0.5 rounded-full text-[10px] shrink-0 ${
+                              sourceType === 'meeting' ? 'bg-purple-50 text-purple-600' : 'bg-blue-50 text-blue-600'
+                            }`}>{typeLabel}</span>
+                          )}
                           {sourceUrl && (
                             <a
                               href={sourceUrl}
@@ -541,6 +615,25 @@ export default function RecipeSyncConfig({
                           {s.records_synced ? ` · ${s.records_synced} 条记录` : ''}
                         </p>
                       </div>
+                      {/* 提取规则选择器（仅沟通资产模式显示） */}
+                      {isRecipeMode && (
+                        matchedRule ? (
+                          <span
+                            title="点击移除提取规则"
+                            onClick={() => handleUpdateSourceRule(s.id, null)}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-indigo-50 text-indigo-600 border border-indigo-200 cursor-pointer hover:bg-red-50 hover:text-red-500 hover:border-red-200 transition-colors"
+                          >
+                            <Sparkles size={10} />
+                            {matchedRule.name}
+                            <X size={10} className="opacity-60" />
+                          </span>
+                        ) : extractionRules.length > 0 ? (
+                          <SourceRulePicker
+                            rules={extractionRules}
+                            onSelect={(ruleId) => handleUpdateSourceRule(s.id, ruleId)}
+                          />
+                        ) : null
+                      )}
                       <SyncStatusBadge status={s.last_sync_status} errorMessage={s.error_message} />
                       <button
                         type="button"
@@ -683,4 +776,47 @@ function SyncStatusBadge({ status, errorMessage }: { status?: string | null; err
     )
   }
   return <span className="px-2 py-0.5 rounded-full text-[10px] bg-gray-100 text-gray-500">{status}</span>
+}
+
+/* ── 数据源提取规则选择器 ───────────────── */
+
+function SourceRulePicker({ rules, onSelect }: { rules: any[]; onSelect: (id: number) => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-gray-100 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
+      >
+        <Plus size={10} />
+        提取规则
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded-lg shadow-lg py-1 min-w-[120px]">
+          {rules.map((r: any) => (
+            <button
+              type="button"
+              key={r.id}
+              onClick={() => { onSelect(r.id); setOpen(false) }}
+              className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
+            >
+              {r.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }

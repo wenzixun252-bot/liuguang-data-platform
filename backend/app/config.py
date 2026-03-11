@@ -30,29 +30,29 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 1440  # 24h
 
-    # ── LLM (Schema 映射) ──
+    # ── LLM (Schema 映射 / 关键信息提取) ──
     llm_api_key: str = ""
-    llm_base_url: str = "https://api.deepseek.com/v1"
-    llm_model: str = "deepseek-chat"
+    llm_base_url: str = "https://newapi.web.azyinghu.com:2443/v1"
+    llm_model: str = "glm-4.5-air"
 
     # ── Embedding ──
     embedding_api_key: str = ""
-    embedding_base_url: str = "https://api.deepseek.com/v1"
-    embedding_model: str = "text-embedding-v3"
-    embedding_dimension: int = 1536
+    embedding_base_url: str = "https://newapi.web.azyinghu.com:2443/v1"
+    embedding_model: str = "BAAI/bge-m3"
+    embedding_dimension: int = 1024
 
     # ── 视觉模型 (图片识别) ──
-    vision_llm_model: str = "Qwen/Qwen2.5-VL-72B-Instruct"
+    vision_llm_model: str = "qwen3-vl-8b-instruct"
 
     # ── 流光助手 Agent LLM ──
     agent_llm_api_key: str = ""
-    agent_llm_base_url: str = "https://api.deepseek.com/v1"
-    agent_llm_model: str = "deepseek-chat"
+    agent_llm_base_url: str = "https://newapi.web.azyinghu.com:2443/v1"
+    agent_llm_model: str = "glm-5"
 
-    # ── ASR 语音转文字（默认硅基流动 SenseVoice，免费） ──
+    # ── ASR 语音转文字 ──
     asr_api_key: str = ""
-    asr_base_url: str = "https://api.siliconflow.cn/v1"
-    asr_model: str = "FunAudioLLM/SenseVoiceSmall"
+    asr_base_url: str = "https://newapi.web.azyinghu.com:2443/v1"
+    asr_model: str = "funasr"
 
     # ── 文件上传 ──
     upload_dir: str = "uploads"

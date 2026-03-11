@@ -63,6 +63,7 @@ class StructuredTable(Base):
     source_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     feishu_record_id: Mapped[str | None] = mapped_column(String(128))
     file_name: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    file_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     schema_info: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     row_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     column_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
@@ -76,6 +77,8 @@ class StructuredTable(Base):
     quality_score: Mapped[float | None] = mapped_column(Float)
     duplicate_of: Mapped[int | None] = mapped_column(Integer)
     content_hash: Mapped[str | None] = mapped_column(String(64))
+    # -- 清洗规则字段 --
+    cleaning_rule_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # -- 通用字段 --
     extra_fields: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
     parse_status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="done")

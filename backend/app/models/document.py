@@ -57,6 +57,7 @@ class Document(Base):
     content_text: Mapped[str] = mapped_column(Text, nullable=False)
     summary: Mapped[str | None] = mapped_column(Text)
     author: Mapped[str | None] = mapped_column(String(256))
+    original_filename: Mapped[str | None] = mapped_column(String(512))
     file_type: Mapped[str | None] = mapped_column(String(64))
     file_size: Mapped[int | None] = mapped_column(Integer)
     file_path: Mapped[str | None] = mapped_column(String(1024))
@@ -70,6 +71,9 @@ class Document(Base):
     quality_score: Mapped[float | None] = mapped_column(Float)
     duplicate_of: Mapped[int | None] = mapped_column(Integer)
     content_hash: Mapped[str | None] = mapped_column(String(64))
+    # -- 个人化提取字段 --
+    key_info: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    extraction_rule_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # -- 通用字段 --
     extra_fields: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
     feishu_created_at: Mapped[datetime | None] = mapped_column()

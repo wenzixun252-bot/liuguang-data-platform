@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Search, ChevronLeft, ChevronRight, X, Paperclip, ExternalLink, Download, Image, User, Trash2, Table2 } from 'lucide-react'
-import api from '../lib/api'
+import api, { getExtractionRules } from '../lib/api'
 import toast from 'react-hot-toast'
+import { useQuery } from '@tanstack/react-query'
 import { ColumnSettingsButton, useColumnSettings, type ColumnDef } from '../components/ColumnSettings'
 import { getUser } from '../lib/auth'
 
@@ -13,11 +14,11 @@ const DOC_COLUMNS: ColumnDef[] = [
   { key: 'tags', label: '标签' },
   { key: 'keywords', label: '关键词', defaultVisible: false },
   { key: 'summary', label: '摘要' },
+  { key: 'key_info', label: '关键信息' },
   { key: 'source_type', label: '来源' },
-  { key: 'uploader_name', label: '上传人', defaultVisible: false },
+  { key: 'uploader_name', label: '资产所有人' },
   { key: 'file_type', label: '类型', defaultVisible: false },
-  { key: 'author', label: '作者', defaultVisible: false },
-  { key: 'time', label: '时间' },
+  { key: 'time', label: '上传时间' },
 ]
 
 interface AttachmentMeta {
@@ -37,7 +38,9 @@ interface DocumentItem {
   id: number
   owner_id: string
   title: string | null
+  original_filename: string | null
   source_type: string
+  source_platform: string | null
   source_app_token: string | null
   source_table_id: string | null
   content_text: string
@@ -45,12 +48,14 @@ interface DocumentItem {
   author: string | null
   file_type: string | null
   keywords: string[]
+  key_info?: Record<string, string> | null
   tags: Record<string, unknown>
   source_url: string | null
   uploader_name: string | null
   extra_fields?: { _attachments?: AttachmentMeta[]; _links?: LinkMeta[]; [key: string]: unknown }
   feishu_record_id: string | null
   bitable_url: string | null
+  extraction_rule_id?: number | null
   parse_status: string | null
   import_count: number
   synced_at: string | null
@@ -69,6 +74,19 @@ const SOURCE_LABELS: Record<string, string> = {
   local: '本地上传',
 }
 
+const PLATFORM_LABELS: Record<string, string> = {
+  feishu_cloud_doc: '飞书云文档',
+  feishu_folder: '飞书文件夹',
+  feishu: '飞书同步',
+}
+
+function getSourceLabel(item: { source_type: string; source_platform: string | null }) {
+  if (item.source_type === 'cloud' && item.source_platform && PLATFORM_LABELS[item.source_platform]) {
+    return PLATFORM_LABELS[item.source_platform]
+  }
+  return SOURCE_LABELS[item.source_type] || item.source_type
+}
+
 export default function Documents() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [data, setData] = useState<DocumentListResponse | null>(null)
@@ -76,7 +94,6 @@ export default function Documents() {
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
   const [sourceFilter, setSourceFilter] = useState('')
-  const [categoryFilter, setCategoryFilter] = useState('')
   const [uploaderFilter, setUploaderFilter] = useState('')
   const [selected, setSelected] = useState<DocumentItem | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
@@ -85,6 +102,13 @@ export default function Documents() {
   const [tagFilter, setTagFilter] = useState<number[]>([])
   const [tagRefreshKey, setTagRefreshKey] = useState(0)
 
+  // 提取规则名称映射
+  const { data: rulesList } = useQuery({ queryKey: ['extraction-rules'], queryFn: getExtractionRules })
+  const rulesMap: Record<number, string> = {}
+  if (Array.isArray(rulesList)) {
+    rulesList.forEach((r: any) => { rulesMap[r.id] = r.name })
+  }
+
   const pageSize = 20
 
   useEffect(() => {
@@ -92,7 +116,6 @@ export default function Documents() {
     const params: Record<string, unknown> = { page, page_size: pageSize }
     if (search) params.search = search
     if (sourceFilter) params.source_type = sourceFilter
-    if (categoryFilter) params.doc_category = categoryFilter
     if (uploaderFilter) params.uploader_name = uploaderFilter
     if (tagFilter.length > 0) params.tag_ids = tagFilter
 
@@ -100,12 +123,12 @@ export default function Documents() {
       .then((res) => setData(res.data))
       .catch(() => toast.error('加载文档列表失败'))
       .finally(() => setLoading(false))
-  }, [page, search, sourceFilter, categoryFilter, uploaderFilter, tagFilter, refreshKey])
+  }, [page, search, sourceFilter, uploaderFilter, tagFilter, refreshKey])
 
   // 翻页/筛选变化时清空选择
   useEffect(() => {
     setSelectedIds(new Set())
-  }, [page, search, sourceFilter, categoryFilter, uploaderFilter, tagFilter])
+  }, [page, search, sourceFilter, uploaderFilter, tagFilter])
 
   // 从搜索结果跳转过来时自动打开详情
   useEffect(() => {
@@ -207,20 +230,9 @@ export default function Documents() {
             <option value="cloud">飞书同步</option>
             <option value="local">本地上传</option>
           </select>
-          <select
-            className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-200"
-            value={categoryFilter}
-            onChange={(e) => { setCategoryFilter(e.target.value); setPage(1) }}
-          >
-            <option value="">全部类型</option>
-            <option value="report">行业报告</option>
-            <option value="proposal">项目方案</option>
-            <option value="policy">规章制度</option>
-            <option value="technical">技术文档</option>
-          </select>
           <input
             type="text"
-            placeholder="上传人筛选"
+            placeholder="资产所有人筛选"
             className="px-3 py-2 border border-gray-200 rounded-lg text-sm w-32 focus:outline-none focus:ring-2 focus:ring-indigo-200"
             value={uploaderFilter}
             onChange={(e) => { setUploaderFilter(e.target.value); setPage(1) }}
@@ -279,11 +291,11 @@ export default function Documents() {
                     {isVisible('tags') && <th className="text-left py-3 px-4 text-gray-500 font-medium">标签</th>}
                     {isVisible('keywords') && <th className="text-left py-3 px-4 text-gray-500 font-medium">关键词</th>}
                     {isVisible('summary') && <th className="text-left py-3 px-4 text-gray-500 font-medium">摘要</th>}
+                    {isVisible('key_info') && <th className="text-left py-3 px-4 text-violet-700 font-semibold bg-violet-50/50">自定义提取内容</th>}
                     {isVisible('source_type') && <th className="text-left py-3 px-4 text-gray-500 font-medium">来源</th>}
-                    {isVisible('uploader_name') && <th className="text-left py-3 px-4 text-gray-500 font-medium">上传人</th>}
+                    {isVisible('uploader_name') && <th className="text-left py-3 px-4 text-indigo-700 font-semibold bg-indigo-50/50">资产所有人</th>}
                     {isVisible('file_type') && <th className="text-left py-3 px-4 text-gray-500 font-medium">类型</th>}
-                    {isVisible('author') && <th className="text-left py-3 px-4 text-gray-500 font-medium">作者</th>}
-                    {isVisible('time') && <th className="text-left py-3 px-4 text-gray-500 font-medium">时间</th>}
+                    {isVisible('time') && <th className="text-left py-3 px-4 text-gray-500 font-medium">上传时间</th>}
                     <th className="text-left py-3 px-4 text-gray-500 font-medium">操作</th>
                   </tr>
                 </thead>
@@ -305,7 +317,7 @@ export default function Documents() {
                       {isVisible('title') && (
                         <td className="py-3 px-4 max-w-[240px]">
                           <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
-                            <span className="text-gray-800 font-medium truncate">{item.title || '无标题'}</span>
+                            <span className="text-gray-800 font-medium truncate">{item.original_filename || item.title || '无标题'}</span>
                             {item.parse_status === 'pending' && (
                               <span className="shrink-0 px-1.5 py-0.5 rounded text-xs bg-amber-50 text-amber-600 border border-amber-200">
                                 分析中
@@ -318,17 +330,28 @@ export default function Documents() {
                             )}
                             {(item.import_count ?? 1) > 1 && (
                               <span
-                                className="shrink-0 px-1.5 py-0.5 rounded text-xs bg-indigo-50 text-indigo-600 border border-indigo-200"
+                                className={`shrink-0 px-1.5 py-0.5 rounded text-xs border ${
+                                  item.import_count >= 10
+                                    ? 'bg-amber-50 text-amber-700 border-amber-300 font-semibold'
+                                    : item.import_count >= 5
+                                      ? 'bg-purple-50 text-purple-600 border-purple-200'
+                                      : 'bg-indigo-50 text-indigo-600 border-indigo-200'
+                                }`}
                                 title={`${item.import_count} 人已归档此文档`}
                               >
-                                {item.import_count} 人归档
+                                {item.import_count >= 10 ? '🔥 ' : ''}{item.import_count} 人归档
+                              </span>
+                            )}
+                            {item.extraction_rule_id && rulesMap[item.extraction_rule_id] && (
+                              <span className="shrink-0 px-1.5 py-0.5 rounded text-xs bg-violet-50 text-violet-700 border border-violet-200 font-medium">
+                                {rulesMap[item.extraction_rule_id]}
                               </span>
                             )}
                           </div>
                         </td>
                       )}
                       {isVisible('tags') && (
-                        <td className="py-3 px-4 max-w-[200px]">
+                        <td className="py-3 px-4 max-w-[200px]" onClick={(e) => e.stopPropagation()}>
                           <InlineTagEditor
                             contentType="document"
                             contentId={item.id}
@@ -344,22 +367,40 @@ export default function Documents() {
                               <span key={i} className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">{kw}</span>
                             ))}
                             {(item.keywords || []).length > 3 && (
-                              <span className="px-1.5 py-0.5 text-gray-400 text-xs">+{item.keywords.length - 3}</span>
+                              <span className="px-1.5 py-0.5 text-gray-400 text-xs">+{(item.keywords || []).length - 3}</span>
                             )}
                           </div>
                         </td>
                       )}
                       {isVisible('summary') && <td className="py-3 px-4 text-gray-500 max-w-[250px] truncate">{item.summary || item.content_text?.slice(0, 60) || '-'}</td>}
+                      {isVisible('key_info') && (
+                        <td className="py-3 px-4 max-w-[280px] bg-violet-50/30">
+                          {item.key_info && Object.keys(item.key_info).length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {Object.entries(item.key_info).slice(0, 3).map(([k, v]) => (
+                                <span key={k} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-violet-100 text-violet-800 border border-violet-200" title={`${k}: ${v}`}>
+                                  <span className="text-violet-500 mr-0.5">{k}:</span>
+                                  <span className="truncate max-w-[90px]">{String(v)}</span>
+                                </span>
+                              ))}
+                              {Object.keys(item.key_info).length > 3 && (
+                                <span className="text-xs text-violet-400">+{Object.keys(item.key_info).length - 3}</span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-gray-300 text-xs">-</span>
+                          )}
+                        </td>
+                      )}
                       {isVisible('source_type') && (
                         <td className="py-3 px-4">
                           <span className={`px-2 py-1 rounded-full text-xs ${item.source_type === 'cloud' ? 'bg-blue-50 text-blue-700' : 'bg-green-50 text-green-700'}`}>
-                            {SOURCE_LABELS[item.source_type] || item.source_type}
+                            {getSourceLabel(item)}
                           </span>
                         </td>
                       )}
-                      {isVisible('uploader_name') && <td className="py-3 px-4 text-gray-500">{item.uploader_name || '-'}</td>}
+                      {isVisible('uploader_name') && <td className="py-3 px-4 text-indigo-700 font-medium bg-indigo-50/30">{item.uploader_name || '-'}</td>}
                       {isVisible('file_type') && <td className="py-3 px-4 text-gray-500">{item.file_type ? item.file_type.toUpperCase() : '-'}</td>}
-                      {isVisible('author') && <td className="py-3 px-4 text-gray-500">{item.author || '-'}</td>}
                       {isVisible('time') && <td className="py-3 px-4 text-gray-500 whitespace-nowrap">{new Date(item.synced_at || item.created_at).toLocaleString('zh-CN')}</td>}
                       <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1">
@@ -443,9 +484,9 @@ function DocumentDetail({ doc, onClose, onDelete }: { doc: DocumentItem; onClose
         </div>
         <div className="p-6 space-y-4">
           <Field label="标题" value={doc.title || '无标题'} />
-          <Field label="来源" value={SOURCE_LABELS[doc.source_type] || doc.source_type} />
-          {doc.uploader_name && <Field label="上传人" value={doc.uploader_name} icon={<User size={14} />} />}
-          {doc.author && <Field label="作者" value={doc.author} />}
+          {doc.original_filename && <Field label="原始文件名" value={doc.original_filename} />}
+          <Field label="来源" value={getSourceLabel(doc)} />
+          {doc.uploader_name && <Field label="资产所有人" value={doc.uploader_name} icon={<User size={14} />} />}
           {doc.file_type && <Field label="文件类型" value={doc.file_type.toUpperCase()} />}
           <Field label="时间" value={new Date(doc.synced_at || doc.created_at).toLocaleString('zh-CN')} />
 
@@ -462,6 +503,21 @@ function DocumentDetail({ doc, onClose, onDelete }: { doc: DocumentItem; onClose
               <div className="flex flex-wrap gap-1.5">
                 {doc.keywords.map((kw, i) => (
                   <span key={i} className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full text-xs">{kw}</span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 自定义提取内容 */}
+          {doc.key_info && Object.keys(doc.key_info).length > 0 && (
+            <div>
+              <p className="text-sm text-gray-500 mb-1">自定义提取内容</p>
+              <div className="space-y-1.5 bg-indigo-50 rounded-lg p-3">
+                {Object.entries(doc.key_info).map(([k, v]) => (
+                  <div key={k} className="flex items-start gap-2 text-sm">
+                    <span className="text-indigo-600 font-medium shrink-0">{k}:</span>
+                    <span className="text-gray-800">{String(v)}</span>
+                  </div>
                 ))}
               </div>
             </div>

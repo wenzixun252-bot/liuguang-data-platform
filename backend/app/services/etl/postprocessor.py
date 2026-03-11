@@ -9,12 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
-# 质量评分权重
+# 质量评分权重（LLM 增强字段因 ETL 流程必定填充，已移除）
 WEIGHTS = {
-    "content_length": 0.3,    # 内容长度充足性
-    "field_completeness": 0.3, # 关键字段完整度
-    "no_garbage": 0.2,        # 无乱码/无意义内容
-    "has_enrichment": 0.2,    # LLM 增强字段是否有值
+    "content_length": 0.4,    # 内容长度充足性
+    "field_completeness": 0.35, # 关键字段完整度
+    "no_garbage": 0.25,        # 无乱码/无意义内容
 }
 
 # 分块参数
@@ -54,10 +53,6 @@ class ContentPostprocessor:
 
         # 3. 无乱码检测
         scores["no_garbage"] = self._garbage_score(content_text)
-
-        # 4. LLM 增强字段完整度
-        enriched = sum(1 for v in [summary, keywords] if v)
-        scores["has_enrichment"] = enriched / 2
 
         # 加权求和
         total = sum(scores[k] * WEIGHTS[k] for k in WEIGHTS)

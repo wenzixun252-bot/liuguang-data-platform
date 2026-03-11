@@ -52,6 +52,22 @@ interface UserBrief {
   department_ids: number[]
 }
 
+interface SharedToMeUser {
+  user_id: number
+  user_name: string
+}
+
+interface SharedToMeDepartment {
+  department_id: number
+  department_name: string
+  users: SharedToMeUser[]
+}
+
+interface SharedToMeData {
+  shared_by_users: SharedToMeUser[]
+  shared_by_departments: SharedToMeDepartment[]
+}
+
 /** 从 permissions API 构建 dept→users 映射 */
 function buildDeptUserMap(users: UserBrief[]): Map<number, UserBrief[]> {
   const map = new Map<number, UserBrief[]>()
@@ -79,14 +95,17 @@ function DataPermissionTab() {
   const [treeSearch, setTreeSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [sharedToMe, setSharedToMe] = useState<SharedToMeData | null>(null)
 
   useEffect(() => {
     Promise.all([
       api.get('/settings/sharing'),
       api.get('/departments/users/permissions').catch(() => ({ data: [] })),
       api.get('/departments/tree').catch(() => ({ data: [] })),
-    ]).then(([sharingRes, permRes, deptsRes]) => {
+      api.get('/settings/shared-to-me').catch(() => ({ data: null })),
+    ]).then(([sharingRes, permRes, deptsRes, sharedToMeRes]) => {
       setSharing(sharingRes.data)
+      setSharedToMe(sharedToMeRes.data)
       const permData: any[] = permRes.data
       const userMap = new Map<number, UserBrief>()
       for (const p of permData) {
@@ -148,82 +167,153 @@ function DataPermissionTab() {
   const deptUserMap = buildDeptUserMap(allUsers)
   const keyword = treeSearch.toLowerCase().trim()
 
+  const hasSharedToMe = sharedToMe && (sharedToMe.shared_by_users.length > 0 || sharedToMe.shared_by_departments.length > 0)
+
   return (
-    <div className="space-y-6 max-w-2xl">
-      <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4">
-        <div className="flex items-center gap-2 mb-1">
-          <Shield size={16} className="text-indigo-600" />
-          <h3 className="text-sm font-semibold text-indigo-900">我的数据可见性</h3>
-          {saving && <span className="text-xs text-indigo-500 ml-auto">保存中...</span>}
-        </div>
-        <p className="text-xs text-indigo-700/70">
-          选择哪些同事或部门可以查看你的文档、会议和聊天记录。未被选中的人无法看到你的数据。
-        </p>
-      </div>
-
-      {/* 已选择的分享对象 */}
-      {(sharing.target_user_ids.length > 0 || sharing.target_department_ids.length > 0) && (
-        <div className="flex flex-wrap gap-2">
-          {sharing.target_department_ids.map(did => {
-            const name = findDeptName(deptTree, did)
-            return (
-              <span key={`d-${did}`} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-50 text-green-700 rounded-lg text-xs border border-green-200">
-                <Building2 size={12} />
-                {name || `部门#${did}`}
-                <button onClick={() => toggleDept(did)} className="hover:text-red-500 ml-0.5"><X size={12} /></button>
-              </span>
-            )
-          })}
-          {sharing.target_user_ids.map(uid => {
-            const u = allUsers.find(u => u.id === uid)
-            return (
-              <span key={`u-${uid}`} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-lg text-xs border border-indigo-200">
-                <UserIcon size={12} />
-                {u?.name || `用户#${uid}`}
-                <button onClick={() => toggleUser(uid)} className="hover:text-red-500 ml-0.5"><X size={12} /></button>
-              </span>
-            )
-          })}
-        </div>
-      )}
-
-      {/* 飞书风格：统一树状选择器（部门+人员） */}
-      <section>
-        <h3 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
-          <Building2 size={15} className="text-green-600" />
-          选择部门或人员
-        </h3>
-
-        <div className="relative mb-3">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input
-            value={treeSearch}
-            onChange={e => setTreeSearch(e.target.value)}
-            placeholder="搜索部门或人员..."
-            className="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-200 bg-white"
-          />
-        </div>
-
-        {deptTree.length > 0 ? (
-          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden max-h-[480px] overflow-y-auto">
-            {deptTree.map(node => (
-              <FeishuDeptNode
-                key={node.id}
-                node={node}
-                depth={0}
-                deptUserMap={deptUserMap}
-                selectedDepts={sharing.target_department_ids}
-                selectedUsers={sharing.target_user_ids}
-                onToggleDept={toggleDept}
-                onToggleUser={toggleUser}
-                searchKeyword={keyword}
-              />
-            ))}
+    <div className="max-w-6xl">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* ══ 左栏：我分享给了谁 ══ */}
+        <div className="space-y-4">
+          <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <Shield size={16} className="text-indigo-600" />
+              <h3 className="text-sm font-semibold text-indigo-900">我分享给了谁</h3>
+              {saving && <span className="text-xs text-indigo-500 ml-auto">保存中...</span>}
+            </div>
+            <p className="text-xs text-indigo-700/70">
+              选择哪些同事或部门可以查看你的文档、会议和聊天记录。未被选中的人无法看到你的数据。
+            </p>
           </div>
-        ) : (
-          <p className="text-xs text-gray-500">暂无部门数据，请联系管理员同步飞书通讯录</p>
-        )}
-      </section>
+
+          {/* 已选择的分享对象 */}
+          {(sharing.target_user_ids.length > 0 || sharing.target_department_ids.length > 0) && (
+            <div className="flex flex-wrap gap-2">
+              {sharing.target_department_ids.map(did => {
+                const name = findDeptName(deptTree, did)
+                return (
+                  <span key={`d-${did}`} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-50 text-green-700 rounded-lg text-xs border border-green-200">
+                    <Building2 size={12} />
+                    {name || `部门#${did}`}
+                    <button onClick={() => toggleDept(did)} className="hover:text-red-500 ml-0.5"><X size={12} /></button>
+                  </span>
+                )
+              })}
+              {sharing.target_user_ids.map(uid => {
+                const u = allUsers.find(u => u.id === uid)
+                return (
+                  <span key={`u-${uid}`} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-lg text-xs border border-indigo-200">
+                    <UserIcon size={12} />
+                    {u?.name || `用户#${uid}`}
+                    <button onClick={() => toggleUser(uid)} className="hover:text-red-500 ml-0.5"><X size={12} /></button>
+                  </span>
+                )
+              })}
+            </div>
+          )}
+
+          {/* 飞书风格：统一树状选择器（部门+人员） */}
+          <section>
+            <h3 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
+              <Building2 size={15} className="text-green-600" />
+              选择部门或人员
+            </h3>
+
+            <div className="relative mb-3">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                value={treeSearch}
+                onChange={e => setTreeSearch(e.target.value)}
+                placeholder="搜索部门或人员..."
+                className="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-200 bg-white"
+              />
+            </div>
+
+            {deptTree.length > 0 ? (
+              <div className="bg-white border border-gray-200 rounded-xl overflow-hidden max-h-[480px] overflow-y-auto">
+                {deptTree.map(node => (
+                  <FeishuDeptNode
+                    key={node.id}
+                    node={node}
+                    depth={0}
+                    deptUserMap={deptUserMap}
+                    selectedDepts={sharing.target_department_ids}
+                    selectedUsers={sharing.target_user_ids}
+                    onToggleDept={toggleDept}
+                    onToggleUser={toggleUser}
+                    searchKeyword={keyword}
+                  />
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-gray-500">暂无部门数据，请联系管理员同步飞书通讯录</p>
+            )}
+          </section>
+        </div>
+
+        {/* ══ 右栏：谁分享给了我 ══ */}
+        <div className="space-y-4">
+          <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <ShieldCheck size={16} className="text-emerald-600" />
+              <h3 className="text-sm font-semibold text-emerald-900">谁分享了数据给我</h3>
+            </div>
+            <p className="text-xs text-emerald-700/70">
+              以下同事将他们的数据分享给了你，你可以在文档、会议等页面中看到他们的内容。
+            </p>
+          </div>
+
+          {!sharedToMe ? (
+            <div className="text-sm text-gray-400 py-8 text-center">加载中...</div>
+          ) : !hasSharedToMe ? (
+            <div className="bg-white rounded-xl border border-gray-200 py-12 text-center">
+              <ShieldCheck size={32} className="mx-auto mb-2 text-gray-300" />
+              <p className="text-sm text-gray-400">暂时没有人分享数据给你</p>
+            </div>
+          ) : (
+            <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-5">
+              {/* 直接分享给我的人 */}
+              {sharedToMe.shared_by_users.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-medium text-gray-500 mb-2.5 flex items-center gap-1.5">
+                    <UserIcon size={12} />
+                    直接分享给我
+                  </h4>
+                  <div className="flex flex-wrap gap-2">
+                    {sharedToMe.shared_by_users.map(u => (
+                      <span key={u.user_id} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded-lg text-xs border border-indigo-200">
+                        <span className="w-5 h-5 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 text-[10px] font-bold shrink-0">
+                          {u.user_name[0]}
+                        </span>
+                        {u.user_name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 通过部门分享给我的人 */}
+              {sharedToMe.shared_by_departments.map(dept => (
+                <div key={dept.department_id}>
+                  <h4 className="text-xs font-medium text-gray-500 mb-2.5 flex items-center gap-1.5">
+                    <Building2 size={12} className="text-green-600" />
+                    通过「{dept.department_name}」部门分享
+                  </h4>
+                  <div className="flex flex-wrap gap-2">
+                    {dept.users.map(u => (
+                      <span key={u.user_id} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-50 text-green-700 rounded-lg text-xs border border-green-200">
+                        <span className="w-5 h-5 rounded-full bg-green-100 flex items-center justify-center text-green-600 text-[10px] font-bold shrink-0">
+                          {u.user_name[0]}
+                        </span>
+                        {u.user_name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

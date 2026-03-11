@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, get_user_feishu_token, refresh_user_feishu_token
 from app.models.asset import ETLDataSource, ETLSyncState, CloudFolderSource, ImportTask, SchemaMappingCache
+from app.models.communication import Communication
 from app.models.document import Document
 from app.models.user import User
 from app.schemas.etl import DataSourceOut, DataSourceWithSyncOut
@@ -43,6 +44,8 @@ class FeishuSourceCreate(BaseModel):
     table_id: str
     table_name: str = ""
     asset_type: str = "document"
+    cleaning_rule_id: int | None = None
+    extraction_rule_id: int | None = None
 
 
 @router.post("/feishu-source", response_model=DataSourceOut, summary="添加飞书数据源")
@@ -70,10 +73,16 @@ async def add_feishu_source(
         table_name=body.table_name,
         asset_type=body.asset_type,
         owner_id=current_user.feishu_open_id,
+        extraction_rule_id=body.extraction_rule_id,
     )
     db.add(ds)
     await db.commit()
     await db.refresh(ds)
+
+    # 结构化数据源：创建后自动触发首次同步
+    if body.asset_type == "structured":
+        asyncio.create_task(_sync_structured_source(ds, current_user.feishu_access_token, body.cleaning_rule_id))
+
     return DataSourceOut.model_validate(ds)
 
 
@@ -126,6 +135,7 @@ async def get_my_sync_status(
             asset_type=ds.asset_type,
             owner_id=ds.owner_id,
             is_enabled=ds.is_enabled,
+            extraction_rule_id=ds.extraction_rule_id,
             created_at=ds.created_at,
             updated_at=ds.updated_at,
             last_sync_status=sync_state.last_sync_status if sync_state else None,
@@ -193,7 +203,7 @@ async def trigger_single_sync(
     return {"message": "同步任务已触发", "source_id": source_id}
 
 
-async def _sync_structured_source(ds: ETLDataSource, user_access_token: str | None) -> None:
+async def _sync_structured_source(ds: ETLDataSource, user_access_token: str | None, cleaning_rule_id: int | None = None) -> None:
     """后台同步结构化数据源（多维表格/飞书表格）到 StructuredTable。"""
     from app.database import async_session
     from app.services.structured_table_import import import_from_bitable, import_from_spreadsheet
@@ -260,6 +270,24 @@ async def _sync_structured_source(ds: ETLDataSource, user_access_token: str | No
                 state.error_message = None
                 await db.commit()
 
+            # 首次导入时，将传入的 cleaning_rule_id 写入表格
+            if table_obj and cleaning_rule_id and not table_obj.cleaning_rule_id:
+                table_obj.cleaning_rule_id = cleaning_rule_id
+                await db.commit()
+
+            # 如果表格已绑定清洗规则，同步后自动应用
+            if table_obj and table_obj.cleaning_rule_id:
+                try:
+                    from app.models.cleaning_rule import CleaningRule
+                    from app.services.structured_table_cleaner import apply_cleaning_rule
+
+                    rule = await db.get(CleaningRule, table_obj.cleaning_rule_id)
+                    if rule:
+                        stats = await apply_cleaning_rule(db, table_obj.id, rule)
+                        logger.info("清洗规则已自动应用: table=%d, stats=%s", table_obj.id, stats)
+                except Exception as clean_err:
+                    logger.warning("自动清洗失败: %s", clean_err)
+
             logger.info("结构化数据源同步成功: %s/%s, %d 行", ds.app_token, ds.table_id, table_obj.row_count)
 
         except Exception as e:
@@ -317,6 +345,32 @@ async def delete_my_source(
     await db.delete(ds)
     await db.commit()
     return {"message": "已删除"}
+
+
+class DataSourceUpdate(BaseModel):
+    extraction_rule_id: int | None = None
+
+
+@router.patch("/feishu-source/{source_id}", response_model=DataSourceOut, summary="更新数据源配置")
+async def update_source(
+    source_id: int,
+    body: DataSourceUpdate,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> DataSourceOut:
+    """更新数据源的配置（如提取规则）。"""
+    ds = await db.get(ETLDataSource, source_id)
+    if not ds:
+        raise HTTPException(404, "数据源不存在")
+    if ds.owner_id != current_user.feishu_open_id and current_user.role != "admin":
+        raise HTTPException(403, "无权修改此数据源")
+    if body.extraction_rule_id is not None:
+        ds.extraction_rule_id = body.extraction_rule_id
+    else:
+        ds.extraction_rule_id = None
+    await db.commit()
+    await db.refresh(ds)
+    return DataSourceOut.model_validate(ds)
 
 
 # 兼容别名，统一使用 deps 中的共享函数
@@ -585,6 +639,7 @@ async def add_feishu_sources_batch(
 class FeishuSourceFromURLRequest(BaseModel):
     url: str
     asset_type: str = "document"
+    cleaning_rule_id: int | None = None
 
 
 @router.post("/feishu-source-from-url", response_model=DataSourceOut, summary="从飞书链接创建数据源")
@@ -700,6 +755,11 @@ async def add_feishu_source_from_url(
     db.add(ds)
     await db.commit()
     await db.refresh(ds)
+
+    # 结构化数据源：创建后自动触发首次同步
+    if body.asset_type == "structured":
+        asyncio.create_task(_sync_structured_source(ds, user_token, body.cleaning_rule_id))
+
     return DataSourceOut.model_validate(ds)
 
 
@@ -710,6 +770,8 @@ class CloudDocInfo(BaseModel):
     token: str
     name: str
     doc_type: str  # "docx", "doc", "file"
+    owner_id: str = ""  # 飞书文档原始所有者 open_id
+    owner_name: str = ""  # 飞书文档原始所有者名称
     modified_time: str | None = None
     already_imported: bool = False
 
@@ -717,6 +779,7 @@ class CloudDocInfo(BaseModel):
 class CloudDocImportRequest(BaseModel):
     """云文档批量导入请求。"""
     items: list[dict]  # [{token, name, type}, ...]
+    extraction_rule_id: int | None = None  # 可选的提取规则 ID，ETL enricher 会在后续处理中使用
 
 
 class CloudDocImportResponse(BaseModel):
@@ -730,6 +793,12 @@ class CloudFolderCreate(BaseModel):
     """云文件夹源创建请求。"""
     folder_token: str
     folder_name: str = ""
+    extraction_rule_id: int | None = None
+
+
+class CloudFolderUpdate(BaseModel):
+    """云文件夹源更新请求。"""
+    extraction_rule_id: int | None = None
 
 
 class CloudFolderOut(BaseModel):
@@ -739,6 +808,7 @@ class CloudFolderOut(BaseModel):
     folder_name: str
     owner_id: str
     is_enabled: bool
+    extraction_rule_id: int | None = None
     last_sync_time: datetime | None = None
     last_sync_status: str
     files_synced: int
@@ -796,13 +866,82 @@ async def discover_feishu_docs(
     )
     imported_tokens = {row[0] for row in result.all()}
 
+    # wiki 类型文档需要先解析为实际 obj_token，batch_get_doc_meta 不支持 doc_type="wiki"
+    wiki_obj_map: dict[str, dict] = {}  # wiki_token -> {obj_token, obj_type}
+    wiki_files_no_owner = [f for f in files if f.get("type") == "wiki" and f.get("token") and not f.get("owner_id")]
+    if wiki_files_no_owner:
+        async def _resolve_wiki(tok: str):
+            try:
+                node = await feishu_client.get_wiki_node_info(tok, user_access_token=user_token)
+                return tok, node.get("obj_token", ""), node.get("obj_type", "docx")
+            except Exception:
+                return tok, "", ""
+        results = await asyncio.gather(*[_resolve_wiki(wf["token"]) for wf in wiki_files_no_owner[:30]])
+        for wt, obj_tok, obj_typ in results:
+            if obj_tok:
+                wiki_obj_map[wt] = {"obj_token": obj_tok, "obj_type": obj_typ}
+
+    # 如果文件列表中缺少 owner_name（list_drive_documents 路径），通过 batch_get_doc_meta 补充
+    meta_map: dict[str, dict] = {}
+    needs_meta = any(not f.get("owner_name") for f in files)
+    if needs_meta and files:
+        try:
+            # 构建查询列表：wiki 用解析后的 obj_token/obj_type，其他类型直接用原始 token
+            meta_docs = []
+            obj_to_wiki: dict[str, str] = {}  # obj_token -> wiki_token（用于映射结果）
+            for f in files:
+                tok = f.get("token", "")
+                if not tok:
+                    continue
+                if tok in wiki_obj_map:
+                    obj_tok = wiki_obj_map[tok]["obj_token"]
+                    meta_docs.append({"token": obj_tok, "type": wiki_obj_map[tok]["obj_type"]})
+                    obj_to_wiki[obj_tok] = tok
+                else:
+                    meta_docs.append({"token": tok, "type": f.get("type", "docx")})
+            raw_meta = await feishu_client.batch_get_doc_meta(
+                docs=meta_docs,
+                user_access_token=user_token,
+            )
+            # 将 wiki obj_token 的结果映射回原始 wiki token
+            for obj_tok, wiki_tok in obj_to_wiki.items():
+                if obj_tok in raw_meta:
+                    meta_map[wiki_tok] = raw_meta[obj_tok]
+            # 非 wiki 文档直接用原始 token
+            for tok, meta in raw_meta.items():
+                if tok not in obj_to_wiki:
+                    meta_map[tok] = meta
+        except Exception as e:
+            logger.warning("batch_get_doc_meta 补充所有者信息失败: %s", e)
+
+    # 收集所有 owner_id，批量查 User 表获取名称（飞书 batch_query 不返回 owner_display_name）
+    all_owner_ids: set[str] = set()
+    for f in files:
+        oid = f.get("owner_id", "") or meta_map.get(f.get("token", ""), {}).get("owner_id", "")
+        if oid:
+            all_owner_ids.add(oid)
+    owner_name_map: dict[str, str] = {}
+    if all_owner_ids:
+        from sqlalchemy import or_
+        user_rows = (await db.execute(
+            select(User.feishu_open_id, User.name).where(
+                User.feishu_open_id.in_(list(all_owner_ids))
+            )
+        )).all()
+        owner_name_map = {row.feishu_open_id: row.name for row in user_rows if row.name}
+
     docs: list[CloudDocInfo] = []
     for f in files:
         token = f.get("token", "")
+        meta = meta_map.get(token, {})
+        oid = f.get("owner_id", "") or meta.get("owner_id", "")
+        oname = f.get("owner_name", "") or meta.get("owner_name", "") or owner_name_map.get(oid, "")
         docs.append(CloudDocInfo(
             token=token,
             name=f.get("name", "未命名"),
             doc_type=f.get("type", ""),
+            owner_id=oid,
+            owner_name=oname,
             modified_time=f.get("modified_time"),
             already_imported=token in imported_tokens,
         ))
@@ -826,6 +965,7 @@ async def import_feishu_docs(
     owner_id = current_user.feishu_open_id
     uploader_name = current_user.name
     items = body.items
+    extraction_rule_id = body.extraction_rule_id
 
     # 创建任务记录
     task = ImportTask(
@@ -859,6 +999,25 @@ async def import_feishu_docs(
                     user_access_token=user_token,
                     uploader_name=uploader_name,
                 )
+
+                # 如果指定了提取规则，将 extraction_rule_id 保存到导入的文档上，并执行关键信息提取
+                if extraction_rule_id and result.documents:
+                    from app.services.etl.enricher import extract_key_info
+                    for doc in result.documents:
+                        try:
+                            doc_in_session = await session.get(Document, doc.id)
+                            if doc_in_session:
+                                doc_in_session.extraction_rule_id = extraction_rule_id
+                                key_info = await extract_key_info(
+                                    doc_in_session.content_text, extraction_rule_id, session,
+                                    title=doc_in_session.title,
+                                    original_filename=doc_in_session.original_filename,
+                                )
+                                if key_info:
+                                    doc_in_session.key_info = key_info
+                        except Exception as e:
+                            logger.warning("文档 key_info 提取失败 (doc_id=%s): %s", doc.id, e)
+                    await session.commit()
 
                 # 检查是否已被用户取消
                 task_in_session = await session.get(ImportTask, task_id)
@@ -898,6 +1057,7 @@ async def import_feishu_docs(
 class CommDocImportRequest(BaseModel):
     """沟通资产云文档导入请求。"""
     items: list[dict]  # [{token, name, type}, ...]
+    extraction_rule_id: int | None = None  # 可选的提取规则 ID，ETL enricher 会在后续处理中使用
 
 
 @router.post("/feishu-docs/communication", summary="批量导入云文档为沟通资产（后台执行）")
@@ -917,6 +1077,7 @@ async def import_feishu_docs_as_communication(
     owner_id = current_user.feishu_open_id
     uploader_name = current_user.name
     items = body.items
+    extraction_rule_id = body.extraction_rule_id
 
     # 创建任务记录
     task = ImportTask(
@@ -951,6 +1112,30 @@ async def import_feishu_docs_as_communication(
                     uploader_name=uploader_name,
                 )
 
+                # 如果指定了提取规则，将 extraction_rule_id 保存到导入的沟通资产上，并执行关键信息提取
+                if extraction_rule_id:
+                    from app.services.etl.enricher import extract_key_info
+                    tokens = [i.get("token", "") for i in items if i.get("token")]
+                    feishu_record_ids = [f"cloud_{t}" for t in tokens]
+                    comm_result = await session.execute(
+                        select(Communication).where(
+                            Communication.owner_id == owner_id,
+                            Communication.feishu_record_id.in_(feishu_record_ids),
+                        )
+                    )
+                    for comm in comm_result.scalars().all():
+                        comm.extraction_rule_id = extraction_rule_id
+                        try:
+                            key_info = await extract_key_info(
+                                comm.content_text, extraction_rule_id, session,
+                                title=comm.title,
+                            )
+                            if key_info:
+                                comm.key_info = key_info
+                        except Exception as e:
+                            logger.warning("沟通资产 key_info 提取失败 (comm_id=%s): %s", comm.id, e)
+                    await session.commit()
+
                 # 检查是否已被用户取消
                 task_in_session = await session.get(ImportTask, task_id)
                 if task_in_session and task_in_session.status == "cancelled":
@@ -964,6 +1149,11 @@ async def import_feishu_docs_as_communication(
                     task_in_session.skipped_count = result.skipped
                     task_in_session.failed_count = result.failed
                     task_in_session.completed_at = datetime.utcnow()
+                    # 记录错误详情到 details
+                    if result.errors:
+                        details = task_in_session.details or {}
+                        details["errors"] = result.errors[:20]
+                        task_in_session.details = details
                     await session.commit()
 
                 logger.info(
@@ -1029,6 +1219,270 @@ async def reimport_feishu_doc(
     return {"message": "重新导入成功", "doc_id": result_doc.id}
 
 
+class CloudDocFromURLRequest(BaseModel):
+    url: str
+    target: str = "document"  # "document" | "communication"
+    extraction_rule_id: int | None = None  # 可选的提取规则 ID
+
+
+@router.post("/feishu-docs/from-url", summary="通过飞书链接导入云文档")
+async def import_feishu_doc_from_url(
+    body: CloudDocFromURLRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """解析飞书云文档链接，自动获取文档信息并导入。
+
+    支持格式：
+    - 云文档: https://xxx.feishu.cn/docx/{token}
+    - 旧文档: https://xxx.feishu.cn/docs/{token}
+    - Wiki: https://xxx.feishu.cn/wiki/{token}
+    - 文件: https://xxx.feishu.cn/file/{token}
+    """
+    import re
+
+    if body.target not in ("document", "communication"):
+        raise HTTPException(400, "target 必须是 document 或 communication")
+
+    url = body.url.strip()
+    doc_type = None
+    token = None
+
+    # docx 链接
+    m = re.search(r'/docx/([A-Za-z0-9_-]+)', url)
+    if m:
+        doc_type, token = "docx", m.group(1)
+
+    # 旧版 doc 链接
+    if not token:
+        m = re.search(r'/docs/([A-Za-z0-9_-]+)', url)
+        if m:
+            doc_type, token = "doc", m.group(1)
+
+    # wiki 链接
+    if not token:
+        m = re.search(r'/wiki/([A-Za-z0-9_-]+)', url)
+        if m:
+            doc_type, token = "wiki", m.group(1)
+
+    # file 链接
+    if not token:
+        m = re.search(r'/file/([A-Za-z0-9_-]+)', url)
+        if m:
+            doc_type, token = "file", m.group(1)
+
+    if not token:
+        raise HTTPException(400, "无法识别的链接格式，请粘贴飞书云文档链接（如 /docx/xxx、/wiki/xxx、/file/xxx）")
+
+    user_token = await _get_user_token(current_user, db)
+    if not user_token:
+        raise HTTPException(401, "飞书授权已失效，请重新登录")
+
+    # Wiki 链接需要解析实际文档类型和 token
+    if doc_type == "wiki":
+        try:
+            try:
+                node_info = await feishu_client.get_wiki_node_info(token, user_access_token=user_token)
+            except Exception:
+                node_info = await feishu_client.get_wiki_node_info(token)
+            obj_type = node_info.get("obj_type", "")
+            obj_token = node_info.get("obj_token", "")
+            if obj_type in ("docx", "doc"):
+                doc_type, token = obj_type, obj_token
+            elif obj_type == "file":
+                doc_type, token = "file", obj_token
+            else:
+                raise HTTPException(400, f"该 Wiki 页面类型 ({obj_type}) 暂不支持直接导入")
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(400, f"解析 Wiki 链接失败: {e}")
+
+    # 尝试获取文档名称和真实所有者
+    doc_name = "未命名文档"
+    real_owner_id = ""
+    real_owner_name = ""
+    try:
+        metas = await feishu_client.batch_get_doc_meta(
+            docs=[{"token": token, "type": doc_type}],
+            user_access_token=user_token,
+        )
+        if token in metas:
+            meta = metas[token]
+            doc_name = meta.get("title") or meta.get("name") or doc_name
+            real_owner_id = meta.get("owner_id", "")
+            real_owner_name = meta.get("owner_name", "")
+    except Exception:
+        pass
+
+    # 如果 meta 返回了 owner_id 但缺少 owner_name，查 User 表兜底
+    if real_owner_id and not real_owner_name:
+        try:
+            row = (await db.execute(
+                select(User.name).where(User.feishu_open_id == real_owner_id)
+            )).scalar_one_or_none()
+            if row:
+                real_owner_name = row
+        except Exception:
+            pass
+
+    owner_id = current_user.feishu_open_id
+    # 资产所有人优先使用文档真实所有者，fallback 到当前用户
+    display_owner_name = real_owner_name or current_user.name
+    items = [{"token": token, "name": doc_name, "type": doc_type, "owner_id": real_owner_id or owner_id, "owner_name": display_owner_name}]
+
+    # 根据 target 选择导入方式
+    endpoint_target = body.target
+    if endpoint_target == "communication":
+        # 复用沟通资产导入逻辑
+        task = ImportTask(
+            task_type="communication",
+            status="pending",
+            owner_id=owner_id,
+            total_count=1,
+            details={"files": [{"token": token, "name": doc_name}]},
+        )
+        db.add(task)
+        await db.commit()
+        await db.refresh(task)
+        task_id = task.id
+
+        _from_url_extraction_rule_id = body.extraction_rule_id
+
+        async def _bg_comm():
+            from app.database import async_session
+            async with async_session() as session:
+                try:
+                    task_in_session = await session.get(ImportTask, task_id)
+                    if task_in_session:
+                        task_in_session.status = "running"
+                        task_in_session.started_at = datetime.utcnow()
+                        await session.commit()
+                    result = await cloud_doc_import_service.batch_import_as_communication(
+                        file_infos=items,
+                        owner_id=owner_id,
+                        db=session,
+                        user_access_token=user_token,
+                        uploader_name=current_user.name,
+                    )
+                    # 保存 extraction_rule_id 到沟通资产，并执行关键信息提取
+                    if _from_url_extraction_rule_id:
+                        from app.services.etl.enricher import extract_key_info
+                        feishu_record_ids = [f"cloud_{token}"]
+                        comm_result = await session.execute(
+                            select(Communication).where(
+                                Communication.owner_id == owner_id,
+                                Communication.feishu_record_id.in_(feishu_record_ids),
+                            )
+                        )
+                        for comm in comm_result.scalars().all():
+                            comm.extraction_rule_id = _from_url_extraction_rule_id
+                            try:
+                                key_info = await extract_key_info(
+                                    comm.content_text, _from_url_extraction_rule_id, session,
+                                    title=comm.title,
+                                )
+                                if key_info:
+                                    comm.key_info = key_info
+                            except Exception as e:
+                                logger.warning("沟通资产 key_info 提取失败 (comm_id=%s): %s", comm.id, e)
+                        await session.commit()
+                    task_in_session = await session.get(ImportTask, task_id)
+                    if task_in_session and task_in_session.status != "cancelled":
+                        task_in_session.status = "completed"
+                        task_in_session.imported_count = result.imported
+                        task_in_session.skipped_count = result.skipped
+                        task_in_session.failed_count = result.failed
+                        task_in_session.completed_at = datetime.utcnow()
+                        await session.commit()
+                except Exception as e:
+                    logger.error("URL 导入沟通资产异常: %s", e)
+                    try:
+                        task_in_session = await session.get(ImportTask, task_id)
+                        if task_in_session and task_in_session.status not in ("cancelled", "timeout"):
+                            task_in_session.status = "failed"
+                            task_in_session.error_message = str(e)[:500]
+                            task_in_session.completed_at = datetime.utcnow()
+                            await session.commit()
+                    except Exception:
+                        pass
+
+        asyncio.create_task(_bg_comm())
+        return {"message": f"已提交「{doc_name}」到后台导入为沟通资产", "task_id": task_id}
+    else:
+        # 文档资产导入
+        task = ImportTask(
+            task_type="cloud_doc",
+            status="pending",
+            owner_id=owner_id,
+            total_count=1,
+            details={"files": [{"token": token, "name": doc_name}]},
+        )
+        db.add(task)
+        await db.commit()
+        await db.refresh(task)
+        task_id = task.id
+
+        _from_url_extraction_rule_id_doc = body.extraction_rule_id
+
+        async def _bg_doc():
+            from app.database import async_session
+            async with async_session() as session:
+                try:
+                    task_in_session = await session.get(ImportTask, task_id)
+                    if task_in_session:
+                        task_in_session.status = "running"
+                        task_in_session.started_at = datetime.utcnow()
+                        await session.commit()
+                    result = await cloud_doc_import_service.batch_import(
+                        file_infos=items,
+                        owner_id=owner_id,
+                        db=session,
+                        user_access_token=user_token,
+                        uploader_name=current_user.name,
+                    )
+                    # 保存 extraction_rule_id 到导入的文档，并执行关键信息提取
+                    if _from_url_extraction_rule_id_doc and result.documents:
+                        from app.services.etl.enricher import extract_key_info
+                        for doc in result.documents:
+                            try:
+                                doc_in_session = await session.get(Document, doc.id)
+                                if doc_in_session:
+                                    doc_in_session.extraction_rule_id = _from_url_extraction_rule_id_doc
+                                    key_info = await extract_key_info(
+                                        doc_in_session.content_text, _from_url_extraction_rule_id_doc, session,
+                                        title=doc_in_session.title,
+                                        original_filename=doc_in_session.original_filename,
+                                    )
+                                    if key_info:
+                                        doc_in_session.key_info = key_info
+                            except Exception as e:
+                                logger.warning("文档 key_info 提取失败 (doc_id=%s): %s", doc.id, e)
+                        await session.commit()
+                    task_in_session = await session.get(ImportTask, task_id)
+                    if task_in_session and task_in_session.status != "cancelled":
+                        task_in_session.status = "completed"
+                        task_in_session.imported_count = result.imported
+                        task_in_session.skipped_count = result.skipped
+                        task_in_session.failed_count = result.failed
+                        task_in_session.completed_at = datetime.utcnow()
+                        await session.commit()
+                except Exception as e:
+                    logger.error("URL 导入文档异常: %s", e)
+                    try:
+                        task_in_session = await session.get(ImportTask, task_id)
+                        if task_in_session and task_in_session.status not in ("cancelled", "timeout"):
+                            task_in_session.status = "failed"
+                            task_in_session.error_message = str(e)[:500]
+                            task_in_session.completed_at = datetime.utcnow()
+                            await session.commit()
+                    except Exception:
+                        pass
+
+        asyncio.create_task(_bg_doc())
+        return {"message": f"已提交「{doc_name}」到后台导入", "task_id": task_id}
+
+
 # ── 云文件夹同步 ─────────────────────────────────────────
 
 
@@ -1082,8 +1536,31 @@ async def add_cloud_folder(
         folder_token=body.folder_token,
         folder_name=body.folder_name,
         owner_id=current_user.feishu_open_id,
+        extraction_rule_id=body.extraction_rule_id,
     )
     db.add(folder)
+    await db.commit()
+    await db.refresh(folder)
+    return CloudFolderOut.model_validate(folder)
+
+
+@router.patch("/cloud-folders/{folder_id}", response_model=CloudFolderOut, summary="更新云文件夹源")
+async def update_cloud_folder(
+    folder_id: int,
+    body: CloudFolderUpdate,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> CloudFolderOut:
+    """更新云文件夹源的配置（如提取规则）。"""
+    folder = await db.get(CloudFolderSource, folder_id)
+    if not folder:
+        raise HTTPException(404, "文件夹源不存在")
+    if folder.owner_id != current_user.feishu_open_id and current_user.role != "admin":
+        raise HTTPException(403, "无权修改此文件夹源")
+    if body.extraction_rule_id is not None:
+        folder.extraction_rule_id = body.extraction_rule_id
+    else:
+        folder.extraction_rule_id = None
     await db.commit()
     await db.refresh(folder)
     return CloudFolderOut.model_validate(folder)
@@ -1126,15 +1603,35 @@ async def trigger_cloud_folder_sync(
     if not folders:
         raise HTTPException(400, "没有已启用的云文件夹源")
 
+    # 创建 ImportTask 记录，让前端能看到进度
+    folder_names = [f.folder_name or f.folder_token for f in folders]
+    task = ImportTask(
+        task_type="folder_sync",
+        status="running",
+        owner_id=current_user.feishu_open_id,
+        total_count=len(folders),
+        details={"folders": folder_names[:10]},
+        started_at=datetime.utcnow(),
+    )
+    db.add(task)
+    await db.commit()
+    await db.refresh(task)
+    task_id = task.id
+
     # 在后台异步执行同步
     async def _sync_all():
         from app.database import async_session
+        total_imported = 0
+        total_skipped = 0
+        total_failed = 0
+        completed_folders = 0
         async with async_session() as session:
             for folder in folders:
                 try:
                     # 更新状态为 running
                     folder_in_session = await session.get(CloudFolderSource, folder.id)
                     if not folder_in_session:
+                        completed_folders += 1
                         continue
                     folder_in_session.last_sync_status = "running"
                     await session.commit()
@@ -1147,11 +1644,42 @@ async def trigger_cloud_folder_sync(
                         current_user.name,
                     )
 
+                    # 如果文件夹配置了提取规则，对新导入的文档执行关键信息提取
+                    if folder_in_session.extraction_rule_id and sync_result.documents:
+                        from app.services.etl.enricher import extract_key_info
+                        for doc in sync_result.documents:
+                            try:
+                                doc_in_session = await session.get(Document, doc.id)
+                                if doc_in_session:
+                                    doc_in_session.extraction_rule_id = folder_in_session.extraction_rule_id
+                                    key_info = await extract_key_info(
+                                        doc_in_session.content_text, folder_in_session.extraction_rule_id, session,
+                                        title=doc_in_session.title,
+                                        original_filename=doc_in_session.original_filename,
+                                    )
+                                    if key_info:
+                                        doc_in_session.key_info = key_info
+                            except Exception as e:
+                                logger.warning("文件夹同步-文档 key_info 提取失败 (doc_id=%s): %s", doc.id, e)
+
                     folder_in_session.last_sync_status = "success"
                     folder_in_session.last_sync_time = datetime.utcnow()
                     folder_in_session.files_synced = sync_result.imported + sync_result.skipped
                     folder_in_session.error_message = None
                     await session.commit()
+
+                    total_imported += sync_result.imported
+                    total_skipped += sync_result.skipped
+                    total_failed += sync_result.failed
+                    completed_folders += 1
+
+                    # 更新 ImportTask 进度
+                    task_in_session = await session.get(ImportTask, task_id)
+                    if task_in_session:
+                        task_in_session.imported_count = total_imported
+                        task_in_session.skipped_count = total_skipped
+                        task_in_session.failed_count = total_failed
+                        await session.commit()
 
                     logger.info(
                         "文件夹 %s 同步完成: imported=%d, skipped=%d, failed=%d",
@@ -1160,6 +1688,8 @@ async def trigger_cloud_folder_sync(
                     )
                 except Exception as e:
                     logger.error("文件夹 %s 同步失败: %s", folder.folder_name, e)
+                    total_failed += 1
+                    completed_folders += 1
                     try:
                         folder_in_session = await session.get(CloudFolderSource, folder.id)
                         if folder_in_session:
@@ -1169,8 +1699,21 @@ async def trigger_cloud_folder_sync(
                     except Exception:
                         pass
 
+            # 最终更新 ImportTask 状态
+            try:
+                task_in_session = await session.get(ImportTask, task_id)
+                if task_in_session:
+                    task_in_session.status = "failed" if (total_failed > 0 and total_imported == 0) else "completed"
+                    task_in_session.imported_count = total_imported
+                    task_in_session.skipped_count = total_skipped
+                    task_in_session.failed_count = total_failed
+                    task_in_session.completed_at = datetime.utcnow()
+                    await session.commit()
+            except Exception:
+                pass
+
     asyncio.create_task(_sync_all())
-    return {"message": "文件夹同步已触发", "folders_count": len(folders)}
+    return {"message": "文件夹同步已触发", "folders_count": len(folders), "task_id": task_id}
 
 
 # ── 导入任务状态 ─────────────────────────────────────────

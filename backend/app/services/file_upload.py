@@ -61,6 +61,8 @@ class FileUploadService:
 
         # 2. 提取文本 & LLM 解析
         is_image = ext in ("png", "jpg", "jpeg", "gif", "webp", "bmp")
+        # 保存原始文件名（含扩展名）
+        original_filename = file.filename or "unknown"
         parsed = {"title": file.filename, "summary": None, "author": None, "tags": [], "category": None}
 
         if is_image and settings.llm_api_key and not settings.llm_api_key.startswith("sk-xxx"):
@@ -107,6 +109,7 @@ class FileUploadService:
         doc = Document(
             owner_id=owner_id,
             source_type="local",
+            original_filename=original_filename,
             title=parsed.get("title") or file.filename,
             content_text=text_content,
             summary=parsed.get("summary"),
@@ -312,6 +315,13 @@ class FileUploadService:
 
         content_hash = hashlib.md5(content_bytes).hexdigest()
 
+        # conclusions 字段是 Text 类型，LLM 可能返回列表，需转为字符串
+        raw_conclusions = parsed.get("conclusions")
+        if isinstance(raw_conclusions, list):
+            conclusions = "\n".join(str(c) for c in raw_conclusions)
+        else:
+            conclusions = raw_conclusions
+
         # 7. 写入 communications 表
         comm = Communication(
             owner_id=owner_id,
@@ -324,7 +334,7 @@ class FileUploadService:
             initiator=parsed.get("initiator"),
             participants=participants,
             duration_minutes=parsed.get("duration_minutes"),
-            conclusions=parsed.get("conclusions"),
+            conclusions=conclusions,
             action_items=parsed.get("action_items") or [],
             transcript=transcript,
             content_text=transcript,

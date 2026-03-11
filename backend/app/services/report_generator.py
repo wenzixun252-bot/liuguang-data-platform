@@ -1,11 +1,12 @@
 """报告生成服务 — 从个人知识库生成报告。"""
 
+import asyncio
 import json
 import logging
 from collections.abc import AsyncGenerator
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, and_, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -16,6 +17,19 @@ from app.services.llm import llm_client
 
 logger = logging.getLogger(__name__)
 
+# 北京时间 UTC+8
+_BEIJING_TZ = timezone(timedelta(hours=8))
+
+
+def _to_beijing_str(dt: datetime | None) -> str:
+    """将 naive UTC datetime 转换为北京时间字符串。"""
+    if dt is None:
+        return ""
+    # 数据库存的是 UTC naive datetime，加上时区后转北京时间
+    utc_dt = dt.replace(tzinfo=timezone.utc)
+    beijing_dt = utc_dt.astimezone(_BEIJING_TZ)
+    return beijing_dt.strftime("%Y-%m-%d %H:%M")
+
 REPORT_SYSTEM_PROMPT = """你是一位资深的商业分析师，擅长从零散的工作数据中提炼洞察、发现趋势。
 
 ## 写作风格
@@ -23,7 +37,15 @@ REPORT_SYSTEM_PROMPT = """你是一位资深的商业分析师，擅长从零散
 - 重点突出：最重要的内容放在最前面
 - 言之有物：严禁使用模板套话（如"取得了显著成果"、"进展顺利"）
 - 诚实客观：如果某个版块数据不足，直接写"本周期该领域无相关数据"，不要凑字数
-- 使用专业简洁的中文，Markdown 格式输出"""
+- 使用专业简洁的中文，Markdown 格式输出
+
+## 标签优先原则
+数据中带有 "tags" 字段的条目表示用户对其做了分类标记。这些标签反映了用户自己的关注重点。
+在撰写报告时，请优先引用带有标签的数据，并在分析时体现标签所代表的主题归属。
+
+## 业务域分析
+如果数据中包含 "business_domain_summary" 字段，这是用户知识图谱的业务域分析结果。
+请利用这些业务域维度来组织和分析数据，例如按域维度归纳工作重点、识别跨域协作等。"""
 
 # 预设系统模板
 SYSTEM_TEMPLATES = [
@@ -157,6 +179,55 @@ async def ensure_system_templates(db: AsyncSession) -> None:
     await db.commit()
 
 
+async def _query_content_tags(
+    db: AsyncSession,
+    content_type: str,
+    content_ids: list[int],
+) -> dict[int, list[str]]:
+    """批量查询内容关联的标签名称。返回 {content_id: [tag_name, ...]}。"""
+    if not content_ids:
+        return {}
+    from app.models.tag import ContentTag, TagDefinition
+    result = await db.execute(
+        select(ContentTag.content_id, TagDefinition.name)
+        .join(TagDefinition, TagDefinition.id == ContentTag.tag_id)
+        .where(
+            and_(
+                ContentTag.content_type == content_type,
+                ContentTag.content_id.in_(content_ids),
+            )
+        )
+    )
+    tag_map: dict[int, list[str]] = {}
+    for row in result.all():
+        tag_map.setdefault(row[0], []).append(row[1])
+    return tag_map
+
+
+def _doc_effective_time(doc_model=None):
+    """构建文档的有效时间表达式（用于 SQL 查询过滤）。
+
+    飞书文档：优先用 feishu_updated_at（最后修改时间），其次 feishu_created_at，最后 created_at
+    本地文档：用 created_at（上传时间）
+    """
+    D = doc_model or Document
+    return case(
+        (D.source_type == "cloud",
+         func.coalesce(D.feishu_updated_at, D.feishu_created_at, D.created_at)),
+        else_=D.created_at,
+    )
+
+
+def _comm_effective_time(comm_model=None):
+    """构建沟通记录的有效时间表达式。
+
+    会议：用 comm_time（会议时间），回退到 created_at
+    聊天：用 comm_time（发送时间），回退到 created_at
+    """
+    C = comm_model or Communication
+    return func.coalesce(C.comm_time, C.created_at)
+
+
 async def gather_data(
     db: AsyncSession,
     owner_id: str,
@@ -164,7 +235,14 @@ async def gather_data(
     time_end: datetime,
     data_sources: list[str],
 ) -> dict:
-    """从三表按时间范围收集用户数据。"""
+    """从三表按时间范围收集用户数据，附带标签信息。
+
+    时间过滤逻辑：
+    - 飞书文档：参考创建时间(feishu_created_at)和修改时间(feishu_updated_at)
+    - 本地文档：参考上传时间(created_at)
+    - 会议：参考会议时间(comm_time)
+    - 聊天：参考发送时间(comm_time)
+    """
     # 三表列为 TIMESTAMP WITHOUT TIME ZONE，需要 naive datetime
     if time_start.tzinfo is not None:
         time_start = time_start.replace(tzinfo=None)
@@ -173,19 +251,30 @@ async def gather_data(
 
     data: dict = {"documents": [], "communications": []}
 
+    doc_eff_time = _doc_effective_time()
+    comm_eff_time = _comm_effective_time()
+
     if "document" in data_sources:
         result = await db.execute(
             select(Document).where(
                 and_(
                     Document.owner_id == owner_id,
-                    Document.created_at >= time_start,
-                    Document.created_at <= time_end,
+                    doc_eff_time >= time_start,
+                    doc_eff_time <= time_end,
                 )
-            ).order_by(Document.created_at.desc()).limit(50)
+            ).order_by(doc_eff_time.desc()).limit(50)
         )
         docs = result.scalars().all()
+        doc_tags = await _query_content_tags(db, "document", [d.id for d in docs])
         data["documents"] = [
-            {"title": d.title, "content": d.content_text[:1500], "created": str(d.created_at)}
+            {
+                "title": d.title,
+                "content": d.content_text[:1500],
+                "created": _to_beijing_str(
+                    d.feishu_updated_at or d.feishu_created_at or d.created_at
+                ),
+                "tags": doc_tags.get(d.id, []),
+            }
             for d in docs
         ]
 
@@ -194,23 +283,45 @@ async def gather_data(
             select(Communication).where(
                 and_(
                     Communication.owner_id == owner_id,
-                    Communication.created_at >= time_start,
-                    Communication.created_at <= time_end,
+                    comm_eff_time >= time_start,
+                    comm_eff_time <= time_end,
                 )
-            ).order_by(Communication.comm_time.desc().nullslast()).limit(100)
+            ).order_by(comm_eff_time.desc()).limit(100)
         )
         comms = result.scalars().all()
+        comm_tags = await _query_content_tags(db, "communication", [c.id for c in comms])
         data["communications"] = [
             {
                 "type": c.comm_type,
                 "title": c.title,
-                "time": str(c.comm_time or c.created_at),
+                "time": _to_beijing_str(c.comm_time or c.created_at),
                 "initiator": c.initiator,
                 "conclusions": c.conclusions,
                 "content": c.content_text[:1500],
+                "tags": comm_tags.get(c.id, []),
             }
             for c in comms
         ]
+
+    # 注入业务域分析摘要（来自知识图谱社群检测结果）
+    try:
+        from app.models.kg_analysis_result import KGAnalysisResult
+        analysis_result = await db.execute(
+            select(KGAnalysisResult)
+            .where(KGAnalysisResult.owner_id == owner_id)
+            .order_by(KGAnalysisResult.generated_at.desc())
+            .limit(1)
+        )
+        analysis = analysis_result.scalar_one_or_none()
+        if analysis and analysis.communities:
+            domain_lines = [
+                f"- {c['domain_label']}：{c['member_count']}个实体，核心：{'、'.join(c.get('top_entities', [])[:5])}"
+                for c in analysis.communities if c.get("domain_label")
+            ]
+            if domain_lines:
+                data["business_domain_summary"] = "\n".join(domain_lines)
+    except Exception as e:
+        logger.warning("查询业务域分析失败，跳过: %s", e)
 
     return data
 
@@ -261,10 +372,8 @@ async def _build_reader_context(db: AsyncSession, owner_id: str, reader_ids: lis
                     select(KGEntity).where(KGEntity.id.in_(related_ids))
                 )
                 for re in re_result.scalars().all():
-                    if re.entity_type == "project":
-                        profile_parts.append(f"关注项目: {re.name}")
-                    elif re.entity_type == "topic":
-                        profile_parts.append(f"关注话题: {re.name}")
+                    if re.entity_type == "item":
+                        profile_parts.append(f"关注事项: {re.name}")
 
         # 查找领导力洞察
         insight_result = await db.execute(
@@ -297,31 +406,24 @@ async def generate_report(
     target_reader_ids: list[str] | None = None,
 ) -> Report:
     """生成报告（非流式）。"""
-    # 确保 naive datetime（三表和 reports 表都是 TIMESTAMP WITHOUT TIME ZONE）
     if time_start.tzinfo is not None:
         time_start = time_start.replace(tzinfo=None)
     if time_end.tzinfo is not None:
         time_end = time_end.replace(tzinfo=None)
 
-    # 获取模板
     template = await db.get(ReportTemplate, template_id)
     if not template:
         raise ValueError("模板不存在")
 
-    # 收集数据
     data = await gather_data(db, owner_id, time_start, time_end, data_sources)
-
-    # 构建阅读者上下文
     reader_context = await _build_reader_context(db, owner_id, target_reader_ids or [])
 
-    # 构建 prompt
     data_text = json.dumps(data, ensure_ascii=False, indent=2)
     prompt = template.prompt_template.format(
         data=data_text[:8000],
         extra_instructions=(extra_instructions or "") + reader_context,
     )
 
-    # 创建报告记录
     report = Report(
         owner_id=owner_id,
         template_id=template_id,
@@ -364,6 +466,114 @@ async def generate_report(
     return report
 
 
+async def _background_generate(
+    report_id: int,
+    owner_id: str,
+    template_prompt: str,
+    time_start: datetime,
+    time_end: datetime,
+    data_sources: list[str],
+    extra_instructions: str | None,
+    target_reader_ids: list[str] | None,
+) -> None:
+    """后台异步生成报告（不阻塞前端请求）。"""
+    from app.database import async_session
+
+    async with async_session() as db:
+        try:
+            report = await db.get(Report, report_id)
+            if not report:
+                return
+
+            data = await gather_data(db, owner_id, time_start, time_end, data_sources)
+            reader_context = await _build_reader_context(db, owner_id, target_reader_ids or [])
+
+            data_text = json.dumps(data, ensure_ascii=False, indent=2)
+            prompt = template_prompt.format(
+                data=data_text[:8000],
+                extra_instructions=(extra_instructions or "") + reader_context,
+            )
+
+            # 更新数据源统计
+            report.data_sources_used = {
+                "sources": data_sources,
+                "counts": {
+                    "documents": len(data["documents"]),
+                    "communications": len(data["communications"]),
+                },
+            }
+            await db.commit()
+
+            response = await llm_client.chat_client.chat.completions.create(
+                model=settings.agent_llm_model,
+                messages=[
+                    {"role": "system", "content": REPORT_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3,
+            )
+            content = response.choices[0].message.content
+            report.content_markdown = content
+            report.status = "completed"
+        except Exception as e:
+            logger.error("后台报告生成失败 (id=%s): %s", report_id, e)
+            report = await db.get(Report, report_id)
+            if report:
+                report.status = "failed"
+                report.content_markdown = f"生成失败: {e}"
+        await db.commit()
+
+
+async def start_report_background(
+    db: AsyncSession,
+    owner_id: str,
+    template_id: int,
+    title: str,
+    time_start: datetime,
+    time_end: datetime,
+    data_sources: list[str],
+    extra_instructions: str | None = None,
+    target_reader_ids: list[str] | None = None,
+) -> Report:
+    """创建报告记录，然后在后台异步生成（立即返回报告ID）。"""
+    if time_start.tzinfo is not None:
+        time_start = time_start.replace(tzinfo=None)
+    if time_end.tzinfo is not None:
+        time_end = time_end.replace(tzinfo=None)
+
+    template = await db.get(ReportTemplate, template_id)
+    if not template:
+        raise ValueError("模板不存在")
+
+    report = Report(
+        owner_id=owner_id,
+        template_id=template_id,
+        title=title,
+        status="generating",
+        time_range_start=time_start,
+        time_range_end=time_end,
+        target_readers=target_reader_ids or [],
+        data_sources_used={"sources": data_sources, "counts": {}},
+    )
+    db.add(report)
+    await db.commit()
+    await db.refresh(report)
+
+    # 在后台事件循环中启动生成任务
+    asyncio.create_task(_background_generate(
+        report_id=report.id,
+        owner_id=owner_id,
+        template_prompt=template.prompt_template,
+        time_start=time_start,
+        time_end=time_end,
+        data_sources=data_sources,
+        extra_instructions=extra_instructions,
+        target_reader_ids=target_reader_ids,
+    ))
+
+    return report
+
+
 async def generate_report_stream(
     db: AsyncSession,
     owner_id: str,
@@ -375,7 +585,7 @@ async def generate_report_stream(
     extra_instructions: str | None = None,
     target_reader_ids: list[str] | None = None,
 ) -> AsyncGenerator[str, None]:
-    """流式生成报告（SSE）。"""
+    """流式生成报告（SSE）— 保留兼容。"""
     if time_start.tzinfo is not None:
         time_start = time_start.replace(tzinfo=None)
     if time_end.tzinfo is not None:
@@ -387,8 +597,6 @@ async def generate_report_stream(
         return
 
     data = await gather_data(db, owner_id, time_start, time_end, data_sources)
-
-    # 构建阅读者上下文
     reader_context = await _build_reader_context(db, owner_id, target_reader_ids or [])
 
     data_text = json.dumps(data, ensure_ascii=False, indent=2)
@@ -397,7 +605,6 @@ async def generate_report_stream(
         extra_instructions=(extra_instructions or "") + reader_context,
     )
 
-    # 创建报告记录
     report = Report(
         owner_id=owner_id,
         template_id=template_id,
@@ -418,7 +625,6 @@ async def generate_report_stream(
     await db.commit()
     await db.refresh(report)
 
-    # 发送报告 ID
     yield json.dumps({"type": "report_id", "id": report.id}, ensure_ascii=False)
 
     full_content = []

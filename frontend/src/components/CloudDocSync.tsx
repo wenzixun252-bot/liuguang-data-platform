@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import {
   Search, RefreshCw, Trash2, Plus, FileUp, FileText, FolderOpen,
-  Check, Loader2, X,
+  Check, Loader2, X, ChevronDown, Link, Sparkles,
 } from 'lucide-react'
-import api from '../lib/api'
+import api, { getExtractionRules } from '../lib/api'
 import toast from 'react-hot-toast'
 
 /* ── 类型 ─────────────────────────────────── */
@@ -12,6 +13,8 @@ interface CloudDoc {
   token: string
   name: string
   doc_type: string
+  owner_id?: string
+  owner_name?: string
   modified_time: string | null
   already_imported: boolean
 }
@@ -21,6 +24,7 @@ interface CloudFolder {
   folder_token: string
   folder_name: string
   is_enabled: boolean
+  extraction_rule_id: number | null
   last_sync_time: string | null
   last_sync_status: string
   files_synced: number
@@ -58,11 +62,16 @@ interface CloudDocSyncProps {
   onImportComplete?: () => void
   initialMode?: ImportMode
   targetTable?: ImportTarget
+  extractionRuleId?: number | null
 }
 
-export default function CloudDocSync({ onClose, onImportComplete, initialMode = 'cloud-doc', targetTable = 'document' }: CloudDocSyncProps) {
+export default function CloudDocSync({ onClose, onImportComplete, initialMode = 'cloud-doc', targetTable = 'document', extractionRuleId: externalRuleId = null }: CloudDocSyncProps) {
   const isCommMode = targetTable === 'communication'
   const [activeMode, setActiveMode] = useState<ImportMode>(initialMode)
+
+  // 提取规则：云文档导入使用外部传入的；文件夹级别有独立的下拉选择
+  const extractionRuleId = externalRuleId
+  const { data: extractionRules = [] } = useQuery({ queryKey: ['extraction-rules'], queryFn: getExtractionRules })
 
   // 手动发现
   const [docs, setDocs] = useState<CloudDoc[]>([])
@@ -87,6 +96,11 @@ export default function CloudDocSync({ onClose, onImportComplete, initialMode = 
   // 文件夹轮询
   const [folderPolling, setFolderPolling] = useState(false)
 
+  // 粘贴链接导入
+  const [showPasteUrl, setShowPasteUrl] = useState(false)
+  const [pasteUrl, setPasteUrl] = useState('')
+  const [addingFromUrl, setAddingFromUrl] = useState(false)
+
   const loadFolders = useCallback(() => {
     api.get('/import/cloud-folders')
       .then((res) => setFolders(res.data))
@@ -100,9 +114,10 @@ export default function CloudDocSync({ onClose, onImportComplete, initialMode = 
   useEffect(() => {
     api.get('/import/cloud-folders')
       .then((res) => {
-        const hasRunning = res.data.some((f: CloudFolder) => f.last_sync_status === 'running')
+        const folders = Array.isArray(res.data) ? res.data : []
+        const hasRunning = folders.some((f: CloudFolder) => f.last_sync_status === 'running')
         if (hasRunning) {
-          setFolders(res.data)
+          setFolders(folders)
           setSyncingFolders(true)
           setFolderPolling(true)
         }
@@ -115,8 +130,9 @@ export default function CloudDocSync({ onClose, onImportComplete, initialMode = 
     if (!folderPolling) return
     const timer = setInterval(() => {
       api.get('/import/cloud-folders').then((res) => {
-        setFolders(res.data)
-        const hasRunning = res.data.some((f: CloudFolder) => f.last_sync_status === 'running')
+        const data = Array.isArray(res.data) ? res.data : []
+        setFolders(data)
+        const hasRunning = data.some((f: CloudFolder) => f.last_sync_status === 'running')
         if (!hasRunning) {
           setFolderPolling(false)
           setSyncingFolders(false)
@@ -192,9 +208,9 @@ export default function CloudDocSync({ onClose, onImportComplete, initialMode = 
     try {
       const items = docs
         .filter((d) => selectedTokens.has(d.token))
-        .map((d) => ({ token: d.token, name: d.name, type: d.doc_type }))
+        .map((d) => ({ token: d.token, name: d.name, type: d.doc_type, owner_id: d.owner_id || '', owner_name: d.owner_name || '' }))
       const endpoint = isCommMode ? '/import/feishu-docs/communication' : '/import/feishu-docs'
-      await api.post(endpoint, { items })
+      await api.post(endpoint, { items, extraction_rule_id: extractionRuleId })
       const label = isCommMode ? '沟通资产' : '文档'
       toast.success(`${items.length} 个${label}已提交后台导入，稍后可在列表中查看`)
       onImportComplete?.()
@@ -281,6 +297,15 @@ export default function CloudDocSync({ onClose, onImportComplete, initialMode = 
     }
   }
 
+  const handleUpdateFolderRule = async (folderId: number, ruleId: number | null) => {
+    try {
+      await api.patch(`/import/cloud-folders/${folderId}`, { extraction_rule_id: ruleId })
+      loadFolders()
+    } catch {
+      toast.error('更新提取规则失败')
+    }
+  }
+
   const handleSyncFolders = async () => {
     setSyncingFolders(true)
     try {
@@ -290,6 +315,27 @@ export default function CloudDocSync({ onClose, onImportComplete, initialMode = 
     } catch (e: any) {
       toast.error(e.response?.data?.detail || '触发同步失败')
       setSyncingFolders(false)
+    }
+  }
+
+  const handleAddFromUrl = async () => {
+    if (!pasteUrl.trim()) { toast.error('请粘贴链接'); return }
+    setAddingFromUrl(true)
+    try {
+      await api.post('/import/feishu-docs/from-url', {
+        url: pasteUrl.trim(),
+        target: isCommMode ? 'communication' : 'document',
+        extraction_rule_id: extractionRuleId,
+      })
+      const label = isCommMode ? '沟通资产' : '文档'
+      toast.success(`已提交后台导入为${label}`)
+      setPasteUrl('')
+      onImportComplete?.()
+      onClose()
+    } catch (e: any) {
+      toast.error(e.response?.data?.detail || '导入失败')
+    } finally {
+      setAddingFromUrl(false)
     }
   }
 
@@ -343,25 +389,29 @@ export default function CloudDocSync({ onClose, onImportComplete, initialMode = 
                   <FileText size={16} />
                   选择飞书云文档
                 </h4>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => handleDiscover()}
-                    disabled={loading}
-                    className="flex items-center gap-1 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs hover:bg-indigo-700 disabled:opacity-50"
-                  >
-                    <Search size={12} />
-                    {loading ? '查询中...' : '刷新列表'}
-                  </button>
-                  {selectedTokens.size > 0 && (
+                <div className="flex items-center gap-3">
+                  <div className="flex gap-2">
                     <button
-                      onClick={handleImport}
-                      disabled={importing}
-                      className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs hover:bg-green-700 disabled:opacity-50"
+                      type="button"
+                      onClick={() => handleDiscover()}
+                      disabled={loading}
+                      className="flex items-center gap-1 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs hover:bg-indigo-700 disabled:opacity-50"
                     >
-                      {importing ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
-                      {importing ? '提交中...' : `${isCommMode ? '导入为沟通资产' : '导入选中'} (${selectedTokens.size})`}
+                      <Search size={12} />
+                      {loading ? '查询中...' : '刷新列表'}
                     </button>
-                  )}
+                    {selectedTokens.size > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleImport}
+                        disabled={importing}
+                        className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs hover:bg-green-700 disabled:opacity-50"
+                      >
+                        {importing ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+                        {importing ? '提交中...' : `${isCommMode ? '导入为沟通资产' : '导入选中'} (${selectedTokens.size})`}
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -431,6 +481,11 @@ export default function CloudDocSync({ onClose, onImportComplete, initialMode = 
                           <FileText size={14} className="text-indigo-400 flex-shrink-0" />
                         )}
                         <span className="text-sm text-gray-700 flex-1 truncate">{doc.name}</span>
+                        {doc.owner_name && (
+                          <span className="text-[10px] text-gray-400 flex-shrink-0 max-w-[80px] truncate" title={doc.owner_name}>
+                            {doc.owner_name}
+                          </span>
+                        )}
                         <span className={`px-1.5 py-0.5 rounded-full text-[10px] flex-shrink-0 ${catStyle.className}`}>
                           {catStyle.label}
                         </span>
@@ -459,6 +514,41 @@ export default function CloudDocSync({ onClose, onImportComplete, initialMode = 
                   <div className="py-4 text-center text-gray-400 text-sm">无匹配结果</div>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* ═══ 粘贴链接导入（云文档模式下显示） ═══ */}
+          {activeMode === 'cloud-doc' && (
+            <div className="border-t border-gray-100 pt-3">
+              <button
+                type="button"
+                onClick={() => setShowPasteUrl(!showPasteUrl)}
+                className="flex items-center gap-1 text-sm text-gray-500 hover:text-indigo-600"
+              >
+                <ChevronDown size={14} className={`transition-transform ${showPasteUrl ? 'rotate-180' : ''}`} />
+                在列表中找不到？粘贴云文档链接
+              </button>
+              {showPasteUrl && (
+                <div className="mt-3 flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="https://xxx.feishu.cn/docx/... 或 /wiki/... 或 /file/..."
+                    className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                    value={pasteUrl}
+                    onChange={(e) => setPasteUrl(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleAddFromUrl() }}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddFromUrl}
+                    disabled={addingFromUrl}
+                    className="flex items-center gap-1 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 disabled:opacity-50 whitespace-nowrap"
+                  >
+                    <Link size={14} />
+                    {addingFromUrl ? '导入中...' : '导入'}
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -576,17 +666,36 @@ export default function CloudDocSync({ onClose, onImportComplete, initialMode = 
                       同步全部
                     </button>
                   </div>
-                  {folders.map((f) => (
-                    <div key={f.id} className="flex items-center gap-3 px-3 py-2 bg-gray-50 rounded-lg text-sm">
-                      <FolderOpen size={14} className="text-amber-500 flex-shrink-0" />
-                      <span className="flex-1 text-gray-700">{f.folder_name || f.folder_token}</span>
-                      <SyncStatusBadge status={f.last_sync_status} errorMessage={f.error_message} />
-                      <span className="text-xs text-gray-400">{f.files_synced} 个文件</span>
-                      <button onClick={() => handleDeleteFolder(f.id)} className="p-1 text-gray-400 hover:text-red-500 rounded" title="删除文件夹" aria-label="删除文件夹">
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  ))}
+                  {folders.map((f) => {
+                    const matchedRule = extractionRules.find((r: any) => r.id === f.extraction_rule_id)
+                    return (
+                      <div key={f.id} className="flex items-center gap-3 px-3 py-2 bg-gray-50 rounded-lg text-sm">
+                        <FolderOpen size={14} className="text-amber-500 flex-shrink-0" />
+                        <span className="flex-1 text-gray-700 truncate">{f.folder_name || f.folder_token}</span>
+                        <SyncStatusBadge status={f.last_sync_status} errorMessage={f.error_message} />
+                        <span className="text-xs text-gray-400">{f.files_synced} 个文件</span>
+                        {matchedRule ? (
+                          <span
+                            title="点击移除提取规则"
+                            onClick={() => handleUpdateFolderRule(f.id, null)}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-indigo-50 text-indigo-600 border border-indigo-200 cursor-pointer hover:bg-red-50 hover:text-red-500 hover:border-red-200 transition-colors"
+                          >
+                            <Sparkles size={10} />
+                            {matchedRule.name}
+                            <X size={10} className="opacity-60" />
+                          </span>
+                        ) : extractionRules.length > 0 ? (
+                          <FolderRulePicker
+                            rules={extractionRules}
+                            onSelect={(ruleId) => handleUpdateFolderRule(f.id, ruleId)}
+                          />
+                        ) : null}
+                        <button onClick={() => handleDeleteFolder(f.id)} className="p-1 text-gray-400 hover:text-red-500 rounded" title="删除文件夹" aria-label="删除文件夹">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    )
+                  })}
                 </div>
               ) : (
                 <div className="py-6 text-center text-gray-400 text-sm">
@@ -624,4 +733,45 @@ function SyncStatusBadge({ status, errorMessage }: { status?: string | null; err
     )
   }
   return <span className="px-2 py-0.5 rounded-full text-[10px] bg-gray-100 text-gray-500">{status}</span>
+}
+
+function FolderRulePicker({ rules, onSelect }: { rules: any[]; onSelect: (id: number) => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-gray-100 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
+      >
+        <Plus size={10} />
+        提取规则
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded-lg shadow-lg py-1 min-w-[120px]">
+          {rules.map((r: any) => (
+            <button
+              type="button"
+              key={r.id}
+              onClick={() => { onSelect(r.id); setOpen(false) }}
+              className="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-indigo-50 hover:text-indigo-600 transition-colors"
+            >
+              {r.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }

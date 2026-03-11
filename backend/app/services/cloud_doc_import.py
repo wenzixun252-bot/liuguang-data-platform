@@ -27,10 +27,86 @@ class ImportResult:
     skipped: int = 0
     failed: int = 0
     documents: list = field(default_factory=list)
+    errors: list = field(default_factory=list)  # [{"name": "文件名", "reason": "错误原因"}]
 
 
 class CloudDocImportService:
     """飞书云文档/文件导入服务。"""
+
+    async def _resolve_wiki_owners(
+        self,
+        file_infos: list[dict],
+        db: AsyncSession,
+        user_access_token: str,
+    ) -> None:
+        """为 wiki 类型文档解析真实的 owner 信息（原地修改 file_infos）。
+
+        wiki 文档的 token 在 batch_get_doc_meta 中无法查到 owner，
+        需要先通过 get_wiki_node_info 解析出 obj_token/obj_type，
+        再用 obj_token 查 meta 获取真实所有者。
+        """
+        wiki_files = [
+            f for f in file_infos
+            if f.get("type") == "wiki" and f.get("token")
+            and (not f.get("owner_id") or not f.get("owner_name"))
+        ]
+        if not wiki_files:
+            return
+
+        # 1. 并发解析 wiki node → obj_token
+        async def _resolve(tok: str):
+            try:
+                node = await feishu_client.get_wiki_node_info(tok, user_access_token=user_access_token)
+                return tok, node.get("obj_token", ""), node.get("obj_type", "docx")
+            except Exception:
+                return tok, "", ""
+
+        resolved = await asyncio.gather(*[_resolve(wf["token"]) for wf in wiki_files[:50]])
+        wiki_obj_map: dict[str, dict] = {}
+        for wt, obj_tok, obj_typ in resolved:
+            if obj_tok:
+                wiki_obj_map[wt] = {"obj_token": obj_tok, "obj_type": obj_typ}
+
+        if not wiki_obj_map:
+            return
+
+        # 2. 用 obj_token 查 batch_get_doc_meta 获取 owner
+        try:
+            obj_to_wiki = {}  # obj_token -> wiki_token
+            meta_docs = []
+            for wiki_tok, obj_info in wiki_obj_map.items():
+                meta_docs.append({"token": obj_info["obj_token"], "type": obj_info["obj_type"]})
+                obj_to_wiki[obj_info["obj_token"]] = wiki_tok
+            meta_map = await feishu_client.batch_get_doc_meta(meta_docs, user_access_token)
+            for obj_tok, wiki_tok in obj_to_wiki.items():
+                meta = meta_map.get(obj_tok, {})
+                wf = next((f for f in wiki_files if f["token"] == wiki_tok), None)
+                if wf and meta:
+                    if meta.get("owner_id") and not wf.get("owner_id"):
+                        wf["owner_id"] = meta["owner_id"]
+                    if meta.get("owner_name") and not wf.get("owner_name"):
+                        wf["owner_name"] = meta["owner_name"]
+        except Exception as e:
+            logger.warning("wiki 文档 batch_get_doc_meta 补充 owner 失败: %s", e)
+
+        # 3. 如果 meta 没有 owner_name 但有 owner_id，查 User 表兜底
+        still_need = [f for f in wiki_files if f.get("owner_id") and not f.get("owner_name")]
+        if still_need:
+            try:
+                from app.models.user import User
+                unique_oids = list({f["owner_id"] for f in still_need})
+                user_rows = (await db.execute(
+                    select(User.feishu_open_id, User.name).where(
+                        User.feishu_open_id.in_(unique_oids)
+                    )
+                )).all()
+                name_map = {r.feishu_open_id: r.name for r in user_rows if r.name}
+                for f in still_need:
+                    resolved_name = name_map.get(f["owner_id"])
+                    if resolved_name:
+                        f["owner_name"] = resolved_name
+            except Exception as e:
+                logger.warning("wiki 文档 User 表解析 owner_name 失败: %s", e)
 
     async def import_cloud_doc(
         self,
@@ -40,6 +116,8 @@ class CloudDocImportService:
         user_access_token: str,
         uploader_name: str | None = None,
         force: bool = False,
+        feishu_owner_id: str | None = None,
+        source_platform: str = "feishu_cloud_doc",
     ) -> tuple[Document | None, str]:
         """导入飞书云文档（docx/doc 类型），通过 Block API 读取内容。
 
@@ -50,6 +128,19 @@ class CloudDocImportService:
             # 1. 检查是否已导入
             existing = await self._find_existing(db, document_id, owner_id)
             if existing and not force:
+                # 回补 _original_owner（老数据可能缺失）
+                changed = False
+                if feishu_owner_id and not (existing.extra_fields or {}).get("_original_owner"):
+                    ef = dict(existing.extra_fields or {})
+                    ef["_original_owner"] = {"id": feishu_owner_id}
+                    existing.extra_fields = ef
+                    changed = True
+                # 回补 uploader_name（老数据可能是导入者而非文档所有者）
+                if uploader_name and existing.uploader_name != uploader_name:
+                    existing.uploader_name = uploader_name
+                    changed = True
+                if changed:
+                    await db.commit()
                 logger.info("云文档已导入，跳过: %s", document_id)
                 return existing, "skipped"
 
@@ -85,8 +176,8 @@ class CloudDocImportService:
             # 7. 构建时间戳
             created_time = doc_content.get("created_time")
             modified_time = doc_content.get("modified_time")
-            feishu_created = datetime.fromtimestamp(int(created_time)) if created_time else None
-            feishu_updated = datetime.fromtimestamp(int(modified_time)) if modified_time else None
+            feishu_created = datetime.utcfromtimestamp(int(created_time)) if created_time else None
+            feishu_updated = datetime.utcfromtimestamp(int(modified_time)) if modified_time else None
 
             # 8. Upsert
             keywords_list = parsed.get("tags", []) if isinstance(parsed.get("tags"), list) else []
@@ -94,6 +185,7 @@ class CloudDocImportService:
             if existing:
                 # 更新现有记录
                 existing.title = parsed.get("title") or title
+                existing.original_filename = title
                 existing.content_text = content_text
                 existing.summary = parsed.get("summary")
                 existing.author = parsed.get("author")
@@ -109,10 +201,15 @@ class CloudDocImportService:
                 logger.info("云文档已更新: doc_id=%d, title=%s", existing.id, existing.title)
                 return existing, "imported"
             else:
+                extra = {}
+                if feishu_owner_id:
+                    extra["_original_owner"] = {"id": feishu_owner_id}
                 doc = Document(
                     owner_id=owner_id,
                     source_type="cloud",
+                    source_platform=source_platform,
                     feishu_record_id=document_id,
+                    original_filename=title,
                     title=parsed.get("title") or title,
                     content_text=content_text,
                     summary=parsed.get("summary"),
@@ -124,6 +221,7 @@ class CloudDocImportService:
                     feishu_created_at=feishu_created,
                     feishu_updated_at=feishu_updated,
                     synced_at=datetime.utcnow(),
+                    extra_fields=extra,
                 )
                 if embedding:
                     doc.content_vector = embedding
@@ -146,6 +244,8 @@ class CloudDocImportService:
         user_access_token: str,
         uploader_name: str | None = None,
         force: bool = False,
+        feishu_owner_id: str | None = None,
+        source_platform: str = "feishu_cloud_doc",
     ) -> tuple[Document | None, str]:
         """导入飞书文件（PDF/PPT 等），先下载再本地提取文本。
 
@@ -156,6 +256,18 @@ class CloudDocImportService:
             # 1. 检查是否已导入
             existing = await self._find_existing(db, file_token, owner_id)
             if existing and not force:
+                # 回补 _original_owner 和 uploader_name（老数据可能缺失或不正确）
+                changed = False
+                if feishu_owner_id and not (existing.extra_fields or {}).get("_original_owner"):
+                    ef = dict(existing.extra_fields or {})
+                    ef["_original_owner"] = {"id": feishu_owner_id}
+                    existing.extra_fields = ef
+                    changed = True
+                if uploader_name and existing.uploader_name != uploader_name:
+                    existing.uploader_name = uploader_name
+                    changed = True
+                if changed:
+                    await db.commit()
                 logger.info("飞书文件已导入，跳过: %s", file_token)
                 return existing, "skipped"
 
@@ -212,6 +324,7 @@ class CloudDocImportService:
 
             if existing:
                 existing.title = parsed.get("title") or file_name
+                existing.original_filename = file_name
                 existing.content_text = content_text
                 existing.summary = parsed.get("summary")
                 existing.author = parsed.get("author")
@@ -227,10 +340,15 @@ class CloudDocImportService:
                 logger.info("飞书文件已更新: doc_id=%d, title=%s", existing.id, existing.title)
                 return existing, "imported"
             else:
+                extra = {}
+                if feishu_owner_id:
+                    extra["_original_owner"] = {"id": feishu_owner_id}
                 doc = Document(
                     owner_id=owner_id,
                     source_type="cloud",
+                    source_platform=source_platform,
                     feishu_record_id=file_token,
+                    original_filename=file_name,
                     title=parsed.get("title") or file_name,
                     content_text=content_text,
                     summary=parsed.get("summary"),
@@ -241,6 +359,7 @@ class CloudDocImportService:
                     source_url=source_url,
                     uploader_name=uploader_name,
                     synced_at=datetime.utcnow(),
+                    extra_fields=extra,
                 )
                 if embedding:
                     doc.content_vector = embedding
@@ -262,6 +381,7 @@ class CloudDocImportService:
         user_access_token: str,
         uploader_name: str | None = None,
         force: bool = False,
+        source_platform: str = "feishu_cloud_doc",
     ) -> tuple[Document | None, str]:
         """路由方法 — 根据文件类型分发到不同处理逻辑。
 
@@ -271,14 +391,19 @@ class CloudDocImportService:
         file_type = file_info.get("type", "")
         token = file_info.get("token", "")
         name = file_info.get("name", "未命名")
+        feishu_owner_id = file_info.get("owner_id", "") or None
+        # 飞书资产：优先使用文档原始所有者名称作为资产所有人
+        display_owner = file_info.get("owner_name", "") or uploader_name
 
         if file_type in ("docx", "doc"):
             return await self.import_cloud_doc(
-                token, owner_id, db, user_access_token, uploader_name, force=force,
+                token, owner_id, db, user_access_token, display_owner, force=force,
+                feishu_owner_id=feishu_owner_id, source_platform=source_platform,
             )
         elif file_type == "file":
             return await self.import_cloud_file(
-                token, name, owner_id, db, user_access_token, uploader_name, force=force,
+                token, name, owner_id, db, user_access_token, display_owner, force=force,
+                feishu_owner_id=feishu_owner_id, source_platform=source_platform,
             )
         elif file_type == "wiki":
             # wiki 节点需要先解析实际类型
@@ -286,13 +411,38 @@ class CloudDocImportService:
                 node = await feishu_client.get_wiki_node_info(token, user_access_token=user_access_token)
                 obj_type = node.get("obj_type", "")
                 obj_token = node.get("obj_token", token)
+
+                # wiki 文档的 owner 信息经常缺失，用解析后的 obj_token 补充
+                if not feishu_owner_id or display_owner == uploader_name:
+                    try:
+                        meta_map = await feishu_client.batch_get_doc_meta(
+                            [{"token": obj_token, "type": obj_type or "docx"}],
+                            user_access_token,
+                        )
+                        meta = meta_map.get(obj_token, {})
+                        if meta.get("owner_id"):
+                            feishu_owner_id = meta["owner_id"]
+                        if meta.get("owner_name"):
+                            display_owner = meta["owner_name"]
+                        elif meta.get("owner_id"):
+                            from app.models.user import User
+                            row = (await db.execute(
+                                select(User.name).where(User.feishu_open_id == meta["owner_id"])
+                            )).scalar_one_or_none()
+                            if row:
+                                display_owner = row
+                    except Exception as e:
+                        logger.debug("wiki 文档 owner 补充失败 [%s]: %s", token, e)
+
                 if obj_type in ("docx", "doc"):
                     return await self.import_cloud_doc(
-                        obj_token, owner_id, db, user_access_token, uploader_name, force=force,
+                        obj_token, owner_id, db, user_access_token, display_owner, force=force,
+                        feishu_owner_id=feishu_owner_id, source_platform=source_platform,
                     )
                 elif obj_type == "file":
                     return await self.import_cloud_file(
-                        obj_token, name, owner_id, db, user_access_token, uploader_name, force=force,
+                        obj_token, name, owner_id, db, user_access_token, display_owner, force=force,
+                        feishu_owner_id=feishu_owner_id, source_platform=source_platform,
                     )
                 else:
                     logger.warning("wiki 节点实际类型不支持导入: %s (%s → %s)", name, token, obj_type)
@@ -311,6 +461,7 @@ class CloudDocImportService:
         db: AsyncSession,
         uploader_name: str | None = None,
         tag_ids: list[int] | None = None,
+        source_platform: str = "feishu_cloud_doc",
     ) -> tuple[Document | None, str]:
         """快速导入 — 仅保存文档元数据，不调用飞书内容 API 和 LLM。
 
@@ -320,6 +471,9 @@ class CloudDocImportService:
         name = file_info.get("name", "未命名")
         doc_type = file_info.get("type", "docx")
         url = file_info.get("url", "")
+        feishu_owner_id = file_info.get("owner_id", "") or None
+        # 飞书资产：优先使用文档原始所有者名称作为资产所有人
+        display_owner = file_info.get("owner_name", "") or uploader_name
 
         if not token:
             return None, "failed"
@@ -327,6 +481,18 @@ class CloudDocImportService:
         try:
             existing = await self._find_existing(db, token, owner_id)
             if existing:
+                # 回补 _original_owner（老数据可能缺失）
+                if feishu_owner_id and not (existing.extra_fields or {}).get("_original_owner"):
+                    ef = dict(existing.extra_fields or {})
+                    ef["_original_owner"] = {"id": feishu_owner_id}
+                    existing.extra_fields = ef
+                    await db.commit()
+                    await db.refresh(existing)
+                # 回补 uploader_name（老数据可能是导入者而非文档所有者）
+                if display_owner and existing.uploader_name != display_owner:
+                    existing.uploader_name = display_owner
+                    await db.commit()
+                    await db.refresh(existing)
                 if tag_ids:
                     await self._apply_tags(existing.id, tag_ids, db)
                 return existing, "skipped"
@@ -335,17 +501,24 @@ class CloudDocImportService:
                 domain = settings.feishu_base_domain or "feishu.cn"
                 url = f"https://{domain}/docx/{token}"
 
+            extra = {}
+            if feishu_owner_id:
+                extra["_original_owner"] = {"id": feishu_owner_id}
+
             doc = Document(
                 owner_id=owner_id,
                 source_type="cloud",
+                source_platform=source_platform,
                 feishu_record_id=token,
+                original_filename=name,
                 title=name,
                 content_text="",
                 file_type=doc_type,
                 source_url=url,
-                uploader_name=uploader_name,
+                uploader_name=display_owner,
                 parse_status="pending",
                 synced_at=datetime.utcnow(),
+                extra_fields=extra,
             )
             db.add(doc)
             await db.commit()
@@ -369,6 +542,7 @@ class CloudDocImportService:
         user_access_token: str,
         uploader_name: str | None = None,
         tag_ids: list[int] | None = None,
+        source_platform: str = "feishu_cloud_doc",
     ) -> ImportResult:
         """批量导入多个云文档/文件，QPS 控制。
 
@@ -376,6 +550,50 @@ class CloudDocImportService:
             tag_ids: 导入成功后自动打上的标签 ID 列表（来自关键词规则的 default_tag_ids）
         """
         PER_FILE_TIMEOUT = 90  # 单文件超时 90 秒
+
+        # wiki 类型文档需要特殊处理：先解析 obj_token 再查 owner
+        await self._resolve_wiki_owners(file_infos, db, user_access_token)
+
+        # 补充非 wiki 文档的 owner_id / owner_name
+        need_meta = [
+            f for f in file_infos
+            if f.get("token") and f.get("type") != "wiki"
+            and (not f.get("owner_id") or not f.get("owner_name"))
+        ]
+        if need_meta:
+            try:
+                meta_map = await feishu_client.batch_get_doc_meta(
+                    [{"token": f["token"], "type": f.get("type", "docx")} for f in need_meta],
+                    user_access_token,
+                )
+                for f in need_meta:
+                    meta = meta_map.get(f["token"])
+                    if meta:
+                        if not f.get("owner_id") and meta.get("owner_id"):
+                            f["owner_id"] = meta["owner_id"]
+                        if not f.get("owner_name") and meta.get("owner_name"):
+                            f["owner_name"] = meta["owner_name"]
+            except Exception as e:
+                logger.warning("batch_get_doc_meta 补充 owner 信息失败: %s", e)
+
+        # 飞书 batch_query API 不返回 owner_display_name，通过 owner_id 查 User 表解析
+        still_need_name = [f for f in file_infos if f.get("owner_id") and not f.get("owner_name")]
+        if still_need_name:
+            try:
+                from app.models.user import User
+                unique_oids = list({f["owner_id"] for f in still_need_name})
+                user_rows = (await db.execute(
+                    select(User.feishu_open_id, User.name).where(
+                        User.feishu_open_id.in_(unique_oids)
+                    )
+                )).all()
+                name_map = {r.feishu_open_id: r.name for r in user_rows if r.name}
+                for f in still_need_name:
+                    resolved = name_map.get(f["owner_id"])
+                    if resolved:
+                        f["owner_name"] = resolved
+            except Exception as e:
+                logger.warning("User 表解析 owner_name 失败: %s", e)
 
         result = ImportResult()
 
@@ -386,6 +604,7 @@ class CloudDocImportService:
                 doc, status = await asyncio.wait_for(
                     self.import_item(
                         info, owner_id, db, user_access_token, uploader_name,
+                        source_platform=source_platform,
                     ),
                     timeout=PER_FILE_TIMEOUT,
                 )
@@ -422,6 +641,7 @@ class CloudDocImportService:
         user_access_token: str,
         uploader_name: str | None = None,
         force: bool = False,
+        feishu_owner_id: str | None = None,
     ) -> tuple[Communication | None, str]:
         """导入飞书云文档为沟通资产（会议纪要/文字记录），使用 LLM 智能提取字段。
 
@@ -458,27 +678,46 @@ class CloudDocImportService:
             # 6. 构建时间戳
             created_time = doc_content.get("created_time")
             modified_time = doc_content.get("modified_time")
-            feishu_created = datetime.fromtimestamp(int(created_time)) if created_time else None
-            feishu_updated = datetime.fromtimestamp(int(modified_time)) if modified_time else None
+            feishu_created = datetime.utcfromtimestamp(int(created_time)) if created_time else None
+            feishu_updated = datetime.utcfromtimestamp(int(modified_time)) if modified_time else None
 
-            # 7. 解析 comm_time（确保不带时区，兼容数据库字段）
+            # 7. 解析 comm_time — 只存实际会议/录音时间，提取不到就留 None
+            from datetime import timedelta
+            now = datetime.utcnow()
             comm_time = None
             if parsed.get("comm_time"):
                 try:
                     dt = datetime.fromisoformat(parsed["comm_time"])
-                    # 移除时区信息，转换为 naive datetime
                     if dt.tzinfo is not None:
-                        dt = dt.replace(tzinfo=None)
-                    comm_time = dt
+                        # 转为 UTC naive（数据库统一存 UTC）
+                        dt = dt.astimezone(tz=None).replace(tzinfo=None)
+                        dt = datetime.utcfromtimestamp(dt.timestamp())
+                    # 合理性校验：不应早于2年前或超过未来1天
+                    if (now - timedelta(days=730)) <= dt <= (now + timedelta(days=1)):
+                        comm_time = dt
+                    else:
+                        logger.warning(
+                            "LLM 提取的 comm_time 不合理 (%s)，丢弃", dt,
+                        )
                 except (ValueError, TypeError):
-                    comm_time = feishu_created
+                    pass
 
             keywords_list = parsed.get("keywords", []) if isinstance(parsed.get("keywords"), list) else []
             participants = parsed.get("participants", []) if isinstance(parsed.get("participants"), list) else []
             action_items = parsed.get("action_items", []) if isinstance(parsed.get("action_items"), list) else []
+            # 确保 participants 为 [{name: ...}] 格式（与 file_upload.py 保持一致）
+            if participants and isinstance(participants[0], str):
+                participants = [{"name": p} for p in participants]
             comm_type = parsed.get("comm_type", "meeting")
             if comm_type not in ("meeting", "chat", "recording"):
                 comm_type = "meeting"
+
+            # conclusions 字段是 Text 类型，LLM 可能返回列表，需转为字符串
+            raw_conclusions = parsed.get("conclusions")
+            if isinstance(raw_conclusions, list):
+                conclusions = "\n".join(str(c) for c in raw_conclusions)
+            else:
+                conclusions = raw_conclusions
 
             if existing:
                 existing.title = parsed.get("title") or title
@@ -486,7 +725,7 @@ class CloudDocImportService:
                 existing.summary = parsed.get("summary")
                 existing.initiator = parsed.get("initiator")
                 existing.participants = participants
-                existing.conclusions = parsed.get("conclusions")
+                existing.conclusions = conclusions
                 existing.action_items = action_items
                 existing.keywords = keywords_list
                 existing.sentiment = parsed.get("sentiment")
@@ -501,6 +740,9 @@ class CloudDocImportService:
                 logger.info("沟通资产已更新: id=%d, title=%s", existing.id, existing.title)
                 return existing, "imported"
             else:
+                extra = {}
+                if feishu_owner_id:
+                    extra["_original_owner"] = {"id": feishu_owner_id}
                 comm = Communication(
                     owner_id=owner_id,
                     comm_type=comm_type,
@@ -508,11 +750,11 @@ class CloudDocImportService:
                     source_app_token=f"cloud_doc_{document_id}",
                     feishu_record_id=f"cloud_{document_id}",
                     title=parsed.get("title") or title,
-                    comm_time=comm_time or feishu_created,
+                    comm_time=comm_time,
                     initiator=parsed.get("initiator"),
                     participants=participants,
                     duration_minutes=parsed.get("duration_minutes"),
-                    conclusions=parsed.get("conclusions"),
+                    conclusions=conclusions,
                     action_items=action_items,
                     content_text=content_text,
                     summary=parsed.get("summary"),
@@ -523,6 +765,7 @@ class CloudDocImportService:
                     feishu_created_at=feishu_created,
                     feishu_updated_at=feishu_updated,
                     synced_at=datetime.utcnow(),
+                    extra_fields=extra,
                 )
                 if embedding:
                     comm.content_vector = embedding
@@ -549,6 +792,7 @@ class CloudDocImportService:
         user_access_token: str,
         uploader_name: str | None = None,
         force: bool = False,
+        feishu_owner_id: str | None = None,
     ) -> tuple[Communication | None, str]:
         """导入飞书文件（PDF 等）为沟通资产：下载文件 → 提取文本 → LLM 解析。
 
@@ -614,9 +858,19 @@ class CloudDocImportService:
             keywords_list = parsed.get("keywords", []) if isinstance(parsed.get("keywords"), list) else []
             participants = parsed.get("participants", []) if isinstance(parsed.get("participants"), list) else []
             action_items = parsed.get("action_items", []) if isinstance(parsed.get("action_items"), list) else []
+            # 确保 participants 为 [{name: ...}] 格式（与 file_upload.py 保持一致）
+            if participants and isinstance(participants[0], str):
+                participants = [{"name": p} for p in participants]
             comm_type = parsed.get("comm_type", "meeting")
             if comm_type not in ("meeting", "chat", "recording"):
                 comm_type = "meeting"
+
+            # conclusions 字段是 Text 类型，LLM 可能返回列表，需转为字符串
+            raw_conclusions = parsed.get("conclusions")
+            if isinstance(raw_conclusions, list):
+                conclusions = "\n".join(str(c) for c in raw_conclusions)
+            else:
+                conclusions = raw_conclusions
 
             if existing:
                 existing.title = parsed.get("title") or title
@@ -624,7 +878,7 @@ class CloudDocImportService:
                 existing.summary = parsed.get("summary")
                 existing.initiator = parsed.get("initiator")
                 existing.participants = participants
-                existing.conclusions = parsed.get("conclusions")
+                existing.conclusions = conclusions
                 existing.action_items = action_items
                 existing.keywords = keywords_list
                 existing.sentiment = parsed.get("sentiment")
@@ -639,6 +893,9 @@ class CloudDocImportService:
                 logger.info("文件沟通资产已更新: id=%d, title=%s", existing.id, existing.title)
                 return existing, "imported"
             else:
+                extra = {}
+                if feishu_owner_id:
+                    extra["_original_owner"] = {"id": feishu_owner_id}
                 comm = Communication(
                     owner_id=owner_id,
                     comm_type=comm_type,
@@ -650,7 +907,7 @@ class CloudDocImportService:
                     initiator=parsed.get("initiator"),
                     participants=participants,
                     duration_minutes=parsed.get("duration_minutes"),
-                    conclusions=parsed.get("conclusions"),
+                    conclusions=conclusions,
                     action_items=action_items,
                     content_text=content_text,
                     summary=parsed.get("summary"),
@@ -659,6 +916,7 @@ class CloudDocImportService:
                     keywords=keywords_list,
                     sentiment=parsed.get("sentiment"),
                     synced_at=datetime.utcnow(),
+                    extra_fields=extra,
                 )
                 if embedding:
                     comm.content_vector = embedding
@@ -691,14 +949,21 @@ class CloudDocImportService:
         """
         PER_FILE_TIMEOUT = 90  # 单文件超时 90 秒
 
+        # wiki 类型文档需要特殊处理：先解析 obj_token 再查 owner
+        await self._resolve_wiki_owners(file_infos, db, user_access_token)
+
         result = ImportResult()
 
         for info in file_infos:
             token = info.get("token", "")
             file_type = info.get("type", "docx")
             name = info.get("name", "未命名")
+            feishu_owner_id = info.get("owner_id", "") or None
+            # 飞书资产：优先使用文档原始所有者名称作为资产所有人
+            display_owner = info.get("owner_name", "") or uploader_name
             if not token:
                 result.failed += 1
+                result.errors.append({"name": name, "reason": "文件token为空"})
                 continue
 
             # 根据文件类型路由到正确的 document_id
@@ -718,19 +983,22 @@ class CloudDocImportService:
                             name, token, obj_type,
                         )
                         result.failed += 1
+                        result.errors.append({"name": name, "reason": f"wiki节点类型{obj_type}不支持"})
                         continue
                 elif file_type == "file":
                     # 普通文件（PDF 等）走下载 → 提取文本路径
                     try:
                         comm, status = await asyncio.wait_for(
                             self.import_file_as_communication(
-                                token, name, owner_id, db, user_access_token, uploader_name,
+                                token, name, owner_id, db, user_access_token, display_owner,
+                                feishu_owner_id=feishu_owner_id,
                             ),
                             timeout=PER_FILE_TIMEOUT,
                         )
                     except asyncio.TimeoutError:
                         logger.warning("文件导入超时（%ds）: %s (%s)", PER_FILE_TIMEOUT, name, token)
                         result.failed += 1
+                        result.errors.append({"name": name, "reason": f"导入超时({PER_FILE_TIMEOUT}s)"})
                         continue
 
                     if status == "imported":
@@ -739,23 +1007,27 @@ class CloudDocImportService:
                         result.skipped += 1
                     else:
                         result.failed += 1
+                        result.errors.append({"name": name, "reason": "文件导入失败"})
                     await asyncio.sleep(0.5)
                     continue
             except Exception as e:
                 logger.warning("解析文件类型失败 [%s]: %s", token, e)
                 result.failed += 1
+                result.errors.append({"name": name, "reason": str(e)[:200]})
                 continue
 
             try:
                 comm, status = await asyncio.wait_for(
                     self.import_cloud_doc_as_communication(
-                        document_id, owner_id, db, user_access_token, uploader_name,
+                        document_id, owner_id, db, user_access_token, display_owner,
+                        feishu_owner_id=feishu_owner_id,
                     ),
                     timeout=PER_FILE_TIMEOUT,
                 )
             except asyncio.TimeoutError:
                 logger.warning("单文件导入超时（%ds）: %s (%s)", PER_FILE_TIMEOUT, name, token)
                 result.failed += 1
+                result.errors.append({"name": name, "reason": f"导入超时({PER_FILE_TIMEOUT}s)"})
                 continue
 
             if status == "imported":
@@ -764,6 +1036,7 @@ class CloudDocImportService:
                 result.skipped += 1
             else:
                 result.failed += 1
+                result.errors.append({"name": name, "reason": "云文档导入失败"})
 
             await asyncio.sleep(0.5)
 
@@ -784,9 +1057,35 @@ class CloudDocImportService:
         )
         logger.info("文件夹 %s 中发现 %d 个支持的文件", folder_token, len(files))
 
-        # 2. 逐个导入
+        # 2. wiki 类型文档先解析 obj_token 再查 owner
+        await self._resolve_wiki_owners(files, db, user_access_token)
+
+        # 3. 补充非 wiki 文档的 owner_id / owner_name
+        need_meta = [
+            f for f in files
+            if f.get("type") != "wiki"
+            and (not f.get("owner_id") or not f.get("owner_name"))
+        ]
+        if need_meta:
+            try:
+                meta_map = await feishu_client.batch_get_doc_meta(
+                    [{"token": f["token"], "type": f.get("type", "docx")} for f in need_meta],
+                    user_access_token,
+                )
+                for f in need_meta:
+                    meta = meta_map.get(f["token"])
+                    if meta:
+                        if not f.get("owner_id") and meta.get("owner_id"):
+                            f["owner_id"] = meta["owner_id"]
+                        if not f.get("owner_name") and meta.get("owner_name"):
+                            f["owner_name"] = meta["owner_name"]
+            except Exception as e:
+                logger.warning("batch_get_doc_meta 补充 owner 信息失败: %s", e)
+
+        # 4. 逐个导入
         return await self.batch_import(
             files, owner_id, db, user_access_token, uploader_name,
+            source_platform="feishu_folder",
         )
 
     # ── 内部辅助方法 ───────────────────────────────────────

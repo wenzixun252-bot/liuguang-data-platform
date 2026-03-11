@@ -85,6 +85,24 @@ class SharingOut(BaseModel):
     target_department_ids: list[int] = []
 
 
+# ── 谁分享给了我 ──
+
+class SharedToMeUser(BaseModel):
+    user_id: int
+    user_name: str
+
+
+class SharedToMeDepartment(BaseModel):
+    department_id: int
+    department_name: str
+    users: list[SharedToMeUser] = []
+
+
+class SharedToMeOut(BaseModel):
+    shared_by_users: list[SharedToMeUser] = []
+    shared_by_departments: list[SharedToMeDepartment] = []
+
+
 # ── 个人信息 ──
 
 class ProfileOut(BaseModel):

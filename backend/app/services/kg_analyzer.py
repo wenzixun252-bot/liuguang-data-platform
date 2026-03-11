@@ -6,7 +6,8 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 import networkx as nx
-from sqlalchemy import select, and_, update
+from sqlalchemy import select, and_, or_, update, delete, cast
+from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -18,13 +19,62 @@ logger = logging.getLogger(__name__)
 
 MAX_ANALYSIS_NODES = 500
 
+# ── 实体类型 → 业务域名称映射（回退用） ──
+# 注意：person 不映射到"人力资源"，因为人物存在于所有业务域中，
+# 仅靠 person 类型无法判断具体业务领域
+_TYPE_TO_DOMAIN = {
+    "organization": "商务合作",
+    "project": "项目管理",
+    "technology": "技术研发",
+    "product": "产品管理",
+    "event": "活动管理",
+    "location": "行政后勤",
+    "concept": "战略规划",
+}
+
+
+def _infer_domain_from_types(type_dist: dict, idx: int, top_entities: list[str] | None = None) -> str:
+    """根据实体类型分布推断业务域名称（作为 LLM 命名失败时的回退）。
+
+    策略：先用非 person 类型映射；person 主导的社群用序号区分。
+    绝不用人名命名，避免域名看起来像 "团队" 划分。
+    """
+    if not type_dist:
+        return f"业务领域{idx + 1}"
+
+    # 按数量排序，优先找非 person/item 类型
+    sorted_types = sorted(type_dist.items(), key=lambda x: x[1], reverse=True)
+
+    # 先尝试用非 person 的具体类型来命名
+    for t, count in sorted_types:
+        if t != "person" and t != "item":
+            label = _TYPE_TO_DOMAIN.get(t)
+            if label:
+                return label
+
+    # person/item 主导的社群 → 用通用职能占位名（等待 LLM 覆盖）
+    _GENERIC_DOMAIN_NAMES = ["综合事务", "协作职能", "业务推进", "运营支持", "战略规划", "专项工作"]
+    return _GENERIC_DOMAIN_NAMES[idx % len(_GENERIC_DOMAIN_NAMES)]
+
+
+def _validate_domain_label(label: str, top_entities: list[str]) -> bool:
+    """校验 LLM 返回的 domain_label 是否为合格的职能类型名称。"""
+    if not label or len(label) < 2 or len(label) > 12:
+        return False
+    # 不能包含实体名（避免人名、项目名拼凑）——只检查长度>=2的实体名
+    for entity_name in top_entities:
+        if len(entity_name) >= 2 and entity_name in label:
+            return False
+    # 不能包含明显的拼接符号
+    if " · " in label or "·" in label:
+        return False
+    return True
+
+
 # ── 类型权重映射 ──
 _TYPE_WEIGHTS = {
     "person": 1.0,
-    "project": 1.0,
-    "event": 0.8,
-    "organization": 0.7,
-    "topic": 0.6,
+    "item": 0.9,
 }
 
 
@@ -68,7 +118,7 @@ async def _load_graph(db: AsyncSession, owner_id: str) -> tuple[list, list, nx.G
 # 1. 社群检测 + 业务域标签
 # ═══════════════════════════════════════════════════════════════════
 
-async def detect_communities(db: AsyncSession, owner_id: str, entities: list = None, relations: list = None, G: nx.Graph = None) -> list[dict]:
+async def detect_communities(db: AsyncSession, owner_id: str, entities: list = None, relations: list = None, G: nx.Graph = None, profile=None) -> list[dict]:
     """运行 Louvain 社群检测 + LLM 业务域命名。"""
     if entities is None or G is None:
         entities, relations, G = await _load_graph(db, owner_id)
@@ -107,53 +157,73 @@ async def detect_communities(db: AsyncSession, owner_id: str, entities: list = N
                         f"{src.name}({src.entity_type}) -{r.relation_type}-> {tgt.name}({tgt.entity_type})"
                     )
 
-        # 收集社群内实体的内容片段
+        # 收集社群内实体的内容片段（增强：更多片段、更长内容）
         community_snippets = []
-        top_member_ids = [m.id for m in top_members[:5]]
+        top_member_ids = [m.id for m in top_members[:8]]
         if top_member_ids:
             snippet_result = await db.execute(
                 select(ContentEntityLink.context_snippet, ContentEntityLink.entity_id)
                 .where(ContentEntityLink.entity_id.in_(top_member_ids))
                 .order_by(ContentEntityLink.id.desc())
-                .limit(10)
+                .limit(20)
             )
             for row in snippet_result.all():
                 if row.context_snippet:
-                    community_snippets.append(row.context_snippet[:100])
+                    community_snippets.append(row.context_snippet[:300])
 
         # 统计实体类型分布
         type_counts = defaultdict(int)
         for m in members:
             type_counts[m.entity_type] += 1
 
+        # 收集 item 实体名称列表（项目名、话题名本身携带业务语义）
+        item_names = [m.name for m in members if m.entity_type == "item"][:10]
+
         result.append({
             "community_id": idx,
             "member_count": len(member_ids),
             "top_entities": top_names,
             "label": label,
-            "domain_label": "",
+            "domain_label": _infer_domain_from_types(dict(type_counts), idx, top_names),
             "member_ids": list(member_ids),
             "_top_members_detail": [
                 {"name": m.name, "type": m.entity_type} for m in top_members
             ],
             "_relations_summary": community_relations[:15],
-            "_content_snippets": community_snippets[:6],
+            "_content_snippets": community_snippets[:10],
+            "_item_names": item_names,
             "_type_distribution": dict(type_counts),
         })
 
     await db.commit()
 
-    # LLM 业务域命名
-    result = await _label_domains_via_llm(result)
+    # LLM 业务域命名（传入用户 profile 提供业务背景）
+    result = await _label_domains_via_llm(result, profile=profile)
+
+    # 去重：如果多个社群被命名为相同的域名，追加区分标识
+    result = _deduplicate_domain_labels(result)
+
+    # 将 domain_label 写入每个实体的 properties JSONB，供 graph_rag 使用
+    for c in result:
+        if c.get("member_ids") and c.get("domain_label"):
+            from sqlalchemy import type_coerce
+            patch_dict = {"domain_label": c["domain_label"]}
+            await db.execute(
+                update(KGEntity)
+                .where(KGEntity.id.in_(c["member_ids"]))
+                .values(
+                    properties=KGEntity.properties.concat(type_coerce(patch_dict, PG_JSONB))
+                )
+            )
+    await db.commit()
+    logger.info("domain_label 已写入 %d 个社群的实体 properties", len(result))
+
     return result
 
 
-async def _label_domains_via_llm(communities: list[dict]) -> list[dict]:
-    """用 LLM 为每个社群分配业务域名称。"""
+async def _label_domains_via_llm(communities: list[dict], profile=None) -> list[dict]:
+    """用 LLM 为每个社群分配业务域名称，根据 profile.domain_mode 动态调整策略。"""
     if not settings.agent_llm_api_key or not communities:
-        # 降级：使用实体类型推断
-        for c in communities:
-            c["domain_label"] = c["label"]
         return communities
 
     client = create_openai_client(
@@ -162,54 +232,97 @@ async def _label_domains_via_llm(communities: list[dict]) -> list[dict]:
         timeout=120.0,
     )
 
-    # 只对成员数 >= 3 的社群调用 LLM 命名
-    big_communities = [c for c in communities if c["member_count"] >= 3]
-    if not big_communities:
-        for c in communities:
-            c["domain_label"] = c["label"]
-        return communities
-
+    # 构建 payload（增强：加入 item_names 和更多 snippets）
     payload = []
-    for c in big_communities:
+    for c in communities:
         payload.append({
             "community_id": c["community_id"],
             "member_count": c["member_count"],
             "type_distribution": c.get("_type_distribution", {}),
             "members": c.get("_top_members_detail", []),
-            "key_relations": c.get("_relations_summary", [])[:8],
-            "content_snippets": c.get("_content_snippets", [])[:4],
+            "item_names": c.get("_item_names", []),
+            "key_relations": c.get("_relations_summary", [])[:10],
+            "content_snippets": c.get("_content_snippets", [])[:8],
         })
 
+    # 读取用户分类偏好
+    domain_mode = getattr(profile, "domain_mode", "function") if profile else "function"
+    custom_domains = getattr(profile, "custom_domains", []) if profile else []
+
+    # 根据 domain_mode 构建分类指令
+    if domain_mode == "custom" and custom_domains:
+        mode_instruction = (
+            f"用户已定义了以下业务域：{', '.join(custom_domains)}\n"
+            "请将每个群组归入最匹配的用户自定义域。如果都不匹配，可以新建一个简短的域名。"
+        )
+    elif domain_mode == "project":
+        mode_instruction = (
+            "请根据群组涉及的主要项目或事项来命名业务域。\n"
+            "域名应该是项目名或事项主题，如「流光项目」「数据看板」「季度审计」等。\n"
+            "优先参考群组中 item_names 字段的名称。"
+        )
+    elif domain_mode == "collaboration":
+        mode_instruction = (
+            "请根据群组的协作团队或协作关系来命名业务域。\n"
+            "域名应体现协作对象，如「投资部协作」「技术团队」「外部合作」等。"
+        )
+    elif domain_mode == "content_type":
+        mode_instruction = (
+            "请根据内容的类型和场景来命名业务域。\n"
+            "域名应体现信息场景，如「会议决策」「文档沉淀」「日常沟通」「审批流程」等。"
+        )
+    else:  # function（默认）
+        mode_instruction = (
+            "请根据群组涉及的工作职能来命名业务域。\n"
+            "域名应是具体的职能领域，如「数据治理」「投资分析」「AI工具开发」「财务管理」「日常沟通」等。\n"
+            "严禁在域名中使用任何人名！不要出现「XX团队」「XX组」这种以人名命名的格式。\n"
+            "即使群组以人物实体为主，也必须根据 content_snippets、key_relations、item_names 中反映的工作内容来判断具体职能。"
+        )
+
+    # 自定义域名作为参考提示（非custom模式下）
+    if custom_domains and domain_mode != "custom":
+        mode_instruction += f"\n用户希望重点关注这些领域：{', '.join(custom_domains)}，请优先使用这些名称。"
+
+    # 构建用户背景
+    profile_context = ""
+    if profile:
+        parts = []
+        if getattr(profile, "user_name", None):
+            parts.append(f"姓名：{profile.user_name}")
+        if getattr(profile, "user_role", None):
+            parts.append(f"职位：{profile.user_role}")
+        if getattr(profile, "user_department", None):
+            parts.append(f"部门：{profile.user_department}")
+        if getattr(profile, "user_description", None):
+            parts.append(f"工作职责：{profile.user_description}")
+        if parts:
+            profile_context = "\n## 用户背景\n" + "\n".join("- " + p for p in parts)
+
     prompt = f"""你是企业数据分析专家。以下是从企业知识图谱中用社群检测算法分出的实体群组。
-请根据群组内的实体关系和内容片段，判断每个群组对应的企业职能业务域。
+请为每个群组分配一个业务域名称。
+{profile_context}
 
-## 业务域必须是企业职能领域，例如：
-财务管理、投资并购、风险合规、市场营销、产品研发、技术架构、人力资源、客户管理、项目管理、战略规划、运营管理、法务合规、供应链、数据分析、行政后勤
+## 分类策略
+{mode_instruction}
 
-## 判断依据优先级：
-1. 关系中的动作语义（works_on/discusses 的对象是什么业务）
-2. 内容片段中的业务关键词（融资、审批、开发、招聘等）
-3. 涉及的组织和项目名称所暗示的职能领域
-4. 实体类型分布（多 organization = 可能是商务/合作）
+## 要求
+- 域名长度 2-6 个中文字，简洁有辨识度
+- 每个群组必须有**不同的**域名称，严禁重复
+- 严禁在域名中包含任何人名（如群组成员的姓名），域名必须体现职能/业务/领域
+- 如果群组确实跨多个职能且无法归类，用「综合事务」
 
-## 要求：
-- 名称必须是 2-4 个中文字的职能领域名称
-- 绝对不要用人名、项目名、公司名拼凑
-- 不同群组尽量分配不同的业务域，避免重复
-- 如果群组确实跨多个职能且无法归类，用"综合事务"
-
-群组数据：
+## 群组数据
 {json.dumps(payload, ensure_ascii=False, indent=2)}
 
 严格按JSON格式输出，不要输出其他内容：
-[{{"community_id": 0, "domain_label": "业务域名称"}}]"""
+[{{"community_id": 0, "domain_label": "域名称"}}]"""
 
     try:
         response = await client.chat.completions.create(
             model=settings.agent_llm_model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.2,
-            max_tokens=500,
+            max_tokens=800,
         )
         content = response.choices[0].message.content.strip()
         if "```" in content:
@@ -218,13 +331,41 @@ async def _label_domains_via_llm(communities: list[dict]) -> list[dict]:
                 content = content[4:]
             content = content.strip()
         labels = json.loads(content)
+        logger.info("LLM 业务域命名返回: %s", json.dumps(labels, ensure_ascii=False))
         label_map = {item["community_id"]: item["domain_label"] for item in labels}
+
+        # project/custom 模式下放宽验证（允许包含项目名）
+        relaxed = domain_mode in ("project", "custom")
         for c in communities:
-            c["domain_label"] = label_map.get(c["community_id"], c["label"])
+            llm_label = label_map.get(c["community_id"])
+            top_ents = [] if relaxed else c.get("top_entities", [])
+            if llm_label and _validate_domain_label(llm_label, top_ents):
+                c["domain_label"] = llm_label
+                logger.info("社群 %d 采用 LLM 命名: %s", c["community_id"], llm_label)
+            else:
+                logger.warning(
+                    "社群 %d LLM 命名被拒或缺失 (llm=%s), 保留回退: %s",
+                    c["community_id"], llm_label, c["domain_label"],
+                )
     except Exception as e:
-        logger.error(f"LLM 业务域命名失败: {e}")
-        for c in communities:
-            c["domain_label"] = c["label"]
+        logger.error("LLM 业务域命名失败: %s", e, exc_info=True)
+
+    return communities
+
+
+def _deduplicate_domain_labels(communities: list[dict]) -> list[dict]:
+    """去重业务域名称：如果多个社群同名，用核心实体名区分。"""
+    # 统计每个 domain_label 出现的次数
+    label_counts: dict[str, list[int]] = defaultdict(list)
+    for i, c in enumerate(communities):
+        label_counts[c.get("domain_label", "")].append(i)
+
+    for label, indices in label_counts.items():
+        if len(indices) <= 1:
+            continue
+        # 有重复，用序号区分（不使用人名）
+        for rank, idx in enumerate(indices, 1):
+            communities[idx]["domain_label"] = f"{label}{rank}"
 
     return communities
 
@@ -294,7 +435,7 @@ async def compute_importance_scores(db: AsyncSession, owner_id: str, entities: l
 def compute_metrics(G: nx.Graph, entities: list) -> dict:
     """计算图谱核心指标。"""
     if len(G.nodes) < 2:
-        return {"top_connectors": [], "top_bridges": [], "hot_projects": [], "isolated": []}
+        return {"top_connectors": [], "top_bridges": [], "hot_items": [], "isolated": []}
 
     degree = nx.degree_centrality(G)
     betweenness = nx.betweenness_centrality(G, weight="weight")
@@ -313,14 +454,14 @@ def compute_metrics(G: nx.Graph, entities: list) -> dict:
         for nid, score in top_bridges if nid in entity_map
     ]
 
-    hot_projects = []
+    hot_items = []
     for nid in G.nodes:
         e = entity_map.get(nid)
-        if e and e.entity_type == "project":
+        if e and e.entity_type == "item":
             total_weight = sum(d.get("weight", 1) for _, _, d in G.edges(nid, data=True))
-            hot_projects.append({"id": nid, "name": e.name, "weight_sum": total_weight})
-    hot_projects.sort(key=lambda x: x["weight_sum"], reverse=True)
-    hot_projects = hot_projects[:10]
+            hot_items.append({"id": nid, "name": e.name, "weight_sum": total_weight})
+    hot_items.sort(key=lambda x: x["weight_sum"], reverse=True)
+    hot_items = hot_items[:10]
 
     isolated = [
         {"id": nid, "name": entity_map[nid].name, "type": entity_map[nid].entity_type}
@@ -330,7 +471,7 @@ def compute_metrics(G: nx.Graph, entities: list) -> dict:
     return {
         "top_connectors": top_connectors,
         "top_bridges": top_bridges,
-        "hot_projects": hot_projects,
+        "hot_items": hot_items,
         "isolated": isolated,
     }
 
@@ -432,12 +573,14 @@ async def extract_business_risks(
             max_tokens=3000,
         )
         content = response.choices[0].message.content.strip()
+        logger.info("LLM 风险原始返回 (%d chars): %s", len(content), content[:200])
         if "```" in content:
             content = content.split("```")[1]
             if content.startswith("json"):
                 content = content[4:]
             content = content.strip()
         risks = json.loads(content)
+        logger.info("LLM 风险解析成功: %d 条", len(risks))
 
         # 标准化输出格式，硬限制最多 8 条
         formatted = []
@@ -453,8 +596,11 @@ async def extract_business_risks(
                 "suggested_action": r.get("suggested_action", ""),
             })
         return formatted
+    except json.JSONDecodeError as e:
+        logger.error("LLM 风险 JSON 解析失败: %s, 原始内容: %s", e, content[:500])
+        return _detect_structural_risks(G, entities)
     except Exception as e:
-        logger.error(f"LLM 业务风险提取失败: {e}")
+        logger.error("LLM 业务风险提取失败: %s: %s", type(e).__name__, e, exc_info=True)
         return _detect_structural_risks(G, entities)
 
 
@@ -463,29 +609,68 @@ def _detect_structural_risks(G: nx.Graph, entities: list) -> list[dict]:
     entity_map = {e.id: e for e in entities}
     risks = []
 
-    # 单点依赖：person 连接 >= 3 个 project 且权重高
+    # 模式1：资源过载 — person 连接 >= 3 个 item 且权重高
     for nid in G.nodes:
         e = entity_map.get(nid)
         if not e or e.entity_type != "person":
             continue
-        connected_projects = []
+        connected_items = []
         for neighbor in G.neighbors(nid):
             ne = entity_map.get(neighbor)
-            if ne and ne.entity_type == "project":
+            if ne and ne.entity_type == "item":
                 w = G[nid][neighbor].get("weight", 1)
                 if w >= 2:
-                    connected_projects.append(ne)
-        if len(connected_projects) >= 3:
-            proj_names = ", ".join(p.name for p in connected_projects[:5])
+                    connected_items.append(ne)
+        if len(connected_items) >= 3:
+            item_names = ", ".join(p.name for p in connected_items[:5])
             risks.append({
                 "title": f"资源过载风险：{e.name}",
-                "description": f"{e.name} 同时深度参与 {len(connected_projects)} 个项目（{proj_names}），存在过载风险。",
+                "description": f"{e.name} 同时深度参与 {len(connected_items)} 个事项（{item_names}），存在过载风险。",
                 "type": "risk",
                 "severity": "high",
-                "related_entity_ids": [nid] + [p.id for p in connected_projects],
+                "related_entity_ids": [nid] + [p.id for p in connected_items],
                 "category": "resource",
-                "evidence": f"图谱显示 {e.name} 与 {len(connected_projects)} 个项目有高权重关联",
+                "evidence": f"图谱显示 {e.name} 与 {len(connected_items)} 个事项有高权重关联",
                 "suggested_action": "建议评估该人员工作负荷，考虑任务分流或增加项目支援",
+            })
+
+    # 模式2：单点依赖 — item 只关联 1 个 person 且被频繁提及
+    for nid in G.nodes:
+        e = entity_map.get(nid)
+        if not e or e.entity_type != "item":
+            continue
+        connected_people = [
+            entity_map[nb] for nb in G.neighbors(nid)
+            if nb in entity_map and entity_map[nb].entity_type == "person"
+        ]
+        if len(connected_people) == 1 and e.mention_count >= 3:
+            person = connected_people[0]
+            risks.append({
+                "title": f"单点依赖：{e.name}",
+                "description": f"事项「{e.name}」仅与 {person.name} 一人关联，若该人员不可用，该事项可能受阻。",
+                "type": "risk",
+                "severity": "medium",
+                "related_entity_ids": [nid, person.id],
+                "category": "collaboration",
+                "evidence": f"{e.name}（提及{e.mention_count}次）仅有 {person.name} 一个关联人员",
+                "suggested_action": "建议指定备份负责人或增加跨团队协作",
+            })
+
+    # 模式3：信息孤岛 — item 被频繁提及但关联极少
+    for nid in G.nodes:
+        e = entity_map.get(nid)
+        if not e or e.entity_type != "item":
+            continue
+        if e.mention_count >= 5 and G.degree(nid) <= 1:
+            risks.append({
+                "title": f"信息孤岛：{e.name}",
+                "description": f"事项「{e.name}」被提及 {e.mention_count} 次但关联极少，可能存在信息断层。",
+                "type": "risk",
+                "severity": "low",
+                "related_entity_ids": [nid],
+                "category": "collaboration",
+                "evidence": f"提及{e.mention_count}次但图谱度数仅{G.degree(nid)}",
+                "suggested_action": "建议核实该事项的负责人和相关团队，补充关联信息",
             })
 
     return risks[:8]
@@ -516,7 +701,7 @@ async def generate_llm_insights(metrics: dict, communities: list[dict]) -> list[
         "business_domains": domain_summary,
         "top_connectors": metrics["top_connectors"][:5],
         "top_bridges": metrics["top_bridges"][:5],
-        "hot_projects": metrics["hot_projects"][:5],
+        "hot_items": metrics["hot_items"][:5],
     }
 
     prompt = f"""你是一个企业知识图谱分析专家。根据以下图谱分析数据，生成 3-5 条关键业务洞察。
@@ -548,14 +733,20 @@ async def generate_llm_insights(metrics: dict, communities: list[dict]) -> list[
             max_tokens=2000,
         )
         content = response.choices[0].message.content.strip()
+        logger.info("LLM 洞察原始返回 (%d chars): %s", len(content), content[:200])
         if "```" in content:
             content = content.split("```")[1]
             if content.startswith("json"):
                 content = content[4:]
             content = content.strip()
-        return json.loads(content)
+        parsed = json.loads(content)
+        logger.info("LLM 洞察解析成功: %d 条", len(parsed))
+        return parsed
+    except json.JSONDecodeError as e:
+        logger.error("LLM 洞察 JSON 解析失败: %s, 原始内容: %s", e, content[:500])
+        return _fallback_insights(metrics)
     except Exception as e:
-        logger.error(f"LLM 洞察生成失败: {e}")
+        logger.error("LLM 洞察生成失败: %s: %s", type(e).__name__, e, exc_info=True)
         return _fallback_insights(metrics)
 
 
@@ -573,32 +764,156 @@ def _fallback_insights(metrics: dict) -> list[dict]:
             "related_entity_ids": [top["id"]],
         })
 
-    if metrics["hot_projects"]:
-        top = metrics["hot_projects"][0]
+    if metrics["hot_items"]:
+        top = metrics["hot_items"][0]
         insights.append({
-            "title": f"最活跃项目：{top['name']}",
-            "description": f"{top['name']} 的关联权重总和为 {top['weight_sum']}，是当前最活跃的项目。",
+            "title": f"最活跃事项：{top['name']}",
+            "description": f"{top['name']} 的关联权重总和为 {top['weight_sum']}，是当前最受关注的事项。",
             "type": "insight",
             "severity": "low",
             "related_entity_ids": [top["id"]],
+        })
+
+    if metrics["top_bridges"]:
+        top = metrics["top_bridges"][0]
+        insights.append({
+            "title": f"跨域桥梁：{top['name']}",
+            "description": f"{top['name']} 的中介中心性最高（{top['score']:.2%}），在不同团队/项目之间起到关键桥梁作用。",
+            "type": "insight",
+            "severity": "medium",
+            "related_entity_ids": [top["id"]],
+        })
+
+    if metrics.get("isolated") and len(metrics["isolated"]) >= 3:
+        count = len(metrics["isolated"])
+        insights.append({
+            "title": f"发现 {count} 个孤立实体",
+            "description": f"图谱中有 {count} 个实体仅有 0-1 个关联，可能存在信息孤岛。考虑补充相关数据或建立关联。",
+            "type": "insight",
+            "severity": "low",
+            "related_entity_ids": [e["id"] for e in metrics["isolated"][:5]],
+        })
+
+    if not insights:
+        insights.append({
+            "title": "图谱概览",
+            "description": "知识图谱已构建完成。随着更多数据导入，将自动发现更多有价值的业务洞察。",
+            "type": "insight",
+            "severity": "low",
+            "related_entity_ids": [],
         })
 
     return insights
 
 
 # ═══════════════════════════════════════════════════════════════════
-# 6. 完整分析流程
+# 6. 低质量实体修剪（聚焦高频人物 + 相关事件）
 # ═══════════════════════════════════════════════════════════════════
 
-async def run_full_analysis(db: AsyncSession, owner_id: str) -> dict:
-    """运行完整分析：社群检测+域标签 → 重要性评分 → 业务风险 → LLM洞察。"""
+async def _prune_low_quality_entities(db: AsyncSession, owner_id: str) -> int:
+    """修剪低质量实体：保留高频人物和与其关联的事项，删除碎片信息。
+
+    策略：
+    1. 核心人物 = mention_count >= 2 的 person
+    2. item 必须与至少一个核心人物有关系，否则删除
+    3. 删除 mention_count == 1 且无任何关系的孤立实体
+    """
+    # 加载所有实体
+    all_entities_result = await db.execute(
+        select(KGEntity).where(KGEntity.owner_id == owner_id)
+    )
+    all_entities = all_entities_result.scalars().all()
+    if not all_entities:
+        return 0
+
+    entity_map = {e.id: e for e in all_entities}
+
+    # 核心人物：mention_count >= 2 的 person
+    core_person_ids = {
+        e.id for e in all_entities
+        if e.entity_type == "person" and e.mention_count >= 2
+    }
+
+    # 加载所有关系
+    all_relations_result = await db.execute(
+        select(KGRelation).where(KGRelation.owner_id == owner_id)
+    )
+    all_relations = all_relations_result.scalars().all()
+
+    # 构建邻接表
+    neighbors: dict[int, set[int]] = defaultdict(set)
+    for r in all_relations:
+        neighbors[r.source_entity_id].add(r.target_entity_id)
+        neighbors[r.target_entity_id].add(r.source_entity_id)
+
+    # 决定要删除的实体
+    to_delete: set[int] = set()
+    for e in all_entities:
+        if e.id in core_person_ids:
+            continue  # 核心人物保留
+
+        if e.entity_type == "person" and e.mention_count >= 2:
+            continue  # 高频人物保留
+
+        if e.entity_type == "item":
+            # item 必须与至少一个核心人物有关系
+            connected_to_core = bool(neighbors.get(e.id, set()) & core_person_ids)
+            if not connected_to_core:
+                to_delete.add(e.id)
+                continue
+
+        # 孤立且低频实体删除
+        if e.mention_count <= 1 and len(neighbors.get(e.id, set())) == 0:
+            to_delete.add(e.id)
+
+    if not to_delete:
+        return 0
+
+    # 先删关系再删实体
+    from app.models.content_entity_link import ContentEntityLink
+    await db.execute(
+        delete(KGRelation).where(
+            and_(
+                KGRelation.owner_id == owner_id,
+                or_(
+                    KGRelation.source_entity_id.in_(to_delete),
+                    KGRelation.target_entity_id.in_(to_delete),
+                ),
+            )
+        )
+    )
+    await db.execute(
+        delete(ContentEntityLink).where(ContentEntityLink.entity_id.in_(to_delete))
+    )
+    await db.execute(
+        delete(KGEntity).where(
+            and_(KGEntity.owner_id == owner_id, KGEntity.id.in_(to_delete))
+        )
+    )
+    await db.commit()
+
+    logger.info("修剪低质量实体: 删除 %d / %d 个实体 (owner=%s)", len(to_delete), len(all_entities), owner_id)
+    return len(to_delete)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 7. 完整分析流程
+# ═══════════════════════════════════════════════════════════════════
+
+async def run_full_analysis(db: AsyncSession, owner_id: str, profile=None) -> dict:
+    """运行完整分析：修剪 → 社群检测+域标签 → 重要性评分 → 业务风险 → LLM洞察。"""
+    # 0. 修剪低质量实体（聚焦高频人物和相关事件）
+    pruned = await _prune_low_quality_entities(db, owner_id)
+    if pruned:
+        logger.info("已修剪 %d 个低质量实体，重新加载图谱", pruned)
+
     entities, relations, G = await _load_graph(db, owner_id)
 
     if len(entities) == 0:
         return {"communities": [], "insights": [], "risks": []}
 
     # 1. 社群检测 + 业务域标签
-    communities = await detect_communities(db, owner_id, entities, relations, G)
+    communities = await detect_communities(db, owner_id, entities, relations, G, profile=profile)
 
     # 2. 指标计算
     metrics = compute_metrics(G, entities)
@@ -611,7 +926,7 @@ async def run_full_analysis(db: AsyncSession, owner_id: str) -> dict:
 
     # 5. LLM 洞察
     insights = await generate_llm_insights(metrics, communities)
-    insights = [i for i in insights if i.get("type") == "insight"]
+    insights = [i for i in insights if i.get("type", "insight") != "risk"]
 
     # 格式化社群信息
     communities_out = [

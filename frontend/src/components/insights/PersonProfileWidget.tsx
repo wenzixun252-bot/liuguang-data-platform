@@ -11,10 +11,7 @@ interface ProfileData {
   name: string
   mention_count: number
   collaborators: RelItem[]
-  projects: RelItem[]
-  topics: RelItem[]
-  organizations: RelItem[]
-  communities: RelItem[]
+  items: RelItem[]
   leadership_insight: {
     id: number
     report_markdown: string | null
@@ -49,18 +46,12 @@ const DIMENSION_LABELS: Record<string, string> = {
 
 const TAG_COLORS: Record<string, string> = {
   collaborators: 'bg-indigo-50 text-indigo-700',
-  projects: 'bg-amber-50 text-amber-700',
-  topics: 'bg-green-50 text-green-700',
-  organizations: 'bg-purple-50 text-purple-700',
-  communities: 'bg-pink-50 text-pink-700',
+  items: 'bg-amber-50 text-amber-700',
 }
 
 const TAG_LABELS: Record<string, string> = {
   collaborators: '合作者',
-  projects: '项目',
-  topics: '话题',
-  organizations: '组织',
-  communities: '社群',
+  items: '关联事项',
 }
 
 export default function PersonProfileWidget({
@@ -117,7 +108,7 @@ export default function PersonProfileWidget({
           entity_type: 'person',
           limit: 5,
         })
-        setSuggestions(res.data)
+        setSuggestions(Array.isArray(res.data) ? res.data : [])
         setShowSuggestions(true)
       } catch {
         setSuggestions([])
@@ -211,7 +202,7 @@ export default function PersonProfileWidget({
           )}
 
           {/* Tags */}
-          {(['collaborators', 'projects', 'topics', 'organizations', 'communities'] as const).map((key) => {
+          {(['collaborators', 'items'] as const).map((key) => {
             const items = profile[key]
             if (!items || items.length === 0) return null
             return (
@@ -236,7 +227,7 @@ export default function PersonProfileWidget({
           {/* Leadership report preview */}
           {profile.leadership_insight?.report_markdown && (
             <div>
-              <p className="text-xs text-gray-500 mb-1">领导力报告</p>
+              <p className="text-xs text-gray-500 mb-1">人物画像分析</p>
               <div className="bg-gray-50 rounded-lg p-3 text-xs text-gray-700 max-h-24 overflow-hidden relative">
                 {profile.leadership_insight.report_markdown.slice(0, 200)}...
                 <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-gray-50 to-transparent" />
@@ -245,7 +236,7 @@ export default function PersonProfileWidget({
           )}
 
           {!profile.leadership_insight && (
-            <p className="text-xs text-gray-400 text-center py-2">暂无领导力洞察数据，请先在员工画像页面生成</p>
+            <p className="text-xs text-gray-400 text-center py-2">暂无画像分析数据，请先在人物画像页面生成</p>
           )}
         </div>
       )}

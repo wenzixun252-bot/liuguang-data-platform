@@ -1,5 +1,6 @@
 """飞书 OAuth 登录接口。"""
 
+import asyncio
 import logging
 from typing import Annotated
 
@@ -12,6 +13,7 @@ from app.models.user import User
 from app.schemas.user import FeishuCallbackRequest, TokenResponse, UserOut
 from app.services.feishu import FeishuAPIError, feishu_client
 from app.utils.security import create_access_token
+from app.worker.scheduler import trigger_login_sync
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +72,9 @@ async def feishu_callback(
 
     # 3. 签发 JWT
     token = create_access_token({"sub": user.feishu_open_id, "role": user.role})
+
+    # 4. 登录成功后，后台触发一次全量同步（不阻塞登录响应）
+    asyncio.create_task(trigger_login_sync(user.feishu_open_id))
 
     return TokenResponse(
         access_token=token,

@@ -1,6 +1,6 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Sparkles, FileText, MessageSquare } from 'lucide-react'
+import { Sparkles, FileText, MessageSquare, ChevronDown, ChevronRight, Brain } from 'lucide-react'
 import { motion } from 'framer-motion'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -14,6 +14,7 @@ export interface SourceRef {
 export interface Message {
   role: 'user' | 'assistant'
   content: string
+  reasoning?: string
   sources?: (SourceRef | string)[]
 }
 
@@ -37,6 +38,39 @@ interface Props {
   messages: Message[]
   promptTemplates?: { label: string; question: string }[]
   onTemplateClick?: (question: string) => void
+}
+
+function ReasoningBlock({ reasoning, isStreaming }: { reasoning: string; isStreaming: boolean }) {
+  const [expanded, setExpanded] = useState(isStreaming)
+
+  useEffect(() => {
+    if (isStreaming) setExpanded(true)
+  }, [isStreaming])
+
+  return (
+    <div className="mb-3 rounded-lg overflow-hidden" style={{ background: 'var(--color-bg-tertiary)' }}>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-1.5 w-full px-3 py-2 text-xs font-medium transition-colors hover:opacity-80"
+        style={{ color: 'var(--color-text-tertiary)' }}
+      >
+        <Brain size={13} className="text-purple-500" />
+        <span>思考过程</span>
+        {isStreaming && (
+          <span className="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse" />
+        )}
+        {expanded ? <ChevronDown size={13} className="ml-auto" /> : <ChevronRight size={13} className="ml-auto" />}
+      </button>
+      {expanded && (
+        <div
+          className="px-3 pb-2 text-xs leading-relaxed max-h-48 overflow-y-auto whitespace-pre-wrap"
+          style={{ color: 'var(--color-text-quaternary)' }}
+        >
+          {reasoning}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function ChatMessages({ messages, promptTemplates, onTemplateClick }: Props) {
@@ -105,8 +139,11 @@ export default function ChatMessages({ messages, promptTemplates, onTemplateClic
           >
             {msg.role === 'assistant' ? (
               <div className="prose prose-sm max-w-none prose-pre:bg-gray-900 prose-pre:text-gray-100">
+                {msg.reasoning && (
+                  <ReasoningBlock reasoning={msg.reasoning} isStreaming={!msg.content && i === messages.length - 1} />
+                )}
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {msg.content || '...'}
+                  {msg.content || (msg.reasoning ? '思考中...' : '...')}
                 </ReactMarkdown>
                 {msg.sources && msg.sources.length > 0 && (
                   <div className="mt-3 pt-3 border-t border-black/[0.06]">

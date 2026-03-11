@@ -1,11 +1,12 @@
 """"流光"智能问答接口 — 流式 SSE + 非流式 JSON + 附件解析。"""
 
+import asyncio
 import io
 import json
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,7 +18,7 @@ from app.models.conversation import Conversation, ConversationMessage
 from app.models.user import User
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.graph_rag import graph_rag_enhancer
-from app.services.rag import SearchResult, hybrid_searcher
+from app.services.rag import MatchedTag, SearchResult, format_key_info, hybrid_searcher, match_tags_from_query
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,9 @@ router = APIRouter(prefix="/api/chat", tags=["流光助手"])
 # ── System Prompt 模板 ───────────────────────────────────
 
 SYSTEM_PROMPT = """你是"流光"个人数据助手，帮助用户从自己的数据资产（文档、会议纪要、聊天记录等）中获取精准答案。
+
+## 当前时间
+今天是 {today}（{weekday}）。请根据此日期理解用户提到的"最近"、"本周"、"上周"、"这个月"等时间表达。
 
 ## 回答规则
 1. **必须基于检索上下文回答**，严禁编造信息
@@ -49,11 +53,13 @@ SOURCE_TABLE_LABELS = {
 
 
 QUERY_REWRITE_PROMPT = """请将用户的口语化问题改写为更适合搜索的关键词查询。
+今天是 {today}（{weekday}）。
 要求：
 1. 提取核心意图和关键词
 2. 去掉口语化表达（如"那个"、"来着"、"啥"）
 3. 补充可能的同义词
-4. 只输出改写后的查询文本，不要解释
+4. 如果用户提到时间相关词（如"最近"、"本周"、"上周"），请换算成具体日期范围
+5. 只输出改写后的查询文本，不要解释
 
 用户问题：{question}
 改写查询："""
@@ -61,16 +67,23 @@ QUERY_REWRITE_PROMPT = """请将用户的口语化问题改写为更适合搜索
 
 async def _rewrite_query(question: str) -> str:
     """用 LLM 将口语化问题改写为精准搜索查询。"""
-    # 如果问题已经很简短明确（少于 10 个字且无口语词），直接返回
+    # 如果问题已经很简短明确（少于 10 个字且无口语词和时间词），直接返回
     casual_markers = ["吗", "呢", "啥", "来着", "那个", "怎么", "什么时候", "有没有"]
-    if len(question) < 10 and not any(m in question for m in casual_markers):
+    time_markers = ["最近", "本周", "上周", "这周", "这个月", "上个月", "今天", "昨天", "前天"]
+    if len(question) < 10 and not any(m in question for m in casual_markers) and not any(m in question for m in time_markers):
         return question
 
     try:
-        client = _get_agent_client()
-        response = await client.chat.completions.create(
-            model=settings.agent_llm_model,
-            messages=[{"role": "user", "content": QUERY_REWRITE_PROMPT.format(question=question)}],
+        from datetime import date
+        today = date.today()
+        weekday = _WEEKDAY_CN[today.weekday()]
+        # 查询改写用快模型，不需要强模型
+        from app.services.llm import llm_client
+        response = await llm_client.chat_client.chat.completions.create(
+            model=settings.llm_model,
+            messages=[{"role": "user", "content": QUERY_REWRITE_PROMPT.format(
+                question=question, today=today.isoformat(), weekday=weekday,
+            )}],
             temperature=0.0,
             max_tokens=100,
         )
@@ -84,18 +97,48 @@ async def _rewrite_query(question: str) -> str:
     return question
 
 
-def _build_context(results: list[SearchResult], attachment_context: str | None = None) -> str:
+def _build_context(
+    results: list[SearchResult],
+    attachment_context: str | None = None,
+    matched_tags: list[MatchedTag] | None = None,
+    domain_labels: list[str] | None = None,
+) -> str:
     """构建检索上下文文本。"""
     if not results and not attachment_context:
         return "（未检索到相关数据）"
     parts = []
+
+    # 域背景提示：告知 LLM 本次检索涉及的业务领域
+    if domain_labels:
+        parts.append(
+            f"## 涉及业务领域\n"
+            f"本次检索涉及以下工作领域：{'、'.join(domain_labels)}。"
+            f"请结合业务领域背景理解数据。"
+        )
+
+    # 如果有命中标签，在上下文顶部说明
+    if matched_tags:
+        tag_names = "、".join(f"「{t.name}」" for t in matched_tags)
+        parts.append(
+            f"## 用户关注标签\n"
+            f"用户的提问命中了以下自定义标签: {tag_names}\n"
+            f"标有 ★ 的来源与这些标签直接关联，请优先基于这些来源进行回答。"
+        )
+
     for i, r in enumerate(results, 1):
         title = r.title or "无标题"
         label = SOURCE_TABLE_LABELS.get(r.source_table, r.source_table)
-        parts.append(f"[{i}] 类型: {label}\n标题: {title}\nID: {r.source_table}:{r.id}\n内容: {r.content_text[:1500]}")
+        tag_marker = ""
+        if r.matched_tags:
+            tag_marker = f" ★ 关联标签: {', '.join(r.matched_tags)}"
+        key_info_text = format_key_info(r.key_info)
+        parts.append(f"[{i}] 类型: {label}{tag_marker}\n标题: {title}\nID: {r.source_table}:{r.id}\n内容: {r.content_text[:1500]}{key_info_text}")
     if attachment_context:
         parts.append(f"\n## 用户上传附件内容\n{attachment_context[:2000]}")
     return "\n\n".join(parts) if parts else "（未检索到相关数据）"
+
+
+_WEEKDAY_CN = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
 
 
 def _build_messages(
@@ -103,7 +146,12 @@ def _build_messages(
     history: list[dict],
     context: str,
 ) -> list[dict]:
-    messages = [{"role": "system", "content": SYSTEM_PROMPT.format(context=context)}]
+    from datetime import date
+    today = date.today()
+    weekday = _WEEKDAY_CN[today.weekday()]
+    messages = [{"role": "system", "content": SYSTEM_PROMPT.format(
+        context=context, today=today.isoformat(), weekday=weekday,
+    )}]
     truncated = history[-(MAX_HISTORY_TURNS * 2):]
     messages.extend(truncated)
     messages.append({"role": "user", "content": question})
@@ -159,36 +207,62 @@ async def _save_messages(
 
 @router.post("/stream", summary="流式问答 (SSE)")
 async def chat_stream(
+    request: Request,
     body: ChatRequest,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """SSE 流式问答接口。"""
-    visible_ids = await get_visible_owner_ids(current_user, db)
+    import time as _time
+    _t0 = _time.time()
+    _timing_lines = []
 
-    # 查询改写：将口语化问题转为精准搜索查询
-    search_query = await _rewrite_query(body.question)
+    visible_ids = await get_visible_owner_ids(current_user, db, request)
+    _timing_lines.append(f"[TIMING] get_visible_ids: {_time.time() - _t0:.1f}s")
 
-    # Graph-RAG 增强：从问题提取实体，找到关联内容
-    graph_source_ids = await graph_rag_enhancer.enhance_search(
-        body.question, current_user.feishu_open_id, db,
+    # 查询改写 + Graph-RAG 实体提取 + 标签匹配 并行执行，节省等待时间
+    _t1 = _time.time()
+    search_query_task = asyncio.create_task(_rewrite_query(body.question))
+    graph_task = asyncio.create_task(
+        graph_rag_enhancer.enhance_search(body.question, current_user.feishu_open_id, db)
     )
+    tag_task = asyncio.create_task(
+        match_tags_from_query(body.question, current_user.feishu_open_id, db)
+    )
+    search_query, graph_result, matched_tags = await asyncio.gather(
+        search_query_task, graph_task, tag_task,
+    )
+    graph_source_ids, domain_labels = graph_result
+    _timing_lines.append(
+        f"[TIMING] rewrite+graph_rag+tag_match: {_time.time() - _t1:.1f}s "
+        f"(query='{search_query[:50]}', tags={[t.name for t in matched_tags]}, domains={domain_labels})"
+    )
+
     # 合并 Graph-RAG 结果到 source_ids
     merged_source_ids = body.source_ids
     if graph_source_ids:
         merged_source_ids = list(set((merged_source_ids or []) + graph_source_ids))
 
+    # 提取命中标签 ID 用于 RAG 加权
+    boost_tag_ids = [t.id for t in matched_tags] if matched_tags else None
+
+    _t2 = _time.time()
     results = await hybrid_searcher.search(
         query_text=search_query,
         visible_ids=visible_ids,
         db=db,
         source_tables=body.source_tables,
         source_ids=merged_source_ids if merged_source_ids else None,
+        boost_tag_ids=boost_tag_ids,
     )
+    _timing_lines.append(f"[TIMING] hybrid_search: {_time.time() - _t2:.1f}s ({len(results)} results)")
 
-    context = _build_context(results, body.attachment_context)
+    context = _build_context(results, body.attachment_context, matched_tags, domain_labels)
     history = [{"role": m.role, "content": m.content} for m in body.history]
     messages = _build_messages(body.question, history, context)
+    _timing_lines.append(f"[TIMING] total pre-stream: {_time.time() - _t0:.1f}s")
+    for _line in _timing_lines:
+        logger.info(_line)
 
     source_id_list = [
         {"type": r.source_table, "id": r.id, "title": r.title or "无标题"}
@@ -196,6 +270,7 @@ async def chat_stream(
     ]
 
     async def _event_generator():
+        import traceback as _tb
         client = _get_agent_client()
         full_content = ""
         try:
@@ -205,7 +280,17 @@ async def chat_stream(
                 stream=True,
             )
             async for chunk in stream:
-                delta = chunk.choices[0].delta
+                choices = chunk.choices
+                if not choices:
+                    continue
+                delta = choices[0].delta
+                if not delta:
+                    continue
+                # 思考过程（reasoning_content）
+                if delta.reasoning_content:
+                    data = json.dumps({"type": "reasoning", "content": delta.reasoning_content}, ensure_ascii=False)
+                    yield f"data: {data}\n\n"
+                # 正式回答（content）
                 if delta.content:
                     full_content += delta.content
                     data = json.dumps({"type": "content", "content": delta.content}, ensure_ascii=False)
@@ -225,7 +310,8 @@ async def chat_stream(
                 except Exception as e:
                     logger.warning("保存对话消息失败: %s", e)
         except Exception as e:
-            logger.error("流式问答异常: %s", e)
+            err_detail = _tb.format_exc()
+            logger.error("流式问答异常: %s\n%s", e, err_detail)
             data = json.dumps({"type": "error", "content": "生成回答时出错，请稍后重试"}, ensure_ascii=False)
             yield f"data: {data}\n\n"
             yield "data: [DONE]\n\n"
@@ -242,23 +328,26 @@ async def chat_stream(
 
 @router.post("/ask", response_model=ChatResponse, summary="非流式问答 (JSON)")
 async def chat_ask(
+    request: Request,
     body: ChatRequest,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ChatResponse:
     """普通 JSON 问答接口。"""
-    visible_ids = await get_visible_owner_ids(current_user, db)
+    visible_ids = await get_visible_owner_ids(current_user, db, request)
 
-    # 查询改写
-    search_query = await _rewrite_query(body.question)
-
-    # Graph-RAG 增强
-    graph_source_ids = await graph_rag_enhancer.enhance_search(
-        body.question, current_user.feishu_open_id, db,
+    # 查询改写 + Graph-RAG + 标签匹配 并行
+    search_query, graph_result, matched_tags = await asyncio.gather(
+        _rewrite_query(body.question),
+        graph_rag_enhancer.enhance_search(body.question, current_user.feishu_open_id, db),
+        match_tags_from_query(body.question, current_user.feishu_open_id, db),
     )
+    graph_source_ids, domain_labels = graph_result
     merged_source_ids = body.source_ids
     if graph_source_ids:
         merged_source_ids = list(set((merged_source_ids or []) + graph_source_ids))
+
+    boost_tag_ids = [t.id for t in matched_tags] if matched_tags else None
 
     results = await hybrid_searcher.search(
         query_text=search_query,
@@ -266,9 +355,10 @@ async def chat_ask(
         db=db,
         source_tables=body.source_tables,
         source_ids=merged_source_ids if merged_source_ids else None,
+        boost_tag_ids=boost_tag_ids,
     )
 
-    context = _build_context(results, body.attachment_context)
+    context = _build_context(results, body.attachment_context, matched_tags, domain_labels)
     history = [{"role": m.role, "content": m.content} for m in body.history]
     messages = _build_messages(body.question, history, context)
 

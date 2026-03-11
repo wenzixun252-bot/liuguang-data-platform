@@ -73,6 +73,7 @@ async def gather_meeting_context(
     event_summary: str,
     event_description: str | None,
     attendee_names: list[str],
+    boost_tag_ids: list[int] | None = None,
 ) -> dict:
     """并行收集会议准备所需的所有上下文信息。
 
@@ -165,7 +166,7 @@ async def gather_meeting_context(
         return "\n".join(parts)
 
     async def _get_related_documents() -> str:
-        """通过 RAG 搜索与会议主题相关的文档。"""
+        """通过 RAG 搜索与会议主题相关的文档，支持标签加权。"""
         query = event_summary
         if event_description:
             query += " " + event_description[:200]
@@ -177,6 +178,7 @@ async def gather_meeting_context(
                 db=db,
                 source_tables=["document"],
                 top_k=5,
+                boost_tag_ids=boost_tag_ids,
             )
         except Exception as e:
             logger.warning("RAG 搜索文档失败: %s", e)
@@ -189,7 +191,8 @@ async def gather_meeting_context(
         for r in results:
             title = r.title or "无标题"
             content = (r.content_text or "")[:300]
-            parts.append(f"- **{title}**\n  摘要: {content}")
+            tag_info = f" [标签: {', '.join(r.matched_tags)}]" if r.matched_tags else ""
+            parts.append(f"- **{title}**{tag_info}\n  摘要: {content}")
 
         return "\n".join(parts)
 
@@ -217,7 +220,7 @@ async def gather_meeting_context(
         return "\n".join(parts)
 
     async def _get_related_chats() -> str:
-        """通过 RAG 搜索与会议主题相关的聊天消息。"""
+        """通过 RAG 搜索与会议主题相关的聊天消息，支持标签加权。"""
         try:
             results = await hybrid_searcher.search(
                 query_text=event_summary,
@@ -225,6 +228,7 @@ async def gather_meeting_context(
                 db=db,
                 source_tables=["communication"],
                 top_k=3,
+                boost_tag_ids=boost_tag_ids,
             )
         except Exception as e:
             logger.warning("RAG 搜索聊天记录失败: %s", e)
@@ -236,7 +240,8 @@ async def gather_meeting_context(
         parts = []
         for r in results:
             content = (r.content_text or "")[:200]
-            parts.append(f"- {r.title or '聊天消息'}: {content}")
+            tag_info = f" [标签: {', '.join(r.matched_tags)}]" if r.matched_tags else ""
+            parts.append(f"- {r.title or '聊天消息'}{tag_info}: {content}")
 
         return "\n".join(parts)
 

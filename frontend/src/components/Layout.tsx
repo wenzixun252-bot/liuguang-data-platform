@@ -1,5 +1,5 @@
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { getUser, clearAuth } from '../lib/auth'
+import { getUser, clearAuth, isAdmin, getAdminMode, toggleAdminMode } from '../lib/auth'
 import {
   FileText,
   MessageSquare,
@@ -15,14 +15,17 @@ import {
   ChevronDown,
   FolderOpen,
   Upload,
-  Loader2,
+  Shield,
+  MessageCircleWarning,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { motion, AnimatePresence } from 'framer-motion'
 import HeaderSearch from './HeaderSearch'
+import TaskProgressPanel from './TaskProgressPanel'
 import PageTransition from './PageTransition'
+import { useTaskProgress } from '../hooks/useTaskProgress'
 import api from '../lib/api'
 
 // ── 导航类型 ──────────────────────────────────────────
@@ -48,7 +51,7 @@ function isNavGroup(entry: NavEntry): entry is NavGroup {
 // ── 导航配置 ──────────────────────────────────────────
 const NAV_ITEMS: NavEntry[] = [
   { path: '/data-insights', label: '数据洞察', icon: Telescope },
-  { path: '/data-import', label: '数据导入', icon: Upload },
+  { path: '/data-import', label: '数据归档', icon: Upload },
   {
     key: 'data-assets',
     label: '数据资产',
@@ -64,6 +67,7 @@ const NAV_ITEMS: NavEntry[] = [
 ]
 
 export default function Layout() {
+  const { addTask, updateTask } = useTaskProgress()
   const user = getUser()
   const location = useLocation()
   const navigate = useNavigate()
@@ -134,9 +138,79 @@ export default function Layout() {
     refetchInterval: 5000,
     staleTime: 2000,
   })
-  const runningTaskCount =
-    ((syncStatusData as { last_sync_status?: string }[] | undefined) ?? []).filter(s => s.last_sync_status === 'running').length +
-    (kgStatusData?.status === 'running' ? 1 : 0)
+  // 轮询正在生成的报告
+  const { data: generatingReportsData } = useQuery({
+    queryKey: ['reports-generating'],
+    queryFn: async () => { const res = await api.get('/reports', { params: { status: 'generating', page_size: 10 } }); return res.data },
+    refetchInterval: 5000,
+    staleTime: 2000,
+  })
+  // 将后端轮询到的运行中任务自动同步到任务中心面板
+  const syncSources = (syncStatusData as { id?: number; table_name?: string; asset_type?: string; last_sync_status?: string }[] | undefined) ?? []
+  const runningSyncIds = syncSources.filter(s => s.last_sync_status === 'running').map(s => ({ id: s.id, table_name: s.table_name, asset_type: s.asset_type }))
+  const kgRunning = kgStatusData?.status === 'running'
+
+  // 用 ref 跟踪上一次的后端状态，避免 useEffect 依赖 tasks 导致无限循环
+  const prevSyncIdsRef = useRef<string>('')
+  const prevKgRunningRef = useRef<boolean | undefined>(undefined)
+  const prevReportIdsRef = useRef<string>('')
+
+  const syncIdsKey = runningSyncIds.map(s => s.id).join(',')
+  useEffect(() => {
+    if (syncIdsKey === prevSyncIdsRef.current) return
+    const prevIds = new Set(prevSyncIdsRef.current.split(',').filter(Boolean))
+    const curIds = new Set(syncIdsKey.split(',').filter(Boolean))
+    // 新增的同步任务
+    runningSyncIds.forEach(s => {
+      const sid = String(s.id)
+      if (!prevIds.has(sid)) {
+        const typeLabel = s.asset_type === 'document' ? '文档' : s.asset_type === 'communication' ? '沟通记录' : s.asset_type === 'structured' ? '数据表' : '数据'
+        const label = s.table_name ? `同步: ${s.table_name}` : `同步${typeLabel}`
+        addTask(`sync-${s.id}`, label, '/data-import')
+      }
+    })
+    // 已结束的同步任务
+    prevIds.forEach(sid => {
+      if (!curIds.has(sid)) {
+        updateTask(`sync-${sid}`, { status: 'done', progress: 100, message: '已完成' })
+      }
+    })
+    prevSyncIdsRef.current = syncIdsKey
+  }, [syncIdsKey, runningSyncIds, addTask, updateTask])
+
+  useEffect(() => {
+    if (kgRunning === prevKgRunningRef.current) return
+    if (kgRunning) {
+      // 使用与 KG 页面相同的任务 ID，addTask 内部会自动去重
+      addTask('kg-build', '知识图谱生成', '/chat?tab=graph')
+    } else if (prevKgRunningRef.current === true) {
+      updateTask('kg-build', { status: 'done', progress: 100, message: '已完成' })
+    }
+    prevKgRunningRef.current = kgRunning
+  }, [kgRunning, addTask, updateTask])
+
+  // 同步报告生成状态到任务中心
+  const generatingReports = (generatingReportsData as { items?: { id: number; title: string; status: string }[] } | undefined)?.items ?? []
+  const generatingReportIdsKey = generatingReports.map(r => r.id).join(',')
+  useEffect(() => {
+    if (generatingReportIdsKey === prevReportIdsRef.current) return
+    const prevIds = new Set(prevReportIdsRef.current.split(',').filter(Boolean))
+    const curIds = new Set(generatingReportIdsKey.split(',').filter(Boolean))
+    // 新发现的正在生成的报告 — 如果任务中心还没有对应任务就添加
+    generatingReports.forEach(r => {
+      const rid = String(r.id)
+      if (!prevIds.has(rid)) {
+        addTask(`report-${r.id}`, `报告: ${r.title.slice(0, 15)}`, '/chat?tab=report')
+      }
+    })
+    // 上次还在生成、现在不在列表里了 → 已完成
+    prevIds.forEach(rid => {
+      if (!curIds.has(rid)) {
+        updateTask(`report-${rid}`, { status: 'done', progress: 100, message: '已完成' })
+      }
+    })
+    prevReportIdsRef.current = generatingReportIdsKey
+  }, [generatingReportIdsKey, generatingReports, addTask, updateTask])
 
   const handleLogout = () => {
     clearAuth()
@@ -313,17 +387,21 @@ export default function Layout() {
             </button>
           </div>
 
-          {/* 全局任务运行指示器 */}
-          {runningTaskCount > 0 && (
-            <Link
-              to="/data-import"
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-600 rounded-xl text-xs font-medium hover:bg-indigo-100 transition-colors shrink-0"
-              title="点击查看任务详情"
-            >
-              <Loader2 size={13} className="animate-spin" />
-              {runningTaskCount} 个任务运行中
-            </Link>
-          )}
+          {/* 用户反馈入口 */}
+          <a
+            href="https://vzyjg03bu3.feishu.cn/base/ScGfb5sXFatp5IsHfKAcIBf8npd"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="问题反馈"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-sm font-medium hover:bg-black/[0.04] transition-colors apple-btn"
+            style={{ color: 'var(--color-text-secondary)' }}
+          >
+            <MessageCircleWarning size={18} />
+            <span className="hidden sm:inline">反馈</span>
+          </a>
+
+          {/* 全局任务中心（紧靠用户头像左侧） */}
+          <TaskProgressPanel />
 
           <div className="relative" ref={dropdownRef}>
             <button
@@ -345,7 +423,9 @@ export default function Layout() {
               )}
               <div className="hidden sm:block text-left">
                 <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>{user?.name}</p>
-                <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{user?.role}</p>
+                <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
+                  {isAdmin(user) ? (getAdminMode() ? '管理模式' : '个人模式') : user?.role}
+                </p>
               </div>
               <ChevronDown size={14} style={{ color: 'var(--color-text-quaternary)' }} />
             </button>
@@ -369,6 +449,23 @@ export default function Layout() {
                     <UserCog size={16} />
                     设置
                   </Link>
+                  {isAdmin(user) && (
+                    <>
+                      <div className="border-t border-black/[0.06] my-1.5 mx-3" />
+                      <button
+                        onClick={() => {
+                          toggleAdminMode()
+                          setDropdownOpen(false)
+                          window.location.reload()
+                        }}
+                        className="flex items-center gap-2.5 w-full px-4 py-2.5 text-sm transition-colors hover:bg-black/[0.04] apple-btn"
+                        style={{ color: getAdminMode() ? 'var(--color-text-primary)' : 'var(--color-accent)' }}
+                      >
+                        <Shield size={16} />
+                        {getAdminMode() ? '切换为个人模式' : '切换为管理模式'}
+                      </button>
+                    </>
+                  )}
                   <div className="border-t border-black/[0.06] my-1.5 mx-3" />
                   <button
                     onClick={() => { setDropdownOpen(false); handleLogout() }}
@@ -393,6 +490,7 @@ export default function Layout() {
 
       {/* 全局搜索弹窗 */}
       <HeaderSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
+
     </div>
   )
 }

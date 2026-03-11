@@ -16,7 +16,9 @@ from app.models.communication import Communication
 from app.models.document import Document
 from app.models.knowledge_graph import KGEntity, KGRelation
 from app.models.kg_analysis_result import KGAnalysisResult
+from app.models.kg_profile import KGProfile
 from app.models.user import User
+from app.schemas.kg_profile import KGProfileCreate, KGProfileOut
 from app.schemas.knowledge_graph import (
     AnalysisResponse,
     CommunityInfo,
@@ -39,6 +41,8 @@ router = APIRouter(prefix="/api/knowledge-graph", tags=["知识图谱"])
 # ── 后台任务状态管理（进程内存） ──
 # key: owner_id, value: {status, progress, message, result, error}
 _build_tasks: dict[str, dict] = {}
+# 存储 asyncio.Task 引用，用于取消
+_build_async_tasks: dict[str, asyncio.Task] = {}
 
 
 async def _get_latest_analysis(db: AsyncSession, owner_id: str) -> KGAnalysisResult | None:
@@ -74,22 +78,25 @@ async def _save_analysis(db: AsyncSession, owner_id: str, analysis_result: dict)
 
 
 async def _run_build_task(owner_id: str):
-    """后台执行知识图谱构建+分析的完整流程。使用独立的数据库会话。"""
+    """后台执行知识图谱构建+分析的完整流程。使用独立的数据库会话。
+
+    旧图谱在构建过程中保留，只有新图谱提取成功后才会替换。
+    """
     try:
-        _build_tasks[owner_id] = {"status": "running", "progress": 0, "message": "正在清理旧数据..."}
+        _build_tasks[owner_id] = {"status": "running", "progress": 0, "message": "正在收集数据..."}
 
         async with async_session() as db:
-            # 清空旧数据
-            await db.execute(delete(KGRelation).where(KGRelation.owner_id == owner_id))
-            await db.execute(delete(KGEntity).where(KGEntity.owner_id == owner_id))
-            await db.execute(delete(KGAnalysisResult).where(KGAnalysisResult.owner_id == owner_id))
-            await db.commit()
+            # 读取用户图谱配置
+            profile_result = await db.execute(
+                select(KGProfile).where(KGProfile.owner_id == owner_id)
+            )
+            profile = profile_result.scalar_one_or_none()
 
-            # 全量构建图谱（传入进度回调）
-            _build_tasks[owner_id].update(progress=10, message="正在提取实体和关系...")
+            # 全量构建图谱（clean_rebuild=True: LLM 提取完成后再删除旧数据）
+            _build_tasks[owner_id].update(progress=5, message="正在提取实体和关系...")
 
             def on_progress(current: int, total: int):
-                pct = 10 + int(70 * current / max(total, 1))
+                pct = 5 + int(70 * current / max(total, 1))
                 _build_tasks[owner_id].update(progress=pct, message=f"正在处理文本 {current}/{total}...")
 
             build_result = await build_knowledge_graph(
@@ -97,11 +104,19 @@ async def _run_build_task(owner_id: str):
                 owner_id=owner_id,
                 incremental=False,
                 on_progress=on_progress,
+                profile=profile,
+                clean_rebuild=True,
             )
 
             # 运行分析
             _build_tasks[owner_id].update(progress=85, message="正在运行图谱分析...")
-            analysis_result = await run_full_analysis(db, owner_id)
+            analysis_result = await run_full_analysis(db, owner_id, profile=profile)
+            logger.info(
+                "图谱分析完成: %d communities, %d insights, %d risks",
+                len(analysis_result.get("communities", [])),
+                len(analysis_result.get("insights", [])),
+                len(analysis_result.get("risks", [])),
+            )
             await _save_analysis(db, owner_id, analysis_result)
 
             _build_tasks[owner_id] = {
@@ -111,13 +126,22 @@ async def _run_build_task(owner_id: str):
                 "result": {"build": build_result, "analysis": analysis_result},
             }
 
+    except asyncio.CancelledError:
+        logger.info("知识图谱构建任务已被用户取消: %s", owner_id)
+        _build_tasks[owner_id] = {
+            "status": "cancelled",
+            "progress": 0,
+            "message": "已取消，旧图谱已保留",
+        }
     except Exception as e:
-        logger.exception("后台构建知识图谱失败: %s", e)
+        logger.exception("后台构建知识图谱失败（旧图谱已保留）: %s", e)
         _build_tasks[owner_id] = {
             "status": "error",
             "progress": 0,
-            "message": f"构建失败: {e}",
+            "message": f"构建失败: {e}（旧图谱已保留）",
         }
+    finally:
+        _build_async_tasks.pop(owner_id, None)
 
 
 @router.post("/build-and-analyze", summary="构建图谱并运行分析（后台任务）")
@@ -133,8 +157,9 @@ async def build_and_analyze_graph(
     if existing and existing.get("status") == "running":
         return {"status": "running", "message": "构建任务已在运行中", "progress": existing.get("progress", 0)}
 
-    # 启动后台任务
-    asyncio.create_task(_run_build_task(owner_id))
+    # 启动后台任务并保存引用
+    task = asyncio.create_task(_run_build_task(owner_id))
+    _build_async_tasks[owner_id] = task
 
     return {"status": "started", "message": "构建任务已启动", "progress": 0}
 
@@ -149,6 +174,28 @@ async def get_build_status(
     if not task:
         return {"status": "idle", "progress": 0, "message": "无构建任务"}
     return task
+
+
+@router.post("/cancel-build", summary="取消正在运行的图谱构建任务")
+async def cancel_build_task(
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    """取消当前用户的知识图谱构建任务。"""
+    owner_id = current_user.feishu_open_id
+    task_info = _build_tasks.get(owner_id)
+    if not task_info or task_info.get("status") != "running":
+        return {"status": "idle", "message": "没有正在运行的构建任务"}
+
+    async_task = _build_async_tasks.get(owner_id)
+    if async_task and not async_task.done():
+        async_task.cancel()
+
+    _build_tasks[owner_id] = {
+        "status": "cancelled",
+        "progress": 0,
+        "message": "已取消",
+    }
+    return {"status": "cancelled", "message": "构建任务已取消"}
 
 
 @router.post("/build", summary="触发图谱构建/增量更新")
@@ -172,7 +219,11 @@ async def analyze_graph(
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """运行完整分析：社群检测 + 指标计算 + 风险检测 + LLM 总结。"""
-    result = await run_full_analysis(db, current_user.feishu_open_id)
+    profile_result = await db.execute(
+        select(KGProfile).where(KGProfile.owner_id == current_user.feishu_open_id)
+    )
+    profile = profile_result.scalar_one_or_none()
+    result = await run_full_analysis(db, current_user.feishu_open_id, profile=profile)
     await _save_analysis(db, current_user.feishu_open_id, result)
     return AnalysisResponse(**result)
 
@@ -197,7 +248,9 @@ async def get_insights(
     """获取最近一次分析的洞察结果。"""
     record = await _get_latest_analysis(db, current_user.feishu_open_id)
     if not record:
+        logger.warning("无分析记录: owner=%s", current_user.feishu_open_id)
         return []
+    logger.info("返回 %d 条洞察: owner=%s", len(record.insights), current_user.feishu_open_id)
     return [InsightItem(**i) for i in record.insights]
 
 
@@ -209,7 +262,9 @@ async def get_risks(
     """获取最近一次分析的风险预警。"""
     record = await _get_latest_analysis(db, current_user.feishu_open_id)
     if not record:
+        logger.warning("无分析记录: owner=%s", current_user.feishu_open_id)
         return []
+    logger.info("返回 %d 条风险: owner=%s", len(record.risks), current_user.feishu_open_id)
     return [InsightItem(**r) for r in record.risks[:10]]
 
 
@@ -479,6 +534,43 @@ async def get_entity_content(
             "context_snippet": link.context_snippet,
         })
     return items
+
+
+@router.get("/profile", response_model=KGProfileOut | None, summary="获取图谱配置")
+async def get_profile(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """获取当前用户的图谱配置。不存在时返回 null。"""
+    result = await db.execute(
+        select(KGProfile).where(KGProfile.owner_id == current_user.feishu_open_id)
+    )
+    return result.scalar_one_or_none()
+
+
+@router.post("/profile", response_model=KGProfileOut, summary="保存图谱配置")
+async def save_profile(
+    body: KGProfileCreate,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """创建或更新当前用户的图谱配置。"""
+    owner_id = current_user.feishu_open_id
+    result = await db.execute(
+        select(KGProfile).where(KGProfile.owner_id == owner_id)
+    )
+    profile = result.scalar_one_or_none()
+
+    if profile:
+        for field, value in body.model_dump().items():
+            setattr(profile, field, value)
+    else:
+        profile = KGProfile(owner_id=owner_id, **body.model_dump())
+        db.add(profile)
+
+    await db.commit()
+    await db.refresh(profile)
+    return profile
 
 
 @router.post("/search", response_model=list[KGEntityOut], summary="实体搜索")

@@ -22,6 +22,9 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
+  if (localStorage.getItem('admin_mode') === 'true') {
+    config.headers['X-Admin-Mode'] = 'true'
+  }
   return config
 })
 
@@ -38,3 +41,16 @@ api.interceptors.response.use(
 )
 
 export default api
+
+// ── 提取规则 API ──
+export const getExtractionRules = () => api.get('/extraction-rules').then(r => r.data)
+export const createExtractionRule = (data: any) => api.post('/extraction-rules', data).then(r => r.data)
+export const updateExtractionRule = (id: number, data: any) => api.put(`/extraction-rules/${id}`, data).then(r => r.data)
+export const deleteExtractionRule = (id: number) => api.delete(`/extraction-rules/${id}`).then(r => r.data)
+export const getExtractionTemplates = () => api.get('/extraction-rules/templates').then(r => r.data)
+
+// ── 清洗规则 API ──
+export const getCleaningRules = () => api.get('/cleaning-rules').then(r => r.data)
+export const createCleaningRule = (data: any) => api.post('/cleaning-rules', data).then(r => r.data)
+export const updateCleaningRule = (id: number, data: any) => api.put(`/cleaning-rules/${id}`, data).then(r => r.data)
+export const deleteCleaningRule = (id: number) => api.delete(`/cleaning-rules/${id}`).then(r => r.data)

@@ -4,15 +4,19 @@ FROM python:3.12-slim AS builder
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+RUN pip install --no-cache-dir --prefix=/install \
+    -i https://pypi.tuna.tsinghua.edu.cn/simple \
+    --trusted-host pypi.tuna.tsinghua.edu.cn \
+    -r requirements.txt
 
 # ── Stage 2: Runtime ──
 FROM python:3.12-slim
 
 WORKDIR /app
 
-# 安装 PostgreSQL 客户端库（asyncpg 运行时需要）
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# 使用国内镜像加速 apt + 安装 PostgreSQL 客户端库
+RUN sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y --no-install-recommends \
     libpq5 curl \
     && rm -rf /var/lib/apt/lists/*
 

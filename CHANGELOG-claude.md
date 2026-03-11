@@ -230,3 +230,158 @@
 - **2026-03-10 16:52:59** [前端组件] `frontend/src/components/Layout.tsx` — 新增 runningTaskCount, res, res
 - **2026-03-10 16:53:08** [前端组件] `frontend/src/components/Layout.tsx` — 调整UI组件
 - **2026-03-10 16:53:21** [前端组件] `frontend/src/components/Layout.tsx` — 新增 1 行代码
+- **2026-03-10 17:27:12** [前端组件] `frontend/src/components/ChatMessages.tsx` — 添加依赖引用
+- **2026-03-10 17:27:23** [前端组件] `frontend/src/components/ChatMessages.tsx` — 新增 1 行代码
+- **2026-03-10 17:27:31** [前端组件] `frontend/src/components/ChatMessages.tsx` — 调整UI组件
+- **2026-03-10 17:27:44** [前端组件] `frontend/src/components/ChatMessages.tsx` — 新增 ReasoningBlock
+- **2026-03-10 17:28:03** [前端页面] `frontend/src/pages/Chat.tsx` — 新增 updateMsg
+- **2026-03-10 17:40:30** [前端] `frontend/src/hooks/useTaskProgress.tsx` — 新建文件 `useTaskProgress`，包含 TaskProgressContext, TaskProgressProvider, addTask, filtered, updateTask
+- **2026-03-10 17:41:12** [前端组件] `frontend/src/components/TaskProgressPanel.tsx` — 新建文件 `TaskProgressPanel`，包含 isIndeterminate, isDone, isError, TaskProgressPanel, runningCount
+- **2026-03-10 17:41:48** [前端] `frontend/src/index.css` — 新增 8 行代码
+- **2026-03-10 17:42:12** [前端] `frontend/src/App.tsx` — 添加依赖引用
+- **2026-03-10 17:42:18** [前端] `frontend/src/App.tsx` — 调整UI组件
+- **2026-03-10 17:42:25** [前端] `frontend/src/App.tsx` — 修改逻辑 (+2/-1行)
+- **2026-03-10 17:42:32** [前端组件] `frontend/src/components/Layout.tsx` — 添加依赖引用
+- **2026-03-10 17:42:39** [前端组件] `frontend/src/components/Layout.tsx` — 新增 1 行代码
+- **2026-03-10 17:42:51** [前端组件] `frontend/src/components/Layout.tsx` — 新增 syncRunningCount, kgRunning, globalRunningCount
+- **2026-03-10 17:43:00** [前端组件] `frontend/src/components/Layout.tsx` — 调整UI组件
+- **2026-03-10 17:50:42** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 新建文件 `LocalImportSection`，包含 CATEGORY_ACCEPT, CATEGORY_LABELS, LocalImportSection, categoryInputRef, getUploadUrl
+- **2026-03-10 17:53:02** [其他] `restart-and-start.bat` — 新建文件 `restart-and-start` (73行)
+- **2026-03-10 17:54:09** [其他] `restart-and-start.bat` — 修改逻辑 (+1/-5行)
+- **2026-03-10 17:54:16** [其他] `restart-and-start.bat` — 新增 4 行代码
+- **2026-03-10 17:54:30** [数据库迁移] `backend/alembic/versions/y5o6p7q8r9s0_add_original_filename.py` — 新建文件 `y5o6p7q8r9s0_add_original_filename`，包含 upgrade, downgrade
+- **2026-03-10 18:04:00** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 修改逻辑 (+1/-8行)
+- **2026-03-10 18:04:28** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 删除 2 行代码
+- **2026-03-10 18:04:29** [前端组件] `frontend/src/components/import/importUtils.ts` — 修改逻辑 (+1/-1行)
+- **2026-03-10 18:12:42** [前端组件] `frontend/src/components/Layout.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-10 18:12:55** [前端组件] `frontend/src/components/Layout.tsx` — 新增 existing, runningSyncs, syncId, stillRunning；移除 globalRunningCount, syncRunningCount
+- **2026-03-10 18:13:16** [前端组件] `frontend/src/components/Layout.tsx` — 新增 prevKgRunningRef, prevSyncIdsRef, curIds, sid；移除 existing, pollingTask, runningSyncs, taskId
+- **2026-03-10 18:13:37** [前端组件] `frontend/src/components/Layout.tsx` — 新增 hasManualKg
+- **2026-03-10 18:30:03** [数据模型] `backend/app/models/__init__.py` — 添加依赖引用
+- **2026-03-10 18:30:07** [数据模型] `backend/app/models/__init__.py` — 新增 1 行代码
+- **2026-03-10 18:38:47** [其他] `C:/Users/ljadmin/.claude/plans/crystalline-growing-widget.md` — 新建文件 `crystalline-growing-widget` (40行)
+- **2026-03-10 19:03:20** [数据库迁移] `backend/alembic/versions/z6p7q8r9s0t1_add_kg_profiles_simplify_types.py` — 新建文件 `z6p7q8r9s0t1_add_kg_profiles_simplify_types`，包含 upgrade, downgrade
+- **2026-03-10 19:04:39** [前端组件] `frontend/src/components/insights/KGMiniWidget.tsx` — 修改逻辑 (+1/-6行)
+- **2026-03-10 19:04:46** [前端组件] `frontend/src/components/KGSidebar.tsx` — 修改逻辑 (+3/-13行)
+- **2026-03-10 19:04:54** [前端组件] `frontend/src/components/insights/DataGraphWidget.tsx` — 修改逻辑 (+1/-4行)
+- **2026-03-10 19:05:03** [前端组件] `frontend/src/components/insights/DataGraphWidget.tsx` — 修改逻辑 (+4/-19行)
+- **2026-03-10 19:05:09** [前端组件] `frontend/src/components/insights/DataGraphWidget.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-10 19:06:25** [前端组件] `frontend/src/components/insights/DataGraphWidget.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-10 19:06:32** [前端组件] `frontend/src/components/insights/PersonProfileWidget.tsx` — 修改逻辑 (+1/-4行)
+- **2026-03-10 19:06:40** [前端组件] `frontend/src/components/insights/PersonProfileWidget.tsx` — 修改逻辑 (+2/-8行)
+- **2026-03-10 19:06:49** [前端组件] `frontend/src/components/insights/PersonProfileWidget.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-10 19:13:09** [前端] `frontend/src/hooks/useWidgetConfig.ts` — 修改逻辑 (+1/-1行)
+- **2026-03-10 19:13:15** [前端] `frontend/src/hooks/useWidgetConfig.ts` — 修改逻辑 (+3/-2行)
+- **2026-03-10 19:13:21** [前端] `frontend/src/hooks/useWidgetConfig.ts` — 新增 savedIds, def, merged
+- **2026-03-10 19:14:00** [前端组件] `frontend/src/components/insights/AssetScoreWidget.tsx` — 新建文件 `AssetScoreWidget`，包含 LEVEL_BG, AssetScoreWidget, navigate, fetchScore, handleAction
+- **2026-03-10 19:14:17** [前端页面] `frontend/src/pages/DataInsights.tsx` — 添加依赖引用
+- **2026-03-10 19:14:24** [前端页面] `frontend/src/pages/DataInsights.tsx` — 调整UI组件
+- **2026-03-10 19:21:21** [数据库迁移] `backend/alembic/versions/afb981d9d787_add_original_filename_to_documents.py` — 修改逻辑 (+3/-1行)
+- **2026-03-10 19:21:30** [数据库迁移] `backend/alembic/versions/afb981d9d787_add_original_filename_to_documents.py` — 新增 17 行代码
+- **2026-03-10 19:23:42** [数据库迁移] `backend/alembic/versions/afb981d9d787_add_original_filename_to_documents.py` — 修改逻辑 (+2/-29行)
+- **2026-03-10 19:24:08** [数据库迁移] `backend/alembic/versions/afb981d9d787_add_original_filename_to_documents.py` — 修改逻辑 (+1/-71行)
+- **2026-03-10 19:24:50** [数据库迁移] `backend/alembic/versions/z6p7q8r9s0t1_add_kg_profiles_simplify_types.py` — 修改逻辑 (+3/-4行)
+- **2026-03-10 19:36:03** [前端组件] `frontend/src/components/insights/WidgetConfigModal.tsx` — 新增 1 行代码
+- **2026-03-10 19:37:06** [前端] `frontend/src/hooks/useTaskProgress.tsx` — 添加依赖引用
+- **2026-03-10 19:37:13** [前端] `frontend/src/hooks/useTaskProgress.tsx` — 新增 1 行代码
+- **2026-03-10 19:37:25** [前端] `frontend/src/hooks/useTaskProgress.tsx` — 新增 cancelTask, taskId
+- **2026-03-10 19:37:38** [前端组件] `frontend/src/components/TaskProgressPanel.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-10 19:37:49** [前端组件] `frontend/src/components/TaskProgressPanel.tsx` — 修改逻辑 (+7/-1行)
+- **2026-03-10 19:37:55** [前端组件] `frontend/src/components/TaskProgressPanel.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-10 19:38:01** [前端组件] `frontend/src/components/TaskProgressPanel.tsx` — 新增 1 行代码
+- **2026-03-10 20:44:49** [前端组件] `frontend/src/components/Layout.tsx` — 移除 hasManualKg
+- **2026-03-10 22:18:48** [前端页面] `frontend/src/pages/Chat.tsx` — 修改逻辑 (+4/-4行)
+- **2026-03-10 22:25:24** [前端页面] `frontend/src/pages/Login.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-10 22:25:25** [前端组件] `frontend/src/components/ProtectedRoute.tsx` — 调整UI组件
+- **2026-03-10 23:29:35** [其他] `restart-all.bat` — 新建文件 `restart-all` (82行)
+- **2026-03-10 23:30:59** [其他] `backend/Dockerfile` — 修改逻辑 (+4/-1行)
+- **2026-03-10 23:31:06** [其他] `backend/Dockerfile` — 修改逻辑 (+2/-2行)
+- **2026-03-10 23:48:04** [前端组件] `frontend/src/components/insights/PersonProfileWidget.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-10 23:48:05** [前端组件] `frontend/src/components/insights/PersonProfileWidget.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-10 23:48:06** [前端组件] `frontend/src/components/insights/DataGraphWidget.tsx` — 修改逻辑 (+2/-2行)
+- **2026-03-11 01:20:08** [前端组件] `frontend/src/components/Layout.tsx` — 修改逻辑 (+2/-2行)
+- **2026-03-11 01:20:21** [前端组件] `frontend/src/components/Layout.tsx` — 修改逻辑 (+2/-2行)
+- **2026-03-11 01:20:34** [前端组件] `frontend/src/components/Layout.tsx` — 修改逻辑 (+2/-2行)
+- **2026-03-11 01:20:54** [前端组件] `frontend/src/components/Layout.tsx` — 新增 typeLabel, label
+- **2026-03-11 09:54:01** [数据库迁移] `backend/alembic/versions/df4008c34f60_add_domain_mode_to_kg_profiles.py` — 新建文件 `df4008c34f60_add_domain_mode_to_kg_profiles`，包含 upgrade, downgrade
+- **2026-03-11 10:54:15** [前端组件] `frontend/src/components/Layout.tsx` — 调整UI组件
+- **2026-03-11 10:54:22** [前端组件] `frontend/src/components/Layout.tsx` — 删除 4 行代码
+- **2026-03-11 10:55:02** [前端组件] `frontend/src/components/Layout.tsx` — 删除 1 行代码
+- **2026-03-11 10:55:08** [前端组件] `frontend/src/components/Layout.tsx` — 移除 runningTaskCount
+- **2026-03-11 10:55:21** [前端组件] `frontend/src/components/Layout.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-11 10:57:50** [前端工具库] `frontend/src/lib/auth.ts` — 新增 toggleAdminMode, setAdminMode, next, getAdminMode
+- **2026-03-11 10:58:09** [前端工具库] `frontend/src/lib/api.ts` — 新增 2 行代码
+- **2026-03-11 10:58:32** [前端组件] `frontend/src/components/Layout.tsx` — 添加依赖引用
+- **2026-03-11 10:58:38** [前端组件] `frontend/src/components/Layout.tsx` — 新增 1 行代码
+- **2026-03-11 10:58:54** [前端组件] `frontend/src/components/Layout.tsx` — 修改逻辑 (+3/-1行)
+- **2026-03-11 10:59:03** [前端组件] `frontend/src/components/Layout.tsx` — 调整UI组件
+- **2026-03-11 11:23:53** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 新增 2 行代码
+- **2026-03-11 12:15:14** [其他] `.superpowers/brainstorm/862-1773202377/rule-editor-modal.html` — 新建文件 `rule-editor-modal` (128行)
+- **2026-03-11 13:05:56** [其他] `.superpowers/brainstorm/862-1773202377/waiting.html` — 新建文件 `waiting` (3行)
+- **2026-03-11 13:16:00** [数据模型] `backend/app/models/__init__.py` — 添加依赖引用
+- **2026-03-11 13:16:01** [数据模型] `backend/app/models/__init__.py` — 新增 2 行代码
+- **2026-03-11 13:17:26** [数据库迁移] `backend/alembic/versions/616945c99bfb_add_extraction_and_cleaning_rules.py` — 新建文件 `616945c99bfb_add_extraction_and_cleaning_rules`，包含 upgrade, downgrade
+- **2026-03-11 13:27:17** [前端工具库] `frontend/src/lib/api.ts` — 新增 getExtractionRules, createExtractionRule, updateExtractionRule, getExtractionTemplates
+- **2026-03-11 13:27:46** [前端组件] `frontend/src/components/import/DataRuleSection.tsx` — 新建文件 `DataRuleSection`，包含 ExtractionRuleEditor, CleaningRuleEditor, DataRuleSection, queryClient, deleteExtraction
+- **2026-03-11 13:29:01** [前端组件] `frontend/src/components/import/CleaningRuleEditor.tsx` — 新建文件 `CleaningRuleEditor`，包含 CLEANING_OPTION_LABELS, DEFAULT_OPTIONS, CleaningRuleEditor, isEditing, toggleOption
+- **2026-03-11 13:34:04** [前端页面] `frontend/src/pages/DataImport.tsx` — 添加依赖引用
+- **2026-03-11 13:34:19** [前端页面] `frontend/src/pages/DataImport.tsx` — 调整UI组件
+- **2026-03-11 13:34:20** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 添加依赖引用
+- **2026-03-11 13:34:30** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 新增 4 行代码
+- **2026-03-11 13:34:38** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 新增 params
+- **2026-03-11 13:34:45** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-11 13:34:55** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 修改逻辑 (+27/-1行)
+- **2026-03-11 13:35:01** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 新增 1 行代码
+- **2026-03-11 13:35:07** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 新增 1 行代码
+- **2026-03-11 13:36:53** [前端页面] `frontend/src/pages/DataImport.tsx` — 调整UI组件
+- **2026-03-11 13:44:44** [前端组件] `frontend/src/components/import/DataRuleSection.tsx` — 新增 2 行代码
+- **2026-03-11 13:45:20** [前端组件] `frontend/src/components/import/DataRuleSection.tsx` — 调整UI组件
+- **2026-03-11 13:45:29** [前端组件] `frontend/src/components/import/DataRuleSection.tsx` — 调整UI组件
+- **2026-03-11 13:57:37** [数据库迁移] `backend/alembic/versions/76dd7a0179bf_add_file_path_to_structured_tables.py` — 新建文件 `76dd7a0179bf_add_file_path_to_structured_tables`，包含 upgrade, downgrade
+- **2026-03-11 14:34:14** [前端组件] `frontend/src/components/import/DataRuleSection.tsx` — 新建文件 `DataRuleSection`，包含 ExtractionRuleEditor, CleaningRuleEditor, DataRuleSection, queryClient, deleteExtraction
+- **2026-03-11 14:38:46** [前端组件] `frontend/src/components/Layout.tsx` — 新增 1 行代码
+- **2026-03-11 15:10:52** [后端] `backend/app/config.py` — 修改逻辑 (+12/-12行)
+- **2026-03-11 15:20:22** [前端页面] `frontend/src/pages/DataImport.tsx` — 添加依赖引用；调整UI组件
+- **2026-03-11 15:22:15** [前端组件] `frontend/src/components/import/DataRuleSection.tsx` — 修改逻辑 (+5/-1行)
+- **2026-03-11 15:22:35** [前端组件] `frontend/src/components/import/DataRuleSection.tsx` — 新增 isActive
+- **2026-03-11 15:22:42** [前端组件] `frontend/src/components/import/DataRuleSection.tsx` — 添加依赖引用
+- **2026-03-11 15:22:59** [前端组件] `frontend/src/components/import/DataRuleSection.tsx` — 新增 isActive
+- **2026-03-11 15:23:21** [前端页面] `frontend/src/pages/DataImport.tsx` — 调整UI组件
+- **2026-03-11 15:23:42** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 添加依赖引用
+- **2026-03-11 15:23:51** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 修改逻辑 (+5/-5行)
+- **2026-03-11 15:24:04** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 修改逻辑 (+1/-29行)
+- **2026-03-11 15:24:22** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 修改逻辑 (+6/-1行)
+- **2026-03-11 15:24:30** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 新增 1 行代码
+- **2026-03-11 15:24:37** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 新增 1 行代码
+- **2026-03-11 15:29:08** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-11 15:29:39** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 修改逻辑 (+2/-1行)
+- **2026-03-11 15:29:53** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 修改逻辑 (+4/-2行)
+- **2026-03-11 15:30:06** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 修改逻辑 (+4/-1行)
+- **2026-03-11 15:35:12** [前端组件] `frontend/src/components/import/DataRuleSection.tsx` — 新增 1 行代码
+- **2026-03-11 15:35:18** [前端组件] `frontend/src/components/import/DataRuleSection.tsx` — 新增 1 行代码
+- **2026-03-11 15:36:31** [数据模型] `backend/app/models/__init__.py` — 添加依赖引用
+- **2026-03-11 15:36:32** [数据模型] `backend/app/models/__init__.py` — 新增 2 行代码
+- **2026-03-11 15:37:29** [数据库迁移] `backend/alembic/versions/c8e804ef9da6_add_structured_tables_and_structured_.py` — 添加依赖引用
+- **2026-03-11 15:37:30** [数据库迁移] `backend/alembic/versions/c8e804ef9da6_add_structured_tables_and_structured_.py` — 修改逻辑 (+1/-1行)
+- **2026-03-11 16:02:19** [数据库迁移] `backend/alembic/versions/23d9b40c8e80_add_extraction_rule_id_to_etl_data_sources.py` — 新建文件 `23d9b40c8e80_add_extraction_rule_id_to_etl_data_sources`，包含 upgrade, downgrade
+- **2026-03-11 16:03:55** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 新增 1 行代码
+- **2026-03-11 16:04:02** [前端组件] `frontend/src/components/import/DataRuleSection.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-11 16:04:03** [前端组件] `frontend/src/components/import/DataRuleSection.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-11 16:08:01** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 新增 1 行代码
+- **2026-03-11 16:09:24** [数据库迁移] `backend/alembic/versions/23d9b40c8e80_add_extraction_rule_id_to_etl_data_sources.py` — 修改逻辑 (+1/-1行)
+- **2026-03-11 16:21:38** [前端组件] `frontend/src/components/import/DataRuleSection.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-11 16:30:54** [前端页面] `frontend/src/pages/DataImport.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-11 16:40:43** [前端页面] `frontend/src/pages/DataImport.tsx` — 添加依赖引用
+- **2026-03-11 16:41:00** [前端页面] `frontend/src/pages/DataImport.tsx` — 新增 activeExtractionRule, activeCleaningRule, hasActiveRule
+- **2026-03-11 17:11:11** [前端] `frontend/src/App.tsx` — 添加依赖引用
+- **2026-03-11 17:11:17** [前端] `frontend/src/App.tsx` — 调整UI组件
+- **2026-03-11 17:11:22** [前端] `frontend/src/App.tsx` — 新增 1 行代码
+- **2026-03-11 17:23:13** [前端页面] `frontend/src/pages/ReportDetail.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-11 17:39:46** [前端] `frontend/src/hooks/useTaskProgress.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-11 17:39:52** [前端] `frontend/src/hooks/useTaskProgress.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-11 17:39:59** [前端] `frontend/src/hooks/useTaskProgress.tsx` — 修改逻辑 (+2/-2行)
+- **2026-03-11 17:41:43** [前端] `frontend/src/hooks/useTaskProgress.tsx` — 调整UI组件
+- **2026-03-11 17:41:52** [前端] `frontend/src/hooks/useTaskProgress.tsx` — 调整UI组件
+- **2026-03-11 17:48:42** [前端页面] `frontend/src/pages/Chat.tsx` — 新建文件 `Chat`，包含 KnowledgeGraph, CalendarAssistant, Todos, PROMPT_TEMPLATES, TABS
+- **2026-03-11 17:56:22** [前端组件] `frontend/src/components/insights/KGMiniWidget.tsx` — 修改逻辑 (+2/-2行)
+- **2026-03-11 17:57:22** [前端组件] `frontend/src/components/insights/PersonProfileWidget.tsx` — 修改逻辑 (+1/-1行)

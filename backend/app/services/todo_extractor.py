@@ -40,7 +40,7 @@ async def extract_todos_from_communications(
     db: AsyncSession,
     owner_id: str,
     user_name: str,
-    days: int = 7,
+    days: int = 2,
 ) -> list[dict]:
     """从沟通记录（会议 + 会话）中提取待办，只提取分配给当前用户的。"""
     since = datetime.utcnow() - timedelta(days=days)
@@ -55,8 +55,35 @@ async def extract_todos_from_communications(
     )
     comms = result.scalars().all()
 
+    logger.info("待办提取: owner=%s, days=%d, since=%s, 找到 %d 条沟通记录",
+                owner_id, days, since.isoformat(), len(comms))
+
+    if not comms:
+        logger.info("待办提取: 无沟通记录，跳过")
+        return []
+
+    # 查询已提取过待办的 communication ids，跳过已处理的记录
+    # 注意：已驳回(dismissed)的待办不算"已处理"，允许重新提取
+    existing_source_result = await db.execute(
+        select(TodoItem.source_id).where(
+            and_(
+                TodoItem.owner_id == owner_id,
+                TodoItem.source_type == "communication",
+                TodoItem.source_id.isnot(None),
+                TodoItem.status != "dismissed",
+            )
+        )
+    )
+    processed_source_ids = {r for r in existing_source_result.scalars().all()}
+    logger.info("待办提取: 已处理的source_id数=%d, 跳过这些沟通记录", len(processed_source_ids))
+
     todos = []
+    skipped_processed = 0
+    skipped_no_content = 0
     for comm in comms:
+        if comm.id in processed_source_ids:
+            skipped_processed += 1
+            continue
         # 会议类：从 action_items JSONB 直接提取，按 assignee 过滤
         if comm.comm_type in ("meeting", "recording") and comm.action_items:
             for item in comm.action_items:
@@ -91,6 +118,8 @@ async def extract_todos_from_communications(
                     "source_text": comm.content_text[:200],
                 })
 
+    logger.info("待办提取: 跳过已处理=%d, 跳过无内容=%d, 共提取原始待办=%d",
+                skipped_processed, skipped_no_content, len(todos))
     return todos
 
 
@@ -98,10 +127,13 @@ async def extract_and_save(
     db: AsyncSession,
     owner_id: str,
     user_name: str = "",
-    days: int = 7,
+    days: int = 2,
 ) -> list[TodoItem]:
     """提取待办并去重保存到数据库。"""
     all_todos = await extract_todos_from_communications(db, owner_id, user_name, days)
+
+    if not all_todos:
+        return []
 
     # 按 title 去重
     seen_titles: set[str] = set()
@@ -112,27 +144,33 @@ async def extract_and_save(
             seen_titles.add(title_key)
             unique_todos.append(t)
 
-    # 检查数据库中已存在的待办（用 content_hash + title 双重去重）
+    # 用 content_hash 去重（hash = source_type + source_id + title，精确到来源）
+    # 不同沟通记录产生的同名待办允许重复创建（因为是不同场景下的任务）
+    # 已驳回(dismissed)的待办不参与去重，允许重新提取
+    active_filter = and_(
+        TodoItem.owner_id == owner_id,
+        TodoItem.status != "dismissed",
+    )
     existing_hash_result = await db.execute(
         select(TodoItem.content_hash).where(
-            and_(TodoItem.owner_id == owner_id, TodoItem.content_hash.isnot(None))
+            and_(active_filter, TodoItem.content_hash.isnot(None))
         )
     )
     existing_hashes = {r for r in existing_hash_result.scalars().all()}
 
-    existing_title_result = await db.execute(
-        select(TodoItem.title).where(TodoItem.owner_id == owner_id)
-    )
-    existing_titles = {r.lower() for r in existing_title_result.scalars().all()}
+    logger.info("待办保存: 原始待办=%d, 去重后=%d, 已有hash=%d",
+                len(all_todos), len(unique_todos), len(existing_hashes))
 
     saved = []
+    skipped_dedup = 0
     for t in unique_todos:
         title_lower = t["title"].strip().lower()
         content_hash = hashlib.md5(
             f"{t['source_type']}:{t.get('source_id', '')}:{title_lower}".encode()
         ).hexdigest()
 
-        if content_hash in existing_hashes or title_lower in existing_titles:
+        if content_hash in existing_hashes:
+            skipped_dedup += 1
             continue
 
         due_date = None
@@ -162,6 +200,7 @@ async def extract_and_save(
         for item in saved:
             await db.refresh(item)
 
+    logger.info("待办保存: 去重跳过=%d, 最终保存=%d", skipped_dedup, len(saved))
     return saved
 
 

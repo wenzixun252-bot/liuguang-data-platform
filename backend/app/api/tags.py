@@ -185,7 +185,8 @@ async def batch_detach_tags(
     return {"detached": result.rowcount}
 
 
-@router.delete("/detach", summary="取消标签")
+@router.delete("/detach", summary="取消标签(DELETE)")
+@router.post("/detach", summary="取消标签")
 async def detach_tag(
     body: DetachRequest,
     current_user: Annotated[User, Depends(get_current_user)],

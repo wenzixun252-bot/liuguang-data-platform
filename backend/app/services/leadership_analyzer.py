@@ -24,6 +24,8 @@ LEADERSHIP_ANALYSIS_PROMPT = """你是一位专业的员工画像分析师。请
 ## 数据
 {data}
 
+注意：数据中带有 "tags" 字段的条目是用户主动标记的分类，反映了用户的关注重点。请在分析中优先考虑这些有标签的数据，并参考标签揭示的主题归属。
+
 ## 分析维度（每个维度给出1-10分评分和简短分析）
 1. **沟通偏好**: 沟通方式、频率、偏好的沟通渠道
 2. **决策模式**: 决策速度、是否民主、数据驱动程度
@@ -93,12 +95,37 @@ async def get_leadership_candidates(
     return result[:50]
 
 
+async def _query_content_tags(
+    db: AsyncSession,
+    content_type: str,
+    content_ids: list[int],
+) -> dict[int, list[str]]:
+    """批量查询内容关联的标签名称。"""
+    if not content_ids:
+        return {}
+    from app.models.tag import ContentTag, TagDefinition
+    result = await db.execute(
+        select(ContentTag.content_id, TagDefinition.name)
+        .join(TagDefinition, TagDefinition.id == ContentTag.tag_id)
+        .where(
+            and_(
+                ContentTag.content_type == content_type,
+                ContentTag.content_id.in_(content_ids),
+            )
+        )
+    )
+    tag_map: dict[int, list[str]] = {}
+    for row in result.all():
+        tag_map.setdefault(row[0], []).append(row[1])
+    return tag_map
+
+
 async def gather_leader_data(
     db: AsyncSession,
     owner_id: str,
     target_name: str,
 ) -> dict:
-    """收集目标领导的相关数据。"""
+    """收集目标领导的相关数据，附带标签信息。"""
     data: dict = {"communications": [], "documents": []}
 
     # 沟通记录（作为发起人）
@@ -110,7 +137,9 @@ async def gather_leader_data(
             )
         ).order_by(Communication.comm_time.desc().nullslast()).limit(100)
     )
-    for c in comms.scalars().all():
+    comm_list = comms.scalars().all()
+    comm_tags = await _query_content_tags(db, "communication", [c.id for c in comm_list])
+    for c in comm_list:
         data["communications"].append({
             "type": c.comm_type,
             "title": c.title,
@@ -119,6 +148,7 @@ async def gather_leader_data(
             "conclusions": c.conclusions,
             "content": c.content_text[:300] if c.content_text else "",
             "participants_count": len(c.participants) if c.participants else 0,
+            "tags": comm_tags.get(c.id, []),
         })
 
     # 文档
@@ -130,12 +160,15 @@ async def gather_leader_data(
             )
         ).order_by(Document.created_at.desc()).limit(20)
     )
-    for d in documents.scalars().all():
+    doc_list = documents.scalars().all()
+    doc_tags = await _query_content_tags(db, "document", [d.id for d in doc_list])
+    for d in doc_list:
         data["documents"].append({
             "title": d.title,
             "keywords": d.keywords,
             "summary": d.summary,
             "created": str(d.created_at),
+            "tags": doc_tags.get(d.id, []),
         })
 
     return data

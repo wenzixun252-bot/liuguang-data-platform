@@ -15,6 +15,10 @@ from app.models.content_chunk import ContentChunk
 from app.models.calendar_reminder import CalendarReminderPref
 from app.models.notification_pref import UserNotificationPref
 from app.models.keyword_sync_rule import KeywordSyncRule
+from app.models.kg_profile import KGProfile
+from app.models.extraction_rule import ExtractionRule
+from app.models.cleaning_rule import CleaningRule
+from app.models.structured_table import StructuredTable, StructuredTableRow
 
 __all__ = [
     "User",
@@ -44,4 +48,9 @@ __all__ = [
     "ContentChunk",
     "UserNotificationPref",
     "KeywordSyncRule",
+    "KGProfile",
+    "ExtractionRule",
+    "CleaningRule",
+    "StructuredTable",
+    "StructuredTableRow",
 ]

@@ -2,13 +2,22 @@
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime
 
-from sqlalchemy import text
+from sqlalchemy import text, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.llm import llm_client
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class MatchedTag:
+    """匹配到的标签。"""
+    id: int
+    name: str
+    category: str
 
 
 @dataclass
@@ -23,6 +32,8 @@ class SearchResult:
     score: float = 0.0
     feishu_record_id: str | None = None  # 用于跨用户去重
     import_count: int = 1               # 同一飞书文档被多少人归档（社群热度）
+    matched_tags: list[str] = field(default_factory=list)  # 命中的标签名称列表
+    key_info: dict | None = None        # 提取规则产出的关键信息
 
 
 # 所有可搜索的表
@@ -74,6 +85,37 @@ def _build_id_filter(
     return f"id IN ({placeholders})", params
 
 
+def _build_time_filter(
+    source_table: str,
+    time_start: datetime | None,
+    time_end: datetime | None,
+) -> tuple[str, dict]:
+    """构建智能时间过滤子句。
+
+    - documents 表（cloud）：COALESCE(feishu_created_at, feishu_updated_at, created_at)
+    - documents 表（local）：created_at
+    - communications 表：COALESCE(comm_time, created_at)
+    """
+    if time_start is None and time_end is None:
+        return "TRUE", {}
+
+    if source_table == "document":
+        eff = "CASE WHEN source_type = 'cloud' THEN COALESCE(feishu_created_at, feishu_updated_at, created_at) ELSE created_at END"
+    else:
+        eff = "COALESCE(comm_time, created_at)"
+
+    clauses = []
+    params: dict = {}
+    if time_start is not None:
+        clauses.append(f"{eff} >= :time_start")
+        params["time_start"] = time_start.replace(tzinfo=None) if time_start.tzinfo else time_start
+    if time_end is not None:
+        clauses.append(f"{eff} <= :time_end")
+        params["time_end"] = time_end.replace(tzinfo=None) if time_end.tzinfo else time_end
+
+    return " AND ".join(clauses), params
+
+
 def _get_tables_to_search(
     source_tables: list[str] | None,
     source_ids: list[tuple[str, int]] | None,
@@ -101,6 +143,8 @@ class VectorSearcher:
         source_tables: list[str] | None = None,
         source_ids: list[tuple[str, int]] | None = None,
         tag_ids: list[int] | None = None,
+        time_start: datetime | None = None,
+        time_end: datetime | None = None,
     ) -> list[SearchResult]:
         query_embedding = await llm_client.generate_embedding(query_text)
         vector_str = f"[{','.join(str(v) for v in query_embedding)}]"
@@ -115,22 +159,24 @@ class VectorSearcher:
             db_table = _TABLE_MAP[table_key]
             id_filter, id_params = _build_id_filter(table_key, source_ids)
             tag_filter, tag_params = _build_tag_filter(table_key, tag_ids)
+            time_filter, time_params = _build_time_filter(table_key, time_start, time_end)
             all_params.update(id_params)
             all_params.update(tag_params)
+            all_params.update(time_params)
 
             unions.append(
                 f"SELECT id, '{table_key}' as source_table, title, content_text, owner_id, "
-                f"feishu_record_id, "
+                f"feishu_record_id, key_info, "
                 f"content_vector <=> :query_vector AS distance "
                 f"FROM {db_table} "
-                f"WHERE content_vector IS NOT NULL AND {owner_filter} AND {id_filter} AND {tag_filter}"
+                f"WHERE content_vector IS NOT NULL AND {owner_filter} AND {id_filter} AND {tag_filter} AND {time_filter}"
             )
 
         if not unions:
             return []
 
         sql = text(
-            f"SELECT id, source_table, title, content_text, owner_id, feishu_record_id, distance FROM ("
+            f"SELECT id, source_table, title, content_text, owner_id, feishu_record_id, key_info, distance FROM ("
             f"{' UNION ALL '.join(unions)}"
             f") combined ORDER BY distance ASC LIMIT :top_k"
         )
@@ -147,6 +193,7 @@ class VectorSearcher:
                 owner_id=row.owner_id,
                 score=1.0 / (1.0 + row.distance),
                 feishu_record_id=row.feishu_record_id,
+                key_info=row.key_info,
             )
             for row in rows
         ]
@@ -167,6 +214,8 @@ class BM25Searcher:
         source_tables: list[str] | None = None,
         source_ids: list[tuple[str, int]] | None = None,
         tag_ids: list[int] | None = None,
+        time_start: datetime | None = None,
+        time_end: datetime | None = None,
     ) -> list[SearchResult]:
         owner_filter, owner_params = _build_owner_filter(visible_ids)
         tables = _get_tables_to_search(source_tables, source_ids)
@@ -178,24 +227,26 @@ class BM25Searcher:
             db_table = _TABLE_MAP[table_key]
             id_filter, id_params = _build_id_filter(table_key, source_ids)
             tag_filter, tag_params = _build_tag_filter(table_key, tag_ids)
+            time_filter, time_params = _build_time_filter(table_key, time_start, time_end)
             all_params.update(id_params)
             all_params.update(tag_params)
+            all_params.update(time_params)
 
             ts_content = "coalesce(title, '') || ' ' || content_text"
             unions.append(
                 f"SELECT id, '{table_key}' as source_table, title, content_text, owner_id, "
-                f"feishu_record_id, "
+                f"feishu_record_id, key_info, "
                 f"ts_rank_cd(to_tsvector('simple', {ts_content}), plainto_tsquery('simple', :query)) AS rank "
                 f"FROM {db_table} "
                 f"WHERE to_tsvector('simple', {ts_content}) @@ plainto_tsquery('simple', :query) "
-                f"AND {owner_filter} AND {id_filter} AND {tag_filter}"
+                f"AND {owner_filter} AND {id_filter} AND {tag_filter} AND {time_filter}"
             )
 
         if not unions:
             return []
 
         sql = text(
-            f"SELECT id, source_table, title, content_text, owner_id, feishu_record_id, rank FROM ("
+            f"SELECT id, source_table, title, content_text, owner_id, feishu_record_id, key_info, rank FROM ("
             f"{' UNION ALL '.join(unions)}"
             f") combined ORDER BY rank DESC LIMIT :top_k"
         )
@@ -212,6 +263,7 @@ class BM25Searcher:
                 owner_id=row.owner_id,
                 score=float(row.rank),
                 feishu_record_id=row.feishu_record_id,
+                key_info=row.key_info,
             )
             for row in rows
         ]
@@ -237,14 +289,19 @@ class HybridSearcher:
         source_tables: list[str] | None = None,
         source_ids: list[tuple[str, int]] | None = None,
         tag_ids: list[int] | None = None,
+        boost_tag_ids: list[int] | None = None,
+        time_start: datetime | None = None,
+        time_end: datetime | None = None,
     ) -> list[SearchResult]:
         vector_results = await self.vector_searcher.search(
             query_text, visible_ids, db, top_k=top_k * 2,
             source_tables=source_tables, source_ids=source_ids, tag_ids=tag_ids,
+            time_start=time_start, time_end=time_end,
         )
         bm25_results = await self.bm25_searcher.search(
             query_text, visible_ids, db, top_k=top_k * 2,
             source_tables=source_tables, source_ids=source_ids, tag_ids=tag_ids,
+            time_start=time_start, time_end=time_end,
         )
 
         # RRF 融合，key 为 (source_table, id) 元组
@@ -296,6 +353,20 @@ class HybridSearcher:
                     boost = 1.0 + 0.15 * math.log2(cnt)
                     r.score = rrf_scores[key] * boost
 
+        # ── 标签权重加成 ──
+        # 如果用户查询命中了标签，拥有这些标签的内容获得额外加权
+        if boost_tag_ids:
+            tag_boost_map = await self._query_tag_boost(db, result_map, boost_tag_ids)
+            for key, (tag_count, tag_names) in tag_boost_map.items():
+                # 每命中一个标签加 30% 权重，多标签叠加
+                boost = 1.0 + 0.3 * tag_count
+                result_map[key].score *= boost
+                result_map[key].matched_tags = tag_names
+            logger.info(
+                "标签加权: %d/%d 条结果命中标签 (boost_tag_ids=%s)",
+                len(tag_boost_map), len(result_map), boost_tag_ids,
+            )
+
         # 重新按加权后分数排序
         sorted_keys = sorted(result_map.keys(), key=lambda k: result_map[k].score, reverse=True)
 
@@ -313,13 +384,107 @@ class HybridSearcher:
                 break
 
         logger.info(
-            "混合检索完成: vector=%d, bm25=%d, merged=%d (去重+热度加权后)",
+            "混合检索完成: vector=%d, bm25=%d, merged=%d (去重+热度+标签加权后)",
             len(vector_results),
             len(bm25_results),
             len(results),
         )
         return results
 
+    async def _query_tag_boost(
+        self,
+        db: AsyncSession,
+        result_map: dict[tuple, SearchResult],
+        boost_tag_ids: list[int],
+    ) -> dict[tuple, tuple[int, list[str]]]:
+        """查询哪些结果拥有指定标签，返回 {(source_table, id): (命中标签数, [标签名])}。"""
+        if not result_map or not boost_tag_ids:
+            return {}
+
+        # 按 source_table 分组构建查询
+        groups: dict[str, list[int]] = {}
+        for (source_table, rid) in result_map.keys():
+            groups.setdefault(source_table, []).append(rid)
+
+        tag_placeholders = ", ".join(f":btid_{i}" for i in range(len(boost_tag_ids)))
+        tag_params = {f"btid_{i}": tid for i, tid in enumerate(boost_tag_ids)}
+
+        boost_map: dict[tuple, tuple[int, list[str]]] = {}
+
+        for source_table, ids in groups.items():
+            id_placeholders = ", ".join(f":rid_{source_table}_{i}" for i in range(len(ids)))
+            id_params = {f"rid_{source_table}_{i}": rid for i, rid in enumerate(ids)}
+
+            sql = text(
+                f"SELECT ct.content_id, COUNT(ct.tag_id) AS tag_count, "
+                f"ARRAY_AGG(td.name) AS tag_names "
+                f"FROM content_tags ct "
+                f"JOIN tag_definitions td ON td.id = ct.tag_id "
+                f"WHERE ct.content_type = :content_type "
+                f"AND ct.content_id IN ({id_placeholders}) "
+                f"AND ct.tag_id IN ({tag_placeholders}) "
+                f"GROUP BY ct.content_id"
+            )
+            params = {"content_type": source_table, **id_params, **tag_params}
+            rows = (await db.execute(sql, params)).fetchall()
+            for row in rows:
+                key = (source_table, row.content_id)
+                boost_map[key] = (row.tag_count, list(row.tag_names))
+
+        return boost_map
+
+
+def format_key_info(key_info: dict | None) -> str:
+    """将 key_info dict 格式化为上下文追加文本。
+
+    跳过值为 None 或空字符串的字段。
+    返回空字符串表示无有效内容。
+    """
+    if not key_info or not isinstance(key_info, dict):
+        return ""
+    parts = []
+    for k, v in key_info.items():
+        if v is None or v == "":
+            continue
+        parts.append(f"{k}: {v}")
+    if not parts:
+        return ""
+    return "\n[关键信息] " + " | ".join(parts)
+
 
 # 模块级单例
 hybrid_searcher = HybridSearcher()
+
+
+# ── 标签匹配工具 ────────────────────────────────────────
+
+
+async def match_tags_from_query(
+    query: str,
+    owner_id: str,
+    db: AsyncSession,
+) -> list[MatchedTag]:
+    """从用户查询中匹配标签名称。
+
+    匹配规则：标签名出现在查询文本中即视为命中。
+    只查该用户可见的标签（自己的 + 共享的）。
+    """
+    from app.models.tag import TagDefinition
+
+    result = await db.execute(
+        select(TagDefinition).where(
+            (TagDefinition.owner_id == owner_id) | (TagDefinition.is_shared == True)
+        )
+    )
+    tags = result.scalars().all()
+
+    matched: list[MatchedTag] = []
+    query_lower = query.lower()
+    for tag in tags:
+        if tag.name.lower() in query_lower:
+            matched.append(MatchedTag(id=tag.id, name=tag.name, category=tag.category))
+
+    if matched:
+        logger.info("标签匹配: query='%s' -> %s", query[:50], [t.name for t in matched])
+
+    return matched

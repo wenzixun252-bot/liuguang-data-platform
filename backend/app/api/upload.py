@@ -7,7 +7,7 @@ import mimetypes
 import os
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, UploadFile, File
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,11 +29,13 @@ router = APIRouter(prefix="/api/upload", tags=["文件上传"])
 async def upload_file(
     file: UploadFile = File(...),
     tag_ids: str | None = Form(None),
+    extraction_rule_id: int | None = Query(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> DocumentOut:
     """上传文件，自动提取文本、LLM 解析结构化字段、生成 Embedding，写入 documents 表。
     tag_ids: 逗号分隔的标签 ID（可选），如 "1,3,7"。
+    extraction_rule_id: 可选的提取规则 ID，用于 LLM 关键信息提取。
     """
     try:
         doc = await file_upload_service.process_upload(
@@ -42,6 +44,19 @@ async def upload_file(
             db=db,
             uploader_name=current_user.name,
         )
+
+        # 如果指定了提取规则，执行关键信息提取
+        if extraction_rule_id:
+            from app.services.etl.enricher import extract_key_info
+            doc.extraction_rule_id = extraction_rule_id
+            try:
+                key_info = await extract_key_info(doc.content_text, extraction_rule_id, db, title=doc.title, original_filename=doc.original_filename)
+                if key_info:
+                    doc.key_info = key_info
+            except Exception as e:
+                logger.warning("文档 key_info 提取失败 (doc_id=%s): %s", doc.id, e)
+            await db.commit()
+            await db.refresh(doc)
 
         # 写入用户指定的标签
         if tag_ids:
@@ -69,11 +84,13 @@ async def upload_communication(
     file: UploadFile = File(...),
     metadata: str | None = Form(None),
     tag_ids: str | None = Form(None),
+    extraction_rule_id: int | None = Query(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> CommunicationOut:
     """上传音频文件（MP3/WAV/M4A等），自动ASR转文字、LLM提取结构化字段，写入communications表。
     metadata: JSON字符串，用户补充的元数据，如 {"title":"周会","comm_type":"meeting","participants":["张三"],"comm_time":"2026-03-10T14:00","context":"Q2需求讨论"}
+    extraction_rule_id: 提取规则 ID（可选），指定后会自动提取关键信息。
     """
     # 解析用户提供的元数据
     user_metadata = {}
@@ -91,6 +108,19 @@ async def upload_communication(
             uploader_name=current_user.name,
             user_metadata=user_metadata,
         )
+
+        # 如果指定了提取规则，保存并执行关键信息提取
+        if extraction_rule_id:
+            from app.services.etl.enricher import extract_key_info
+            comm.extraction_rule_id = extraction_rule_id
+            try:
+                key_info = await extract_key_info(comm.content_text, extraction_rule_id, db, title=comm.title)
+                if key_info:
+                    comm.key_info = key_info
+            except Exception as e:
+                logger.warning("沟通资产 key_info 提取失败 (comm_id=%s): %s", comm.id, e)
+            await db.commit()
+            await db.refresh(comm)
 
         # 写入用户指定的标签
         if tag_ids:

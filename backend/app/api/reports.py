@@ -26,6 +26,7 @@ from app.services.report_generator import (
     ensure_system_templates,
     generate_report,
     generate_report_stream,
+    start_report_background,
 )
 
 logger = logging.getLogger(__name__)
@@ -119,6 +120,30 @@ async def create_report_stream(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.post("/reports/generate/background", response_model=ReportOut, summary="后台生成报告")
+async def create_report_background(
+    body: ReportGenerateRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """后台异步生成报告，立即返回报告记录（status=generating）。
+
+    前端通过轮询 GET /reports/{id} 查看生成状态。
+    """
+    report = await start_report_background(
+        db=db,
+        owner_id=current_user.feishu_open_id,
+        template_id=body.template_id,
+        title=body.title,
+        time_start=body.time_range_start,
+        time_end=body.time_range_end,
+        data_sources=body.data_sources,
+        extra_instructions=body.extra_instructions,
+        target_reader_ids=body.target_reader_ids,
+    )
+    return report
 
 
 @router.get("/reports", response_model=ReportListResponse, summary="报告列表")

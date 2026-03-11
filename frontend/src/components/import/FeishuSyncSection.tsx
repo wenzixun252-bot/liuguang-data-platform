@@ -113,7 +113,12 @@ type ConfigTarget = RecipeKey | 'structured' | 'structured-bitable' | 'structure
 type DocImportMode = 'cloud-doc' | 'folder-sync'
 type ImportTarget = 'document' | 'communication'
 
-export default function FeishuSyncSection() {
+interface FeishuSyncSectionProps {
+  extractionRuleId: number | null
+  cleaningRuleId: number | null
+}
+
+export default function FeishuSyncSection({ extractionRuleId, cleaningRuleId }: FeishuSyncSectionProps) {
   const queryClient = useQueryClient()
   const [showCloudDocSync, setShowCloudDocSync] = useState(false)
   const [cloudDocInitMode, setCloudDocInitMode] = useState<DocImportMode>('cloud-doc')
@@ -227,8 +232,9 @@ export default function FeishuSyncSection() {
       return await api.post('/import/cloud-folders/sync')
     },
     onSuccess: () => {
-      toast.success('文件夹同步已触发')
+      toast.success('文件夹同步已触发，可在下方任务面板查看进度')
       queryClient.invalidateQueries({ queryKey: ['cloud-folders'] })
+      queryClient.invalidateQueries({ queryKey: ['import-tasks'] })
     },
     onError: (error: any) => {
       toast.error(error.response?.data?.detail || '同步失败')
@@ -254,6 +260,8 @@ export default function FeishuSyncSection() {
         recipeUrl: '',
         assetType: 'structured' as const,
         recipeKeywords: [] as string[],
+        filterType: configTarget === 'structured-bitable' ? 'bitable' as const :
+                    configTarget === 'structured-spreadsheet' ? 'spreadsheet' as const : undefined,
         steps: isBitable ? [
           '点击"刷新列表"自动检索你有阅读权限的飞书多维表格',
           '选择要导入的多维表格数据表，点击可在飞书中查看原表',
@@ -271,6 +279,7 @@ export default function FeishuSyncSection() {
       recipeUrl: cfg.recipeUrl,
       assetType: cfg.assetType,
       recipeKeywords: cfg.recipeKeywords,
+      discoverKeywords: cfg.discoverKeywords,
       steps: cfg.steps,
     }
   }
@@ -475,15 +484,7 @@ export default function FeishuSyncSection() {
           </div>
 
           {/* 底栏 */}
-          <div className="px-4 py-2.5 border-t border-gray-100 bg-gray-50/50 flex items-center justify-between">
-            <button
-              type="button"
-              onClick={() => setConfigTarget('structured')}
-              className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 flex items-center gap-1 transition-colors"
-            >
-              <Database className="w-3 h-3" />
-              配置数据源
-            </button>
+          <div className="px-4 py-2.5 border-t border-gray-100 bg-gray-50/50 flex items-center justify-end">
             <div className="flex items-center gap-2">
               {structuredSources.length > 0 && (
                 <>
@@ -585,7 +586,7 @@ export default function FeishuSyncSection() {
                       .filter(f => f.last_sync_time)
                       .sort((a, b) => new Date(b.last_sync_time!).getTime() - new Date(a.last_sync_time!).getTime())[0]?.last_sync_time
                     return latestFolderTime ? (
-                      <p className="text-gray-400">最近更新: {new Date(latestFolderTime).toLocaleString('zh-CN')}</p>
+                      <p className="text-gray-400">最近更新: {new Date(latestFolderTime.endsWith('Z') ? latestFolderTime : latestFolderTime + 'Z').toLocaleString('zh-CN')}</p>
                     ) : null
                   })()}
                 </div>
@@ -637,12 +638,19 @@ export default function FeishuSyncSection() {
                       <div className="flex items-center gap-2">
                         <span className="font-medium text-gray-700">
                           {task.task_type === 'communication' ? '沟通资产导入' :
-                           task.task_type === 'cloud_doc' ? '云文档导入' : '同步任务'}
+                           task.task_type === 'cloud_doc' ? '云文档导入' :
+                           task.task_type === 'folder_sync' ? '文件夹同步' :
+                           task.task_type === 'bitable_sync' ? '多维表格同步' : '同步任务'}
                         </span>
                         <span className="text-xs text-gray-400">
-                          {task.total_count} 个文件
+                          {task.task_type === 'folder_sync' ? `${task.total_count} 个文件夹` : `${task.total_count} 个文件`}
                         </span>
                       </div>
+                      {task.status === 'running' && (task.imported_count > 0 || task.skipped_count > 0) && (
+                        <p className="text-xs text-blue-500 mt-0.5">
+                          已导入 {task.imported_count} · 跳过 {task.skipped_count}{task.failed_count > 0 ? ` · 失败 ${task.failed_count}` : ''}
+                        </p>
+                      )}
                       {task.status === 'completed' && (
                         <p className="text-xs text-gray-500 mt-0.5">
                           成功 {task.imported_count} · 跳过 {task.skipped_count} · 失败 {task.failed_count}
@@ -739,6 +747,7 @@ export default function FeishuSyncSection() {
               onClose={() => setShowCloudDocSync(false)}
               initialMode={cloudDocInitMode}
               targetTable={cloudDocTarget}
+              extractionRuleId={extractionRuleId}
             />
           </div>
         </div>
@@ -751,6 +760,8 @@ export default function FeishuSyncSection() {
         return (
           <RecipeSyncConfig
             {...props}
+            cleaningRuleId={cleaningRuleId}
+            extractionRuleId={extractionRuleId}
             onClose={() => setConfigTarget(null)}
             onSyncComplete={() => {
               queryClient.invalidateQueries({ queryKey: ['sync-status'] })

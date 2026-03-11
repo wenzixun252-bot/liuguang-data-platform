@@ -31,6 +31,24 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/structured-tables", tags=["结构化数据表"])
 
 
+async def _apply_cleaning_after_import(
+    db: AsyncSession, table_id: int, cleaning_rule_id: int
+) -> None:
+    """导入完成后自动应用清洗规则（内部辅助函数）。"""
+    from app.models.cleaning_rule import CleaningRule
+    from app.services.structured_table_cleaner import apply_cleaning_rule
+
+    rule = await db.get(CleaningRule, cleaning_rule_id)
+    if not rule:
+        logger.warning("清洗规则 %d 不存在，跳过清洗", cleaning_rule_id)
+        return
+    try:
+        stats = await apply_cleaning_rule(db, table_id, rule)
+        logger.info("清洗规则 %d 已应用到表格 %d: %s", cleaning_rule_id, table_id, stats)
+    except Exception as e:
+        logger.error("应用清洗规则失败 (rule=%d, table=%d): %s", cleaning_rule_id, table_id, e)
+
+
 # ── 导入端点 ────────────────────────────────────────────────
 
 
@@ -50,6 +68,10 @@ async def import_bitable(
             body.table_id,
             user_access_token=current_user.feishu_access_token,
         )
+        # 如果指定了清洗规则，导入完成后自动应用
+        if body.cleaning_rule_id:
+            await _apply_cleaning_after_import(db, table.id, body.cleaning_rule_id)
+            await db.refresh(table)
         return table
     except Exception as e:
         logger.error("导入多维表格失败: %s", e, exc_info=True)
@@ -72,6 +94,10 @@ async def import_spreadsheet(
             body.sheet_id,
             user_access_token=current_user.feishu_access_token,
         )
+        # 如果指定了清洗规则，导入完成后自动应用
+        if body.cleaning_rule_id:
+            await _apply_cleaning_after_import(db, table.id, body.cleaning_rule_id)
+            await db.refresh(table)
         return table
     except Exception as e:
         logger.error("导入飞书表格失败: %s", e, exc_info=True)
@@ -81,6 +107,7 @@ async def import_spreadsheet(
 @router.post("/import/upload", response_model=StructuredTableOut, summary="上传本地 CSV/Excel")
 async def import_upload(
     file: UploadFile = File(...),
+    cleaning_rule_id: int | None = Query(None, description="清洗规则 ID"),
     current_user: Annotated[User, Depends(get_current_user)] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ):
@@ -100,6 +127,10 @@ async def import_upload(
             file.filename,
             content,
         )
+        # 如果指定了清洗规则，导入完成后自动应用
+        if cleaning_rule_id:
+            await _apply_cleaning_after_import(db, table.id, cleaning_rule_id)
+            await db.refresh(table)
         return table
     except Exception as e:
         logger.error("导入本地文件失败: %s", e, exc_info=True)
@@ -286,11 +317,15 @@ async def import_from_url(
                     raise HTTPException(status_code=400, detail="该多维表格下没有数据表")
                 table_id = tables_raw[0].get("table_id", "")
 
-            return await import_from_bitable(
+            table = await import_from_bitable(
                 db, current_user.feishu_open_id,
                 parsed["token"], table_id,
                 user_access_token=user_token,
             )
+            if body.cleaning_rule_id:
+                await _apply_cleaning_after_import(db, table.id, body.cleaning_rule_id)
+                await db.refresh(table)
+            return table
 
         elif parsed["type"] == "spreadsheet":
             # 取第一个工作表
@@ -301,11 +336,15 @@ async def import_from_url(
                 raise HTTPException(status_code=400, detail="该飞书表格下没有工作表")
             sheet_id = sheets_raw[0].get("sheet_id", "")
 
-            return await import_from_spreadsheet(
+            table = await import_from_spreadsheet(
                 db, current_user.feishu_open_id,
                 parsed["token"], sheet_id,
                 user_access_token=user_token,
             )
+            if body.cleaning_rule_id:
+                await _apply_cleaning_after_import(db, table.id, body.cleaning_rule_id)
+                await db.refresh(table)
+            return table
 
     except HTTPException:
         raise
@@ -418,16 +457,69 @@ async def list_tables(
     count_q = select(func.count()).select_from(StructuredTable).where(and_(*conditions))
     total = (await db.execute(count_q)).scalar() or 0
 
-    # 分页
+    # 分页（LEFT JOIN User 获取 uploader_name）
     q = (
-        select(StructuredTable)
+        select(StructuredTable, User.name.label("uploader_name"))
+        .outerjoin(User, StructuredTable.owner_id == User.feishu_open_id)
         .where(and_(*conditions))
         .order_by(StructuredTable.updated_at.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
     result = await db.execute(q)
-    items = result.scalars().all()
+    rows = result.all()
+
+    # 统计每个 (source_app_token, source_table_id) 被多少人归档（一次批量查询）
+    source_keys = [
+        (r.StructuredTable.source_app_token, r.StructuredTable.source_table_id)
+        for r in rows
+        if r.StructuredTable.source_app_token and r.StructuredTable.source_table_id
+    ]
+    import_count_map: dict[tuple[str, str], int] = {}
+    if source_keys:
+        unique_app_tokens = list({k[0] for k in source_keys})
+        count_rows = (await db.execute(
+            select(
+                StructuredTable.source_app_token,
+                StructuredTable.source_table_id,
+                func.count(StructuredTable.owner_id.distinct()).label("cnt"),
+            )
+            .where(
+                StructuredTable.source_app_token.in_(unique_app_tokens),
+                StructuredTable.source_table_id.isnot(None),
+            )
+            .group_by(StructuredTable.source_app_token, StructuredTable.source_table_id)
+        )).all()
+        import_count_map = {
+            (row.source_app_token, row.source_table_id): row.cnt
+            for row in count_rows
+        }
+
+    # 批量查询清洗规则名称
+    from app.models.cleaning_rule import CleaningRule
+    rule_ids = list({r.StructuredTable.cleaning_rule_id for r in rows if r.StructuredTable.cleaning_rule_id})
+    cleaning_rule_map: dict[int, str] = {}
+    if rule_ids:
+        rule_rows = (await db.execute(
+            select(CleaningRule.id, CleaningRule.name).where(CleaningRule.id.in_(rule_ids))
+        )).all()
+        cleaning_rule_map = {row.id: row.name for row in rule_rows}
+
+    items = []
+    for r in rows:
+        tbl = r.StructuredTable
+        out = StructuredTableOut.model_validate(tbl)
+        # 飞书资产：优先使用文档原始所有者名称，本地资产用导入者名称
+        feishu_owner = (tbl.extra_fields or {}).get("_feishu_owner_name", "")
+        display_owner = feishu_owner or r.uploader_name
+        updates: dict = {"uploader_name": display_owner}
+        key = (tbl.source_app_token, tbl.source_table_id)
+        if key[0] and key[1] and key in import_count_map:
+            updates["import_count"] = import_count_map[key]
+        if tbl.cleaning_rule_id and tbl.cleaning_rule_id in cleaning_rule_map:
+            updates["cleaning_rule_name"] = cleaning_rule_map[tbl.cleaning_rule_id]
+        out = out.model_copy(update=updates)
+        items.append(out)
 
     return StructuredTableListResponse(items=items, total=total)
 
@@ -477,7 +569,7 @@ async def search_rows(
     total = (await db.execute(count_q)).scalar() or 0
 
     q_rows = (
-        select(StructuredTableRow, StructuredTable.name)
+        select(StructuredTableRow, StructuredTable.name, StructuredTable.schema_info)
         .join(StructuredTable, StructuredTableRow.table_id == StructuredTable.id)
         .where(and_(
             StructuredTable.owner_id == owner_id,
@@ -492,10 +584,22 @@ async def search_rows(
 
     results: list[SearchResultItem] = []
     keyword_lower = keyword.lower()
-    for row_obj, table_name in rows:
-        # 找出匹配的字段
+    for row_obj, table_name, schema_info in rows:
+        # 构建 field_id -> field_name 映射，将原始字段ID翻译为中文
+        field_map: dict[str, str] = {}
+        if schema_info:
+            for s in schema_info:
+                fid = s.get("field_id", "")
+                fname = s.get("field_name", "")
+                if fid and fname:
+                    field_map[fid] = fname
+
+        # 翻译 row_data 的 key 为中文字段名
+        raw_data = row_obj.row_data or {}
+        row_data = {field_map.get(k, k): v for k, v in raw_data.items()}
+
+        # 找出匹配的字段（使用翻译后的名称）
         matched_fields = []
-        row_data = row_obj.row_data or {}
         for field_name, value in row_data.items():
             if value and keyword_lower in str(value).lower():
                 matched_fields.append(field_name)
@@ -527,7 +631,13 @@ async def get_table(
     table = result.scalar_one_or_none()
     if not table:
         raise HTTPException(status_code=404, detail="表格不存在")
-    return table
+    out = StructuredTableDetail.model_validate(table)
+    if table.cleaning_rule_id:
+        from app.models.cleaning_rule import CleaningRule
+        rule = await db.get(CleaningRule, table.cleaning_rule_id)
+        if rule:
+            out = out.model_copy(update={"cleaning_rule_name": rule.name})
+    return out
 
 
 @router.get("/{table_id}/rows", response_model=StructuredTableRowListResponse, summary="行数据预览")
@@ -592,6 +702,10 @@ async def sync_table(
 
     try:
         result = await do_sync(db, table_id, user_access_token=current_user.feishu_access_token)
+        # 如果表格已绑定清洗规则，同步后自动重新应用
+        table_obj = await db.get(StructuredTable, table_id)
+        if table_obj and table_obj.cleaning_rule_id:
+            await _apply_cleaning_after_import(db, table_id, table_obj.cleaning_rule_id)
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -615,6 +729,15 @@ async def delete_table(
     table = result.scalar_one_or_none()
     if not table:
         raise HTTPException(status_code=404, detail="表格不存在")
+
+    # 清理原始文件
+    if table.file_path:
+        import os
+        try:
+            if os.path.exists(table.file_path):
+                os.remove(table.file_path)
+        except OSError:
+            logger.warning("删除原始文件失败: %s", table.file_path)
 
     # 级联删除行（靠 FK ON DELETE CASCADE），但显式删除更安全
     await db.execute(
@@ -733,11 +856,42 @@ async def export_table_xlsx(
     wb.save(buffer)
     buffer.seek(0)
 
-    # 生成文件名
+    # 生成文件名（中文需要 URL 编码）
+    from urllib.parse import quote
     filename = f"{table.name}.xlsx"
+    encoded_filename = quote(filename)
 
     return StreamingResponse(
         buffer,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename*=UTF-8\'\'{filename}'},
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}"},
+    )
+
+
+@router.get("/{table_id}/download-original", summary="下载原始上传文件")
+async def download_original_file(
+    table_id: int,
+    current_user: Annotated[User, Depends(get_current_user)] = None,
+    db: Annotated[AsyncSession, Depends(get_db)] = None,
+):
+    """下载本地上传表格的原始文件。"""
+    import os
+    from fastapi.responses import FileResponse
+
+    result = await db.execute(
+        select(StructuredTable).where(
+            StructuredTable.id == table_id,
+            StructuredTable.owner_id == current_user.feishu_open_id,
+        )
+    )
+    table = result.scalar_one_or_none()
+    if not table:
+        raise HTTPException(status_code=404, detail="表格不存在")
+    if not table.file_path or not os.path.exists(table.file_path):
+        raise HTTPException(status_code=404, detail="原始文件不存在（仅本地上传的表格保留原始文件）")
+
+    return FileResponse(
+        path=table.file_path,
+        filename=table.file_name or f"original_{table_id}",
+        media_type="application/octet-stream",
     )

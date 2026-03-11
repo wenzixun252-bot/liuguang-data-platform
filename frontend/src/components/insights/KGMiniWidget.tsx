@@ -35,12 +35,7 @@ interface SimLink extends d3.SimulationLinkDatum<SimNode> {
 
 const ENTITY_COLORS: Record<string, string> = {
   person: '#6366f1',
-  project: '#f59e0b',
-  topic: '#10b981',
-  organization: '#8b5cf6',
-  event: '#ef4444',
-  document: '#3b82f6',
-  community: '#ec4899',
+  item: '#f59e0b',
 }
 
 export default function KGMiniWidget({
@@ -61,8 +56,8 @@ export default function KGMiniWidget({
     setError(null)
     api.get('/knowledge-graph', { params: { limit: 50 } })
       .then((res) => {
-        nodesRef.current = res.data.nodes.slice(0, 50)
-        edgesRef.current = res.data.edges
+        nodesRef.current = (res.data.nodes || []).slice(0, 50)
+        edgesRef.current = res.data.edges || []
       })
       .catch(() => setError('加载图谱数据失败'))
       .finally(() => setLoading(false))

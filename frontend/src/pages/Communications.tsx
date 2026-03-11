@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Search, ChevronLeft, ChevronRight, X, Clock, MapPin, Users, Paperclip, ExternalLink, Download, Image, FileText, User, Trash2, MessageSquare, Video, Mic, Table2 } from 'lucide-react'
-import api from '../lib/api'
+import { Search, ChevronLeft, ChevronRight, X, Clock, MapPin, Users, Paperclip, ExternalLink, Download, Image, FileText, Trash2, MessageSquare, Video, Mic, Table2 } from 'lucide-react'
+import api, { getExtractionRules } from '../lib/api'
 import toast from 'react-hot-toast'
+import { useQuery } from '@tanstack/react-query'
 import { ColumnSettingsButton, useColumnSettings, type ColumnDef } from '../components/ColumnSettings'
 import { getUser } from '../lib/auth'
 import { TagChips, TagFilter, BatchTagBar, useContentTags, InlineTagEditor } from '../components/TagManager'
@@ -22,12 +23,12 @@ const MEETING_COLUMNS: ColumnDef[] = [
   { key: 'comm_time', label: '会议时间' },
   { key: 'initiator', label: '组织者' },
   { key: 'participants', label: '参与人' },
+  { key: 'key_info', label: '自定义提取内容' },
   { key: 'content', label: '内容预览' },
   { key: 'source_url', label: '会议纪要', defaultVisible: false },
   { key: 'duration', label: '时长', defaultVisible: false },
   { key: 'location', label: '地点', defaultVisible: false },
   { key: 'keywords', label: '关键词', defaultVisible: false },
-  { key: 'uploader_name', label: '上传人', defaultVisible: false },
 ]
 
 const CHAT_COLUMNS: ColumnDef[] = [
@@ -35,10 +36,10 @@ const CHAT_COLUMNS: ColumnDef[] = [
   { key: 'comm_time', label: '发送时间' },
   { key: 'initiator', label: '发送者' },
   { key: 'chat_name', label: '群组名称' },
+  { key: 'key_info', label: '自定义提取内容' },
   { key: 'content', label: '发送内容' },
   { key: 'attachments', label: '附件' },
   { key: 'keywords', label: '关键词', defaultVisible: false },
-  { key: 'uploader_name', label: '上传人', defaultVisible: false },
 ]
 
 function getColumnsForType(commType: CommTypeFilter): ColumnDef[] {
@@ -91,6 +92,8 @@ interface CommunicationItem {
   sentiment: string | null
   quality_score: number | null
   duplicate_of: number | null
+  key_info?: Record<string, string> | null
+  extraction_rule_id?: number | null
   extra_fields: { _attachments?: AttachmentMeta[]; _links?: LinkMeta[]; [key: string]: unknown }
   feishu_created_at: string | null
   feishu_updated_at: string | null
@@ -154,6 +157,13 @@ export default function Communications() {
   const [refreshKey, setRefreshKey] = useState(0)
   const [tagFilter, setTagFilter] = useState<number[]>([])
   const [tagRefreshKey, setTagRefreshKey] = useState(0)
+
+  // 提取规则名称映射
+  const { data: rulesList } = useQuery({ queryKey: ['extraction-rules'], queryFn: getExtractionRules })
+  const rulesMap: Record<number, string> = {}
+  if (Array.isArray(rulesList)) {
+    rulesList.forEach((r: any) => { rulesMap[r.id] = r.name })
+  }
 
   const activeColumns = getColumnsForType(commTypeFilter)
   const { isVisible, toggle, columns: colDefs } = useColumnSettings(`comm-${commTypeFilter}`, activeColumns)
@@ -343,7 +353,7 @@ export default function Communications() {
                     </th>
                     <th className="text-left py-3 px-4 text-gray-500 font-medium">类型</th>
                     {colDefs.filter(c => isVisible(c.key)).map(c => (
-                      <th key={c.key} className="text-left py-3 px-4 text-gray-500 font-medium">{c.label}</th>
+                      <th key={c.key} className={`text-left py-3 px-4 font-medium ${c.key === 'key_info' ? 'text-violet-700 font-semibold bg-violet-50/50' : 'text-gray-500'}`}>{c.label}</th>
                     ))}
                     <th className="text-left py-3 px-4 text-gray-500 font-medium">操作</th>
                   </tr>
@@ -361,9 +371,20 @@ export default function Communications() {
                       <td className="py-3 px-4">
                         <CommTypeBadge type={item.comm_type} />
                       </td>
-                      {isVisible('title') && <td className="py-3 px-4 text-gray-800 font-medium">{item.title || '无标题'}</td>}
+                      {isVisible('title') && (
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                            <span className="text-gray-800 font-medium truncate">{item.title || '无标题'}</span>
+                            {item.extraction_rule_id && rulesMap[item.extraction_rule_id] && (
+                              <span className="shrink-0 px-1.5 py-0.5 rounded text-xs bg-violet-50 text-violet-700 border border-violet-200 font-medium">
+                                {rulesMap[item.extraction_rule_id]}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                      )}
                       {isVisible('tags') && (
-                        <td className="py-3 px-4 max-w-[200px]">
+                        <td className="py-3 px-4 max-w-[200px]" onClick={(e) => e.stopPropagation()}>
                           <InlineTagEditor
                             contentType="communication"
                             contentId={item.id}
@@ -380,12 +401,31 @@ export default function Communications() {
                       {isVisible('initiator') && <td className="py-3 px-4 text-gray-500">{item.initiator || '-'}</td>}
                       {isVisible('participants') && (
                         <td className="py-3 px-4 text-gray-500">
-                          {item.participants.length > 0
-                            ? item.participants.slice(0, 3).map(p => p.name || '未知').join('、') + (item.participants.length > 3 ? ` 等${item.participants.length}人` : '')
+                          {(item.participants || []).length > 0
+                            ? (item.participants || []).slice(0, 3).map(p => p.name || '未知').join('、') + ((item.participants || []).length > 3 ? ` 等${item.participants.length}人` : '')
                             : '-'}
                         </td>
                       )}
                       {isVisible('chat_name') && <td className="py-3 px-4 text-gray-500">{item.chat_name || '个人聊天'}</td>}
+                      {isVisible('key_info') && (
+                        <td className="py-3 px-4 max-w-[280px] bg-violet-50/30">
+                          {item.key_info && Object.keys(item.key_info).length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {Object.entries(item.key_info).slice(0, 3).map(([k, v]) => (
+                                <span key={k} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-violet-100 text-violet-800 border border-violet-200" title={`${k}: ${v}`}>
+                                  <span className="text-violet-500 mr-0.5">{k}:</span>
+                                  <span className="truncate max-w-[90px]">{String(v)}</span>
+                                </span>
+                              ))}
+                              {Object.keys(item.key_info).length > 3 && (
+                                <span className="text-xs text-violet-400">+{Object.keys(item.key_info).length - 3}</span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-gray-300 text-xs">-</span>
+                          )}
+                        </td>
+                      )}
                       {isVisible('content') && (
                         <td className="py-3 px-4 text-gray-500 max-w-xs truncate">
                           {item.summary?.slice(0, 60) || item.content_text?.slice(0, 60) || '-'}
@@ -427,7 +467,6 @@ export default function Communications() {
                           </div>
                         </td>
                       )}
-                      {isVisible('uploader_name') && <td className="py-3 px-4 text-gray-500">{item.uploader_name || '-'}</td>}
                       <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-1">
                           {item.source_url && (
@@ -551,6 +590,21 @@ function CommunicationDetail({
             </div>
           )}
 
+          {/* 自定义提取内容 */}
+          {item.key_info && Object.keys(item.key_info).length > 0 && (
+            <div>
+              <p className="text-sm text-gray-500 mb-1">自定义提取内容</p>
+              <div className="space-y-2">
+                {Object.entries(item.key_info).map(([k, v]) => (
+                  <div key={k} className="bg-violet-50 rounded-lg p-3">
+                    <p className="text-xs text-violet-500 font-medium mb-0.5">{k}</p>
+                    <p className="text-sm text-gray-800 whitespace-pre-wrap">{String(v)}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* 时间和地点 (会议类) */}
           {isMeetingLike && (
             <div className="flex flex-wrap gap-4 text-sm text-gray-600">
@@ -582,9 +636,6 @@ function CommunicationDetail({
 
           {/* 会议类的组织者 */}
           {isMeetingLike && item.initiator && <Field label="组织者" value={item.initiator} />}
-
-          {/* 上传人 */}
-          {item.uploader_name && <Field label="上传人" value={item.uploader_name} icon={<User size={14} />} />}
 
           {/* 相关链接 */}
           {(item.source_url || item.recording_url || item.bitable_url) && (
@@ -629,7 +680,7 @@ function CommunicationDetail({
           )}
 
           {/* 参与人（会议类） */}
-          {isMeetingLike && item.participants.length > 0 && (
+          {isMeetingLike && (item.participants || []).length > 0 && (
             <div>
               <p className="text-sm text-gray-500 mb-1 flex items-center gap-1"><Users size={14} /> 参与人</p>
               <div className="flex flex-wrap gap-2">
@@ -643,7 +694,7 @@ function CommunicationDetail({
           )}
 
           {/* 提及人（会话类） */}
-          {isChat && item.participants.length > 0 && (
+          {isChat && (item.participants || []).length > 0 && (
             <div>
               <p className="text-sm text-gray-500 mb-1">提及</p>
               <div className="flex flex-wrap gap-2">
@@ -673,7 +724,7 @@ function CommunicationDetail({
           )}
 
           {/* 待办事项（会议类） */}
-          {isMeetingLike && item.action_items.length > 0 && (
+          {isMeetingLike && (item.action_items || []).length > 0 && (
             <div>
               <p className="text-sm text-gray-500 mb-1">待办事项</p>
               <ul className="space-y-2">

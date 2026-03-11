@@ -28,3 +28,17 @@ export function clearAuth() {
 export function isAdmin(user: User | null): boolean {
   return user?.role === 'admin'
 }
+
+export function getAdminMode(): boolean {
+  return localStorage.getItem('admin_mode') === 'true'
+}
+
+export function setAdminMode(enabled: boolean) {
+  localStorage.setItem('admin_mode', String(enabled))
+}
+
+export function toggleAdminMode(): boolean {
+  const next = !getAdminMode()
+  setAdminMode(next)
+  return next
+}

@@ -14,7 +14,7 @@ export default function Login() {
   // 已登录直接跳转
   useEffect(() => {
     if (getToken()) {
-      navigate('/dashboard', { replace: true })
+      navigate('/data-insights', { replace: true })
     }
   }, [navigate])
 
@@ -31,7 +31,7 @@ export default function Login() {
         const { access_token, user } = res.data
         setAuth(access_token, user)
         toast.success(`欢迎回来，${user.name}`)
-        navigate('/dashboard', { replace: true })
+        navigate('/data-insights', { replace: true })
       })
       .catch((err) => {
         codeHandled.current = false

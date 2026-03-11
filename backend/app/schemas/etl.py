@@ -55,6 +55,7 @@ class DataSourceOut(BaseModel):
     default_tag_ids: list[int] = []
     include_shared: bool = True
     is_enabled: bool
+    extraction_rule_id: int | None = None
     created_at: UTCDatetime
     updated_at: UTCDatetime
 
@@ -82,6 +83,7 @@ class DataSourceWithSyncOut(BaseModel):
     owner_name: str | None = None
     default_tag_ids: list[int] = []
     is_enabled: bool
+    extraction_rule_id: int | None = None
     created_at: UTCDatetime
     updated_at: UTCDatetime
     include_shared: bool = True
@@ -99,6 +101,7 @@ class CloudFolderCreate(BaseModel):
     folder_token: str
     folder_name: str = ""
     include_shared: bool = True
+    extraction_rule_id: int | None = None
 
 
 class CloudFolderOut(BaseModel):
@@ -109,6 +112,7 @@ class CloudFolderOut(BaseModel):
     owner_id: str
     include_shared: bool = True
     is_enabled: bool
+    extraction_rule_id: int | None = None
     last_sync_time: UTCDatetimeOpt = None
     last_sync_status: str = "idle"
     files_synced: int = 0

@@ -1,0 +1,1 @@
+{"timestamp": "2026-03-05T03:48:01.728602+00:00", "level": "INFO", "logger": "app.worker.scheduler", "message": "调度器已启动，ETL/云文件夹同步间隔: 30 分钟, 数据表同步: 120分钟, KG构建: 120分钟, 画像生成: 180分钟", "module": "scheduler", "function": "init_scheduler", "line": 118}

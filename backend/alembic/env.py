@@ -36,6 +36,11 @@ from app.models import (  # noqa: F401
     CalendarReminderPref,
     UserNotificationPref,
     KeywordSyncRule,
+    KGProfile,
+    ExtractionRule,
+    CleaningRule,
+    StructuredTable,
+    StructuredTableRow,
 )
 
 config = context.config

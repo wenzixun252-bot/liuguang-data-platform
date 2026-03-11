@@ -71,6 +71,7 @@ class ETLDataSource(Base):
     default_tag_ids: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="[]")
     include_shared: Mapped[bool] = mapped_column(nullable=False, server_default="true")
     is_enabled: Mapped[bool] = mapped_column(nullable=False, server_default="true")
+    extraction_rule_id: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now(), onupdate=func.now())
 
@@ -96,6 +97,7 @@ class CloudFolderSource(Base):
     last_sync_time: Mapped[datetime | None] = mapped_column()
     last_sync_status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="idle")
     files_synced: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    extraction_rule_id: Mapped[int | None] = mapped_column(Integer)
     error_message: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now(), onupdate=func.now())

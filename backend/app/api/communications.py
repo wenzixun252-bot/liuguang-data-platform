@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +25,7 @@ def _apply_visibility(stmt, visible_ids: list[str] | None):
 
 @router.get("/list", response_model=CommunicationListResponse, summary="沟通记录列表")
 async def list_communications(
+    request: Request,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
     comm_type: str | None = Query(None),
@@ -36,7 +37,7 @@ async def list_communications(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ) -> CommunicationListResponse:
-    visible_ids = await get_visible_owner_ids(current_user, db)
+    visible_ids = await get_visible_owner_ids(current_user, db, request)
 
     base = select(Communication)
     count_stmt = select(func.count()).select_from(Communication)
@@ -45,8 +46,14 @@ async def list_communications(
     count_stmt = _apply_visibility(count_stmt, visible_ids)
 
     if comm_type:
-        base = base.where(Communication.comm_type == comm_type)
-        count_stmt = count_stmt.where(Communication.comm_type == comm_type)
+        if comm_type == "meeting":
+            # "会议（含录音）" 包含 meeting 和 recording 两种类型
+            types = ["meeting", "recording"]
+            base = base.where(Communication.comm_type.in_(types))
+            count_stmt = count_stmt.where(Communication.comm_type.in_(types))
+        else:
+            base = base.where(Communication.comm_type == comm_type)
+            count_stmt = count_stmt.where(Communication.comm_type == comm_type)
 
     if search:
         like = f"%{search}%"
@@ -84,6 +91,10 @@ async def list_communications(
     items_stmt = base.order_by(Communication.comm_time.desc().nullslast()).offset((page - 1) * page_size).limit(page_size)
     rows = (await db.execute(items_stmt)).scalars().all()
 
+    # 将 key_info 中的 field_xxx key 翻译为中文 label
+    from app.services.etl.enricher import translate_key_info_batch
+    await translate_key_info_batch(rows, db)
+
     return CommunicationListResponse(
         items=[CommunicationOut.model_validate(r) for r in rows],
         total=total,
@@ -94,11 +105,12 @@ async def list_communications(
 
 @router.get("/{comm_id}", response_model=CommunicationOut, summary="沟通记录详情")
 async def get_communication(
+    request: Request,
     comm_id: int,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> CommunicationOut:
-    visible_ids = await get_visible_owner_ids(current_user, db)
+    visible_ids = await get_visible_owner_ids(current_user, db, request)
 
     stmt = select(Communication).where(Communication.id == comm_id)
     stmt = _apply_visibility(stmt, visible_ids)

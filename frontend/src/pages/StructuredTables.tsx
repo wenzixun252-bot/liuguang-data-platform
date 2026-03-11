@@ -19,8 +19,13 @@ interface StructuredTableItem {
   source_type: string
   source_url: string | null
   file_name: string | null
+  file_path: string | null
   row_count: number
   column_count: number
+  import_count: number
+  cleaning_rule_id?: number | null
+  cleaning_rule_name?: string | null
+  uploader_name: string | null
   synced_at: string | null
   created_at: string
   updated_at: string
@@ -240,7 +245,8 @@ export default function StructuredTables() {
       const url = window.URL.createObjectURL(new Blob([response.data]))
       const link = document.createElement('a')
       link.href = url
-      link.setAttribute('download', `${name}.xlsx`)
+      const downloadName = name.endsWith('.xlsx') ? name : `${name}.xlsx`
+      link.setAttribute('download', downloadName)
       document.body.appendChild(link)
       link.click()
       link.remove()
@@ -248,6 +254,23 @@ export default function StructuredTables() {
       toast.success('导出成功')
     } catch {
       toast.error('导出失败')
+    }
+  }
+
+  const handleDownloadOriginal = async (id: number, name: string) => {
+    try {
+      const response = await api.get(`/structured-tables/${id}/download-original`, { responseType: 'blob' })
+      const url = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', name)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+      toast.success('下载成功')
+    } catch {
+      toast.error('无原始文件')
     }
   }
 
@@ -411,10 +434,11 @@ export default function StructuredTables() {
                     <th className="text-left py-3 px-4 text-gray-500 font-medium">表名</th>
                     <th className="text-left py-3 px-4 text-gray-500 font-medium">标签</th>
                     <th className="text-left py-3 px-4 text-gray-500 font-medium">来源</th>
-                    <th className="text-left py-3 px-4 text-gray-500 font-medium">行数</th>
-                    <th className="text-left py-3 px-4 text-gray-500 font-medium">列数</th>
+                    <th className="text-left py-3 px-4 text-indigo-700 font-semibold bg-indigo-50/50">资产所有人</th>
+                    <th className="text-left py-3 px-4 text-gray-500 font-medium">记录数</th>
+                    <th className="text-left py-3 px-4 text-gray-500 font-medium">字段数</th>
                     <th className="text-left py-3 px-4 text-gray-500 font-medium">摘要</th>
-                    <th className="text-left py-3 px-4 text-gray-500 font-medium">同步时间</th>
+                    <th className="text-left py-3 px-4 text-gray-500 font-medium">同步/上传时间</th>
                     <th className="text-left py-3 px-4 text-gray-500 font-medium">操作</th>
                   </tr>
                 </thead>
@@ -433,8 +457,35 @@ export default function StructuredTables() {
                           setSelectedIds(next)
                         }} className="rounded" />
                       </td>
-                      <td className="py-3 px-4 text-gray-800 font-medium max-w-[200px] truncate">{item.name}</td>
-                      <td className="py-3 px-4 max-w-[200px]">
+                      <td className="py-3 px-4 max-w-[240px]">
+                        <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+                          <span className="text-gray-800 font-medium truncate">{item.name}</span>
+                          {(item.import_count ?? 1) > 1 && (
+                            <span
+                              className={`shrink-0 px-1.5 py-0.5 rounded text-xs border ${
+                                item.import_count >= 10
+                                  ? 'bg-amber-50 text-amber-700 border-amber-300 font-semibold'
+                                  : item.import_count >= 5
+                                    ? 'bg-purple-50 text-purple-600 border-purple-200'
+                                    : 'bg-indigo-50 text-indigo-600 border-indigo-200'
+                              }`}
+                              title={`${item.import_count} 人已归档此表格`}
+                            >
+                              {item.import_count >= 10 ? '🔥 ' : ''}{item.import_count} 人归档
+                            </span>
+                          )}
+                          {item.cleaning_rule_id ? (
+                            <span className="shrink-0 px-1.5 py-0.5 rounded text-xs bg-green-50 text-green-600 border border-green-200" title={item.cleaning_rule_name || '已清洗'}>
+                              {item.cleaning_rule_name || '已清洗'}
+                            </span>
+                          ) : (
+                            <span className="shrink-0 px-1.5 py-0.5 rounded text-xs bg-gray-50 text-gray-400 border border-gray-200">
+                              未清洗
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-3 px-4 max-w-[200px]" onClick={(e) => e.stopPropagation()}>
                         <InlineTagEditor
                           contentType="structured_table"
                           contentId={item.id}
@@ -447,6 +498,7 @@ export default function StructuredTables() {
                           {SOURCE_LABELS[item.source_type] || item.source_type}
                         </span>
                       </td>
+                      <td className="py-3 px-4 text-indigo-700 font-medium bg-indigo-50/30">{item.uploader_name || '-'}</td>
                       <td className="py-3 px-4 text-gray-500">{item.row_count}</td>
                       <td className="py-3 px-4 text-gray-500">{item.column_count}</td>
                       <td className="py-3 px-4 text-gray-500 max-w-[200px] truncate">{item.summary || '-'}</td>
@@ -519,6 +571,8 @@ export default function StructuredTables() {
           onSearchChange={setDetailSearch}
           onSync={() => handleSync(detail.id)}
           onDelete={() => handleDelete(detail.id)}
+          onExport={handleExport}
+          onDownloadOriginal={handleDownloadOriginal}
         />
       )}
 
@@ -530,7 +584,7 @@ export default function StructuredTables() {
 
 function TableDetailPanel({
   detail, rows, rowsTotal, rowPage, rowSearch, pageSize, loading,
-  onClose, onPageChange, onSearchChange, onSync, onDelete,
+  onClose, onPageChange, onSearchChange, onSync, onDelete, onExport, onDownloadOriginal,
 }: {
   detail: StructuredTableDetail
   rows: RowItem[]
@@ -544,8 +598,21 @@ function TableDetailPanel({
   onSearchChange: (s: string) => void
   onSync: () => void
   onDelete: () => void
+  onExport: (id: number, name: string) => void
+  onDownloadOriginal: (id: number, name: string) => void
 }) {
-  const columns = detail.schema_info?.map((s) => s.field_name) || (rows.length > 0 ? Object.keys(rows[0].row_data) : [])
+  // 构建 field_id -> field_name 映射，用于把原始字段ID翻译成中文
+  const fieldIdToName: Record<string, string> = {}
+  if (detail.schema_info) {
+    detail.schema_info.forEach((s) => {
+      fieldIdToName[s.field_id] = s.field_name
+      fieldIdToName[s.field_name] = s.field_name // 兼容已经是中文名的情况
+    })
+  }
+  // columnKeys: 用于访问 row_data 的实际 key（field_id 或 field_name）
+  const columnKeys = detail.schema_info?.map((s) => s.field_name) || (rows.length > 0 ? Object.keys(rows[0].row_data) : [])
+  // 显示用的列名：优先用中文 field_name
+  const getColumnLabel = (key: string) => fieldIdToName[key] || key
   const rowTotalPages = Math.ceil(rowsTotal / pageSize)
 
   return (
@@ -561,9 +628,24 @@ function TableDetailPanel({
               </span>
               <span>{detail.row_count} 行 × {detail.column_count} 列</span>
               {detail.synced_at && <span>同步: {new Date(detail.synced_at).toLocaleString('zh-CN')}</span>}
+              {detail.cleaning_rule_id ? (
+                <span className="px-2 py-0.5 rounded-full text-xs bg-green-50 text-green-600 border border-green-200">
+                  {detail.cleaning_rule_name || '已清洗'}
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 rounded-full text-xs bg-gray-50 text-gray-400 border border-gray-200">未清洗</span>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <button onClick={() => onExport(detail.id, detail.name)} className="flex items-center gap-1 px-3 py-1.5 bg-green-50 text-green-700 rounded-lg text-sm hover:bg-green-100">
+              <Download size={14} /> {detail.cleaning_rule_id ? '下载清洗后' : '下载 XLSX'}
+            </button>
+            {detail.file_path && (
+              <button onClick={() => onDownloadOriginal(detail.id, detail.file_name || detail.name)} className="flex items-center gap-1 px-3 py-1.5 bg-orange-50 text-orange-700 rounded-lg text-sm hover:bg-orange-100">
+                <Download size={14} /> 下载原表格
+              </button>
+            )}
             {detail.source_type !== 'local' && (
               <button onClick={onSync} className="flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg text-sm hover:bg-blue-100">
                 <RefreshCw size={14} /> 同步
@@ -627,8 +709,8 @@ function TableDetailPanel({
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="text-left py-2 px-3 text-gray-500 font-medium text-xs whitespace-nowrap">#</th>
-                    {columns.map((col) => (
-                      <th key={col} className="text-left py-2 px-3 text-gray-500 font-medium text-xs whitespace-nowrap">{col}</th>
+                    {columnKeys.map((col) => (
+                      <th key={col} className="text-left py-2 px-3 text-gray-500 font-medium text-xs whitespace-nowrap">{getColumnLabel(col)}</th>
                     ))}
                   </tr>
                 </thead>
@@ -636,7 +718,7 @@ function TableDetailPanel({
                   {rows.map((row) => (
                     <tr key={row.id} className="border-t border-gray-100 hover:bg-gray-50">
                       <td className="py-2 px-3 text-gray-400 text-xs">{row.row_index + 1}</td>
-                      {columns.map((col) => (
+                      {columnKeys.map((col) => (
                         <td key={col} className="py-2 px-3 text-gray-700 max-w-[200px] truncate">{String(row.row_data[col] ?? '')}</td>
                       ))}
                     </tr>

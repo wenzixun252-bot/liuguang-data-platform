@@ -11,9 +11,12 @@ import {
   Check,
   Search,
   Trash2,
+  ExternalLink,
+  Loader2,
 } from 'lucide-react'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
+import { useTaskProgress } from '../hooks/useTaskProgress'
 
 interface TodoItem {
   id: number
@@ -51,7 +54,25 @@ const TABS = [
   { key: 'completed', label: '已完成' },
 ]
 
+interface SourceDetail {
+  id: number
+  title: string | null
+  comm_type: string
+  comm_time: string | null
+  initiator: string | null
+  participants: string[]
+  content_text: string
+  summary: string | null
+  conclusions: string | null
+  action_items: string[]
+  keywords: string[]
+  source_url: string | null
+  bitable_url: string | null
+  created_at: string
+}
+
 export default function Todos({ embedded = false }: { embedded?: boolean } = {}) {
+  const { addTask, updateTask } = useTaskProgress()
   const PAGE_SIZE = embedded ? 5 : 20
   const [items, setItems] = useState<TodoItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -60,10 +81,15 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editTitle, setEditTitle] = useState('')
-  const [days, setDays] = useState(7)
+  const [days, setDays] = useState(2)
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
+  const [sourceModal, setSourceModal] = useState<{ open: boolean; loading: boolean; data: SourceDetail | null }>({
+    open: false,
+    loading: false,
+    data: null,
+  })
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
@@ -74,8 +100,8 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
     api
       .get('/todos', { params })
       .then((res) => {
-        setItems(res.data.items)
-        setTotal(res.data.total ?? res.data.items.length)
+        setItems(res.data.items || [])
+        setTotal(res.data.total ?? (res.data.items || []).length)
       })
       .catch(() => toast.error('加载待办失败'))
       .finally(() => setLoading(false))
@@ -93,12 +119,17 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
 
   const handleExtract = async () => {
     setExtracting(true)
+    const taskId = `todo-extract-${Date.now()}`
+    addTask(taskId, '智能提取待办', '/chat?tab=todos')
+    updateTask(taskId, { message: '正在分析数据...' })
     try {
       const res = await api.post('/todos/extract', { days })
+      updateTask(taskId, { status: 'done', progress: 100, message: `提取到 ${res.data.length} 条` })
       toast.success(`提取到 ${res.data.length} 条待办`)
       setTab('pending_review')
       fetchTodos()
     } catch {
+      updateTask(taskId, { status: 'error', progress: 100, message: '提取失败' })
       toast.error('提取待办失败')
     } finally {
       setExtracting(false)
@@ -161,6 +192,17 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
     }
   }
 
+  const handleViewSource = async (sourceId: number) => {
+    setSourceModal({ open: true, loading: true, data: null })
+    try {
+      const res = await api.get(`/communications/${sourceId}`)
+      setSourceModal({ open: true, loading: false, data: res.data })
+    } catch {
+      toast.error('加载来源详情失败')
+      setSourceModal({ open: false, loading: false, data: null })
+    }
+  }
+
   const toggleSelect = (id: number) => {
     const next = new Set(selected)
     if (next.has(id)) next.delete(id)
@@ -196,6 +238,7 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
             onChange={(e) => setDays(Number(e.target.value))}
             className="border border-gray-200 rounded-lg px-3 py-2 text-sm"
           >
+            <option value={2}>近 2 天</option>
             <option value={3}>近 3 天</option>
             <option value={7}>近 7 天</option>
             <option value={14}>近 14 天</option>
@@ -321,9 +364,18 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
                   <span className={`px-2 py-0.5 rounded-full text-xs ${PRIORITY_COLORS[item.priority]}`}>
                     {item.priority === 'high' ? '高' : item.priority === 'medium' ? '中' : '低'}
                   </span>
-                  <span className="text-xs text-gray-400">
-                    来源: 沟通记录
-                  </span>
+                  {item.source_id ? (
+                    <button
+                      onClick={() => handleViewSource(item.source_id!)}
+                      className="text-xs text-indigo-500 hover:text-indigo-700 hover:underline transition-colors"
+                    >
+                      来源: 沟通记录
+                    </button>
+                  ) : (
+                    <span className="text-xs text-gray-400">
+                      来源: 沟通记录
+                    </span>
+                  )}
                   {item.due_date && (
                     <span className="text-xs text-gray-400 flex items-center gap-1">
                       <Clock size={12} />
@@ -451,6 +503,157 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
             >
               <ChevronRight size={16} />
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* 来源详情弹窗 */}
+      {sourceModal.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setSourceModal({ open: false, loading: false, data: null })}>
+          <div
+            className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 max-h-[80vh] overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* 弹窗头部 */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+              <h3 className="text-base font-semibold text-gray-800">来源详情</h3>
+              <button
+                type="button"
+                title="关闭"
+                onClick={() => setSourceModal({ open: false, loading: false, data: null })}
+                className="p-1 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* 弹窗内容 */}
+            <div className="flex-1 overflow-y-auto p-5">
+              {sourceModal.loading ? (
+                <div className="flex items-center justify-center py-12 text-gray-400">
+                  <Loader2 size={24} className="animate-spin mr-2" />
+                  加载中...
+                </div>
+              ) : sourceModal.data ? (
+                <div className="space-y-4">
+                  {/* 标题 */}
+                  {sourceModal.data.title && (
+                    <div>
+                      <span className="text-xs font-medium text-gray-400">标题</span>
+                      <p className="text-sm text-gray-800 mt-0.5">{sourceModal.data.title}</p>
+                    </div>
+                  )}
+
+                  {/* 基本信息 */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <span className="text-xs font-medium text-gray-400">类型</span>
+                      <p className="text-sm text-gray-700 mt-0.5">{sourceModal.data.comm_type}</p>
+                    </div>
+                    {sourceModal.data.comm_time && (
+                      <div>
+                        <span className="text-xs font-medium text-gray-400">时间</span>
+                        <p className="text-sm text-gray-700 mt-0.5">
+                          {new Date(sourceModal.data.comm_time).toLocaleString('zh-CN')}
+                        </p>
+                      </div>
+                    )}
+                    {sourceModal.data.initiator && (
+                      <div>
+                        <span className="text-xs font-medium text-gray-400">发起人</span>
+                        <p className="text-sm text-gray-700 mt-0.5">{sourceModal.data.initiator}</p>
+                      </div>
+                    )}
+                    <div>
+                      <span className="text-xs font-medium text-gray-400">创建时间</span>
+                      <p className="text-sm text-gray-700 mt-0.5">
+                        {new Date(sourceModal.data.created_at).toLocaleString('zh-CN')}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* 参与人 */}
+                  {sourceModal.data.participants.length > 0 && (
+                    <div>
+                      <span className="text-xs font-medium text-gray-400">参与人</span>
+                      <div className="flex flex-wrap gap-1.5 mt-1">
+                        {sourceModal.data.participants.map((p, i) => (
+                          <span key={i} className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full text-xs">
+                            {typeof p === 'string' ? p : JSON.stringify(p)}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 摘要 */}
+                  {sourceModal.data.summary && (
+                    <div>
+                      <span className="text-xs font-medium text-gray-400">摘要</span>
+                      <p className="text-sm text-gray-700 mt-0.5 whitespace-pre-wrap">{sourceModal.data.summary}</p>
+                    </div>
+                  )}
+
+                  {/* 结论 */}
+                  {sourceModal.data.conclusions && (
+                    <div>
+                      <span className="text-xs font-medium text-gray-400">结论</span>
+                      <p className="text-sm text-gray-700 mt-0.5 whitespace-pre-wrap">{sourceModal.data.conclusions}</p>
+                    </div>
+                  )}
+
+                  {/* 待办事项 */}
+                  {sourceModal.data.action_items.length > 0 && (
+                    <div>
+                      <span className="text-xs font-medium text-gray-400">待办事项</span>
+                      <ul className="mt-1 space-y-1">
+                        {sourceModal.data.action_items.map((a, i) => (
+                          <li key={i} className="text-sm text-gray-700 flex items-start gap-1.5">
+                            <span className="text-indigo-400 mt-0.5">•</span>
+                            {typeof a === 'string' ? a : JSON.stringify(a)}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* 原文内容 */}
+                  <div>
+                    <span className="text-xs font-medium text-gray-400">原文内容</span>
+                    <p className="text-sm text-gray-600 mt-0.5 whitespace-pre-wrap max-h-40 overflow-y-auto bg-gray-50 rounded-lg p-3">
+                      {sourceModal.data.content_text}
+                    </p>
+                  </div>
+
+                  {/* 关键词 */}
+                  {sourceModal.data.keywords.length > 0 && (
+                    <div>
+                      <span className="text-xs font-medium text-gray-400">关键词</span>
+                      <div className="flex flex-wrap gap-1.5 mt-1">
+                        {sourceModal.data.keywords.map((k, i) => (
+                          <span key={i} className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs">
+                            {k}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 飞书源链接 */}
+                  {sourceModal.data.bitable_url && (
+                    <a
+                      href={sourceModal.data.bitable_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-xs text-indigo-500 hover:text-indigo-700 transition-colors"
+                    >
+                      <ExternalLink size={12} />
+                      在飞书多维表格中查看
+                    </a>
+                  )}
+                </div>
+              ) : null}
+            </div>
           </div>
         </div>
       )}

@@ -32,7 +32,7 @@ export function TagManagerPanel() {
   const fetchTags = async () => {
     try {
       const { data } = await api.get('/tags')
-      setTags(data)
+      setTags(Array.isArray(data) ? data : [])
     } catch { /* ignore */ } finally {
       setLoading(false)
     }
@@ -148,16 +148,18 @@ export function TagManagerPanel() {
             {tag.owner_id && (
               <>
                 <button
-                  onClick={() => { setEditingId(tag.id); setForm({ name: tag.name, category: tag.category, color: tag.color, is_shared: tag.is_shared }) }}
-                  className="opacity-0 group-hover:opacity-100 transition ml-1"
+                  onClick={(e) => { e.stopPropagation(); setEditingId(tag.id); setForm({ name: tag.name, category: tag.category, color: tag.color, is_shared: tag.is_shared }) }}
+                  className="ml-1 cursor-pointer"
+                  type="button"
                 >
-                  <Edit2 size={10} className="text-gray-400 hover:text-gray-700" />
+                  <Edit2 size={10} className="text-gray-400 hover:text-gray-700 transition-colors" />
                 </button>
                 <button
-                  onClick={() => handleDelete(tag.id)}
-                  className="opacity-0 group-hover:opacity-100 transition"
+                  onClick={(e) => { e.stopPropagation(); handleDelete(tag.id) }}
+                  className="cursor-pointer"
+                  type="button"
                 >
-                  <X size={10} className="text-gray-400 hover:text-red-400" />
+                  <X size={10} className="text-gray-400 hover:text-red-400 transition-colors" />
                 </button>
               </>
             )}
@@ -231,7 +233,7 @@ export function TagChips({
 
   const handleDetach = async (tagId: number) => {
     try {
-      await api.delete('/tags/detach', { data: { tag_id: tagId, content_type: contentType, content_id: contentId } })
+      await api.post('/tags/detach', { tag_id: tagId, content_type: contentType, content_id: contentId })
       fetchContentTags()
     } catch { /* ignore */ }
   }
@@ -254,7 +256,11 @@ export function TagChips({
         >
           {t.tag_name}
           {editable && (
-            <button onClick={() => handleDetach(t.tag_id)}>
+            <button
+              onClick={(e) => { e.stopPropagation(); handleDetach(t.tag_id) }}
+              className="p-0.5 rounded-full hover:bg-black/10 transition-colors cursor-pointer"
+              type="button"
+            >
               <X size={10} />
             </button>
           )}
@@ -302,7 +308,7 @@ export function TagFilter({
   const [allTags, setAllTags] = useState<TagDef[]>([])
 
   useEffect(() => {
-    api.get('/tags').then(res => setAllTags(res.data)).catch(() => {})
+    api.get('/tags').then(res => setAllTags(Array.isArray(res.data) ? res.data : [])).catch(() => {})
   }, [])
 
   const toggle = (id: number) => {
@@ -356,7 +362,7 @@ export function QuickTagSelector({
   const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    api.get('/tags').then(res => setAllTags(res.data)).catch(() => {})
+    api.get('/tags').then(res => setAllTags(Array.isArray(res.data) ? res.data : [])).catch(() => {})
   }, [])
 
   const filtered = allTags.filter(t => !search || t.name.toLowerCase().includes(search.toLowerCase()))
@@ -387,7 +393,7 @@ export function QuickTagSelector({
   return (
     <div className="relative" ref={containerRef}>
       <div
-        className="flex flex-wrap gap-1 items-center min-h-[36px] px-2 py-1 border border-gray-200 rounded-lg cursor-text bg-white"
+        className="relative z-50 flex flex-wrap gap-1 items-center min-h-[36px] px-2 py-1 border border-gray-200 rounded-lg cursor-text bg-white"
         onClick={() => setOpen(true)}
       >
         {selected.map(id => {
@@ -400,7 +406,12 @@ export function QuickTagSelector({
               style={{ backgroundColor: tag.color + '22', color: tag.color, border: `1px solid ${tag.color}44` }}
             >
               {tag.name}
-              <button onClick={e => { e.stopPropagation(); toggle(id) }}><X size={9} /></button>
+              <button
+                className="p-0.5 rounded-full hover:bg-black/10 transition-colors"
+                onClick={e => { e.stopPropagation(); toggle(id) }}
+              >
+                <X size={9} />
+              </button>
             </span>
           )
         })}
@@ -546,7 +557,7 @@ export function TagSelector({
   const [allTags, setAllTags] = useState<TagDef[]>([])
 
   useEffect(() => {
-    api.get('/tags').then(res => setAllTags(res.data)).catch(() => {})
+    api.get('/tags').then(res => setAllTags(Array.isArray(res.data) ? res.data : [])).catch(() => {})
   }, [])
 
   const toggle = (id: number) => {
@@ -648,9 +659,12 @@ export function InlineTagEditor({
 
   const handleDetach = async (tagId: number) => {
     try {
-      await api.delete('/tags/detach', { data: { tag_id: tagId, content_type: contentType, content_id: contentId } })
+      await api.post('/tags/detach', { tag_id: tagId, content_type: contentType, content_id: contentId })
       onChanged()
-    } catch { /* ignore */ }
+    } catch (e: any) {
+      const detail = e.response?.data?.detail
+      toast.error(typeof detail === 'string' ? detail : '移除标签失败')
+    }
   }
 
   const handleCreate = async () => {
@@ -684,10 +698,11 @@ export function InlineTagEditor({
         >
           {t.tag_name}
           <button
-            onClick={() => handleDetach(t.tag_id)}
-            className="opacity-0 group-hover:opacity-100 transition"
+            onClick={(e) => { e.stopPropagation(); handleDetach(t.tag_id) }}
+            className="ml-0.5 p-0.5 rounded-full hover:bg-black/10 transition-colors cursor-pointer"
+            type="button"
           >
-            <X size={8} />
+            <X size={10} />
           </button>
         </span>
       ))}

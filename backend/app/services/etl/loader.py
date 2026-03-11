@@ -38,8 +38,9 @@ class AssetLoader:
         if not records:
             return 0
 
-        # 0. 查询数据源的默认标签 ID
+        # 0. 查询数据源配置（默认标签 + 提取规则）
         default_tag_ids: list[int] = []
+        extraction_rule_id: int | None = None
         ds_result = await db.execute(
             select(ETLDataSource).where(
                 ETLDataSource.app_token == transform_result.app_token,
@@ -47,8 +48,11 @@ class AssetLoader:
             )
         )
         ds = ds_result.scalar_one_or_none()
-        if ds and ds.default_tag_ids:
-            default_tag_ids = ds.default_tag_ids
+        if ds:
+            if ds.default_tag_ids:
+                default_tag_ids = ds.default_tag_ids
+            if ds.extraction_rule_id:
+                extraction_rule_id = ds.extraction_rule_id
 
         # 0. 处理附件：下载 → 存盘 → 提取文本 → 追加到 content_text
         for record in records:
@@ -145,6 +149,32 @@ class AssetLoader:
                         await self._inherit_tags(
                             db, record.feishu_record_id, content_type, default_tag_ids
                         )
+
+                    # 应用提取规则：对有 extraction_rule_id 的数据源执行关键信息提取
+                    if extraction_rule_id and record_id and record.content_text:
+                        try:
+                            from app.services.etl.enricher import extract_key_info
+                            key_info = await extract_key_info(
+                                record.content_text, extraction_rule_id, db,
+                                title=getattr(record, 'title', None),
+                            )
+                            table_name_for_update = "documents" if content_type == "document" else "communications"
+                            await db.execute(
+                                text(
+                                    f"UPDATE {table_name_for_update} SET extraction_rule_id = :rule_id, "
+                                    f"key_info = CAST(:key_info AS jsonb) WHERE id = :id"
+                                ),
+                                {
+                                    "rule_id": extraction_rule_id,
+                                    "key_info": json.dumps(key_info, ensure_ascii=False) if key_info else None,
+                                    "id": record_id,
+                                },
+                            )
+                        except Exception as e_extract:
+                            logger.warning(
+                                "提取规则应用失败 (record_id=%s, rule_id=%d): %s",
+                                record.feishu_record_id, extraction_rule_id, e_extract,
+                            )
             except Exception as e:
                 logger.error(
                     "Upsert 失败 (record_id=%s): %s",
@@ -162,10 +192,6 @@ class AssetLoader:
             transform_result.table_id,
             loaded_count,
         )
-
-        # 4. ETL 完成后自动触发 KG 增量更新
-        if loaded_count > 0:
-            await self._trigger_kg_build(db, records)
 
         logger.info(
             "数据加载完成: %s/%s -> %s, 成功 %d/%d 条",
@@ -503,25 +529,6 @@ class AssetLoader:
 
         if attachment_metas:
             record.extra_fields["_attachments"] = attachment_metas
-
-    # ── KG 自动触发 ──────────────────────────────────────
-
-    @staticmethod
-    async def _trigger_kg_build(db: AsyncSession, records: list) -> None:
-        """ETL 完成后自动触发增量 KG 构建。"""
-        try:
-            from app.services.kg_builder import build_knowledge_graph
-            owner_ids = {r.owner_id for r in records if r.owner_id}
-            for oid in owner_ids:
-                result = await build_knowledge_graph(db, oid, incremental=True)
-                logger.info(
-                    "KG 自动构建完成 (owner=%s): entities=%d, relations=%d",
-                    oid,
-                    result.get("entities_added", 0),
-                    result.get("relations_added", 0),
-                )
-        except Exception as e:
-            logger.warning("KG 自动构建失败（不影响 ETL 结果）: %s", e)
 
     # ── 同步状态更新 ─────────────────────────────────────
 

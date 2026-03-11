@@ -1,11 +1,14 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import {
-  Search, RefreshCw, X, Loader2, Info, AlertTriangle, Lightbulb,
-  ZoomIn, ZoomOut, Maximize2, FileText, ExternalLink, Download, Paperclip,
+  RefreshCw, X, Loader2, Info, AlertTriangle, Lightbulb, Settings,
+  ZoomIn, ZoomOut, Maximize2, FileText, ExternalLink, Download, Paperclip, Network, UserSearch,
 } from 'lucide-react'
+import KGProfileWizard from '../components/KGProfileWizard'
+import { RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar, ResponsiveContainer } from 'recharts'
 import * as d3 from 'd3'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
+import { useTaskProgress } from '../hooks/useTaskProgress'
 
 // ── 类型定义 ──
 
@@ -123,16 +126,15 @@ interface MeetingDetailData {
 interface ProfileData {
   entity_id: number | null
   name: string
+  entity_type: string
   mention_count: number
   collaborators: { id: number; name: string; entity_type: string; relation_type: string; weight: number }[]
-  projects: { id: number; name: string; entity_type: string; relation_type: string; weight: number }[]
-  topics: { id: number; name: string; entity_type: string; relation_type: string; weight: number }[]
-  organizations: { id: number; name: string; entity_type: string; relation_type: string; weight: number }[]
-  communities: { id: number; name: string; entity_type: string; relation_type: string; weight: number }[]
+  items: { id: number; name: string; entity_type: string; relation_type: string; weight: number }[]
   leadership_insight: {
     id: number
     report_markdown: string | null
     dimensions: Record<string, unknown>
+    data_coverage: Record<string, unknown>
     generated_at: string
   } | null
 }
@@ -155,22 +157,55 @@ interface SimLink extends d3.SimulationLinkDatum<SimNode> {
   target_entity_id: number
 }
 
+// ── 六维雷达图组件 ──
+
+const DIMENSION_LABELS: Record<string, string> = {
+  communication: '沟通偏好',
+  decision_making: '决策模式',
+  focus_areas: '关注领域',
+  meeting_habits: '会议习惯',
+  responsiveness: '响应速度',
+  collaboration_advice: '协作能力',
+}
+
+function ProfileRadarChart({ dimensions }: { dimensions: Record<string, number> }) {
+  const data = Object.entries(DIMENSION_LABELS).map(([key, label]) => ({
+    dimension: label,
+    score: typeof dimensions[key] === 'number' ? dimensions[key] : 0,
+    fullMark: 10,
+  }))
+
+  return (
+    <div className="mb-2">
+      <ResponsiveContainer width="100%" height={200}>
+        <RadarChart cx="50%" cy="50%" outerRadius="70%" data={data}>
+          <PolarGrid stroke="#e5e7eb" />
+          <PolarAngleAxis dataKey="dimension" tick={{ fontSize: 10, fill: '#6b7280' }} />
+          <PolarRadiusAxis angle={90} domain={[0, 10]} tick={{ fontSize: 8, fill: '#9ca3af' }} axisLine={false} />
+          <Radar
+            name="评分"
+            dataKey="score"
+            stroke="#6366f1"
+            fill="#6366f1"
+            fillOpacity={0.2}
+            strokeWidth={2}
+          />
+        </RadarChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
 // ── 常量 ──
 
 const ENTITY_COLORS: Record<string, string> = {
   person: '#6366f1',
-  project: '#f59e0b',
-  topic: '#10b981',
-  organization: '#8b5cf6',
-  event: '#ef4444',
+  item: '#f59e0b',
 }
 
 const ENTITY_LABELS: Record<string, string> = {
   person: '人物',
-  project: '项目',
-  topic: '主题',
-  organization: '组织',
-  event: '事件',
+  item: '事项',
 }
 
 const RISK_CATEGORY_CONFIG: Record<string, { label: string; icon: string; color: string }> = {
@@ -182,9 +217,7 @@ const RISK_CATEGORY_CONFIG: Record<string, { label: string; icon: string; color:
 
 const RELATION_LABELS: Record<string, string> = {
   collaborates_with: '合作',
-  works_on: '参与',
-  discusses: '讨论',
-  belongs_to: '隶属',
+  involved_in: '参与',
   related_to: '关联',
 }
 
@@ -204,6 +237,7 @@ const SOURCE_TYPE_LABELS: Record<string, string> = {
 // ── 组件 ──
 
 export default function KnowledgeGraph({ embedded = false }: { embedded?: boolean } = {}) {
+  const { addTask, updateTask } = useTaskProgress()
   const [nodes, setNodes] = useState<KGNode[]>([])
   const [edges, setEdges] = useState<KGEdge[]>([])
   const [stats, setStats] = useState<KGStats | null>(null)
@@ -215,19 +249,20 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
   const [selectedNode, setSelectedNode] = useState<KGNode | null>(null)
   const [selectedRelations, setSelectedRelations] = useState<KGEdge[]>([])
   const [relatedNodes, setRelatedNodes] = useState<KGNode[]>([])
-  const [typeFilter, setTypeFilter] = useState<string>('')
   const [communityFilter, setCommunityFilter] = useState<string>('')
-  const [searchQuery, setSearchQuery] = useState('')
-  const [colorMode, setColorMode] = useState<'type' | 'community'>('type')
-  const [rightTab, setRightTab] = useState<'insights' | 'risks'>('insights')
+  const [rightTab, setRightTab] = useState<'insights' | 'risks' | 'domains' | 'profiles'>('insights')
   const [domainTab, setDomainTab] = useState<string>('all')
-  const [nodeLimit, setNodeLimit] = useState<number>(50)
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null)
   const [linkedAssets, setLinkedAssets] = useState<LinkedAsset[]>([])
   const [profileData, setProfileData] = useState<ProfileData | null>(null)
   const [profileLoading, setProfileLoading] = useState(false)
   const [, setHoveredNodeId] = useState<number | null>(null)
 
+  const [personProfiles, setPersonProfiles] = useState<{ id: number; name: string; mention_count: number }[]>([])
+  const [personProfilesLoading, setPersonProfilesLoading] = useState(false)
+  const [selectedProfileName, setSelectedProfileName] = useState<string | null>(null)
+  const [selectedProfileData, setSelectedProfileData] = useState<ProfileData | null>(null)
+  const [selectedProfileLoading, setSelectedProfileLoading] = useState(false)
   const [generatingProfile, setGeneratingProfile] = useState(false)
   const [showReportModal, setShowReportModal] = useState(false)
   const [showAssetModal, setShowAssetModal] = useState(false)
@@ -237,14 +272,29 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
   const [assetLoading, setAssetLoading] = useState(false)
   const [imagePreview, setImagePreview] = useState<string | null>(null)
 
+  // KG Profile 向导相关
+  const [showWizard, setShowWizard] = useState(false)
+  const [kgProfile, setKgProfile] = useState<Record<string, unknown> | null>(null)
+  const [kgProfileLoaded, setKgProfileLoaded] = useState(false)
+
+  const [activeInsightKey, setActiveInsightKey] = useState<string | null>(null)
+  const activeHighlightRef = useRef<{ key: string; ids: Set<number> } | null>(null)
+
   const svgRef = useRef<SVGSVGElement>(null)
   const simulationRef = useRef<d3.Simulation<SimNode, SimLink> | null>(null)
+  const topIdsRef = useRef<Set<number>>(new Set())
 
   // ── 获取图谱数据 ──
+  // ── 加载 KG Profile ──
+  useEffect(() => {
+    api.get('/knowledge-graph/profile')
+      .then(res => { setKgProfile(res.data); setKgProfileLoaded(true) })
+      .catch(() => setKgProfileLoaded(true))
+  }, [])
+
   const fetchGraph = useCallback(() => {
     setLoading(true)
-    const params: Record<string, unknown> = { limit: nodeLimit }
-    if (typeFilter) params.entity_type = typeFilter
+    const params: Record<string, unknown> = { limit: 150 }
     // 业务域Tab映射到community_id
     if (domainTab !== 'all') {
       params.community_id = parseInt(domainTab)
@@ -259,8 +309,14 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
 
     Promise.all([graphPromise, statsPromise, insightsPromise, risksPromise])
       .then(([graphRes, statsRes, insightsRes, risksRes]) => {
-        setNodes(graphRes.data.nodes)
-        setEdges(graphRes.data.edges)
+        // 过滤掉没有业务域归属的节点（community_id 为 null）
+        const rawNodes: KGNode[] = graphRes.data.nodes || []
+        const domainNodes = rawNodes.filter(n => n.community_id !== null)
+        setNodes(domainNodes)
+        // 过滤掉引用了被移除节点的边
+        const domainNodeIds = new Set(domainNodes.map(n => n.id))
+        const rawEdges: KGEdge[] = graphRes.data.edges || []
+        setEdges(rawEdges.filter(e => domainNodeIds.has(e.source_entity_id) && domainNodeIds.has(e.target_entity_id)))
         setStats(statsRes.data)
         if (statsRes.data.last_analysis_at) {
           setLastAnalysisAt(statsRes.data.last_analysis_at)
@@ -273,13 +329,16 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
       })
       .catch(() => toast.error('加载图谱失败'))
       .finally(() => setLoading(false))
-  }, [typeFilter, communityFilter, domainTab, nodeLimit])
+  }, [communityFilter, domainTab])
 
   useEffect(() => { fetchGraph() }, [fetchGraph])
 
   // ── 轮询构建进度（抽取为独立函数，页面加载和手动触发均可复用） ──
+  const kgTaskId = 'kg-build'
   const pollBuildProgress = useCallback(async () => {
     setBuilding(true)
+    addTask(kgTaskId, '知识图谱生成', '/chat?tab=graph')
+    updateTask(kgTaskId, { message: '正在构建...' })
     try {
       let done = false
       while (!done) {
@@ -287,6 +346,7 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
         const { status, progress, message } = res.data
         setBuildProgress(progress || 0)
         setBuildMessage(message || '')
+        updateTask(kgTaskId, { progress: progress || 0, message: message || '构建中...' })
 
         if (status === 'done') {
           if (res.data.result?.analysis) {
@@ -295,9 +355,15 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
           setLastAnalysisAt(new Date().toISOString())
           fetchGraph()
           toast.success('知识图谱生成完成')
+          updateTask(kgTaskId, { status: 'done', progress: 100, message: '已完成' })
           done = true
         } else if (status === 'error') {
           toast.error(`知识图谱生成失败: ${message}`)
+          updateTask(kgTaskId, { status: 'error', progress: 100, message: message || '失败' })
+          done = true
+        } else if (status === 'cancelled') {
+          toast('知识图谱构建已取消', { icon: '🛑' })
+          updateTask(kgTaskId, { status: 'error', message: '已取消' })
           done = true
         } else if (status !== 'running') {
           // idle or unknown — stop polling
@@ -309,12 +375,13 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
     } catch (err: any) {
       const detail = err?.response?.data?.detail || err?.message || '未知错误'
       toast.error(`查询构建进度失败: ${detail}`)
+      updateTask(kgTaskId, { status: 'error', progress: 100, message: '查询失败' })
     } finally {
       setBuilding(false)
       setBuildProgress(0)
       setBuildMessage('')
     }
-  }, [fetchGraph])
+  }, [fetchGraph, addTask, updateTask])
 
   // ── 页面加载时检查是否有正在运行的构建任务 ──
   useEffect(() => {
@@ -348,15 +415,17 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
       })
     svg.call(zoom)
 
-    // 构建模拟数据
-    const simNodes: SimNode[] = nodes.map(n => ({
-      id: n.id,
-      name: n.name,
-      entity_type: n.entity_type,
-      mention_count: n.mention_count,
-      community_id: n.community_id,
-      importance_score: n.importance_score ?? 0,
-    }))
+    // 构建模拟数据（过滤掉没有业务域归属的实体）
+    const simNodes: SimNode[] = nodes
+      .filter(n => n.community_id !== null)
+      .map(n => ({
+        id: n.id,
+        name: n.name,
+        entity_type: n.entity_type,
+        mention_count: n.mention_count,
+        community_id: n.community_id,
+        importance_score: n.importance_score ?? 0,
+      }))
 
     const nodeMap = new Map(simNodes.map(n => [n.id, n]))
     const simLinks: SimLink[] = edges
@@ -377,22 +446,25 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
       const idx = communityIds.indexOf(id)
       return (2 * Math.PI * idx) / Math.max(communityIds.length, 1)
     }
-    const commRadius = Math.min(width, height) * 0.2
+    const commRadius = Math.min(width, height) * 0.3
 
     // 力模型
     const simulation = d3.forceSimulation(simNodes)
       .force('link', d3.forceLink<SimNode, SimLink>(simLinks).id(d => d.id).distance(70).strength(0.3))
-      .force('charge', d3.forceManyBody().strength(-120))
+      .force('charge', d3.forceManyBody().strength(-100))
       .force('center', d3.forceCenter(width / 2, height / 2))
       .force('collide', d3.forceCollide<SimNode>().radius(d => getNodeRadius(d) + 5))
       .force('communityX', d3.forceX<SimNode>(d =>
         d.community_id !== null ? width / 2 + commRadius * Math.cos(commAngle(d.community_id)) : width / 2
-      ).strength(d => d.community_id !== null ? 0.1 : 0))
+      ).strength(d => d.community_id !== null ? 0.25 : 0))
       .force('communityY', d3.forceY<SimNode>(d =>
         d.community_id !== null ? height / 2 + commRadius * Math.sin(commAngle(d.community_id)) : height / 2
-      ).strength(d => d.community_id !== null ? 0.1 : 0))
+      ).strength(d => d.community_id !== null ? 0.25 : 0))
 
     simulationRef.current = simulation
+
+    // 域背景层（在边层之前）
+    const domainBgGroup = container.append('g').attr('class', 'domain-backgrounds')
 
     // 绘制边
     const linkGroup = container.append('g').attr('class', 'links')
@@ -410,16 +482,34 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
       .join('g')
       .attr('cursor', 'pointer')
 
-    node.append('circle')
-      .attr('r', d => getNodeRadius(d))
-      .attr('fill', d => getNodeColor(d))
-      .attr('stroke', 'white')
-      .attr('stroke-width', 1.5)
-      .attr('opacity', 0.85)
+    // person 节点用圆形，item 节点用圆角矩形
+    node.each(function (d) {
+      const el = d3.select(this)
+      const r = getNodeRadius(d)
+      if (d.entity_type === 'item') {
+        const size = r * 1.6
+        el.append('rect')
+          .attr('width', size).attr('height', size)
+          .attr('x', -size / 2).attr('y', -size / 2)
+          .attr('rx', 4).attr('ry', 4)
+          .attr('fill', getNodeColor(d))
+          .attr('stroke', 'white')
+          .attr('stroke-width', 1.5)
+          .attr('opacity', 0.85)
+      } else {
+        el.append('circle')
+          .attr('r', r)
+          .attr('fill', getNodeColor(d))
+          .attr('stroke', 'white')
+          .attr('stroke-width', 1.5)
+          .attr('opacity', 0.85)
+      }
+    })
 
     // 按重要性排序，只有 Top 15 显示标签，其余悬停时显示
     const sortedByImportance = [...simNodes].sort((a, b) => b.importance_score - a.importance_score)
     const topIds = new Set(sortedByImportance.slice(0, 15).map(n => n.id))
+    topIdsRef.current = topIds
 
     node.append('text')
       .text(d => d.name.length > 8 ? d.name.slice(0, 8) + '...' : d.name)
@@ -469,7 +559,7 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
     node.on('mouseenter', (_event, d) => {
       setHoveredNodeId(d.id)
       const connected = connectedMap.get(d.id) ?? new Set()
-      node.select('circle')
+      node.select('circle, rect')
         .attr('opacity', (n: SimNode) => n.id === d.id || connected.has(n.id) ? 1 : 0.15)
       // 悬停时显示相关节点标签
       node.select('text')
@@ -489,13 +579,33 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
 
     node.on('mouseleave', () => {
       setHoveredNodeId(null)
-      node.select('circle').attr('opacity', 0.85)
-      // 恢复：只有 Top 节点显示标签
-      node.select('text').attr('opacity', (n: SimNode) => topIds.has(n.id) ? 1 : 0)
-      link.attr('stroke-opacity', 0.5).attr('stroke', '#cbd5e1')
+      const active = activeHighlightRef.current
+      if (active) {
+        // 恢复到洞察/风险高亮状态
+        const idSet = active.ids
+        node.select('circle, rect')
+          .attr('opacity', (n: SimNode) => idSet.has(n.id) ? 1 : 0.15)
+          .attr('stroke', (n: SimNode) => idSet.has(n.id) ? '#1e1b4b' : 'white')
+          .attr('stroke-width', (n: SimNode) => idSet.has(n.id) ? 3 : 1.5)
+        node.select('text')
+          .attr('opacity', (n: SimNode) => idSet.has(n.id) ? 1 : 0.1)
+        link
+          .attr('stroke-opacity', (l: SimLink) => {
+            const sid = (l.source as SimNode).id
+            const tid = (l.target as SimNode).id
+            return idSet.has(sid) && idSet.has(tid) ? 0.8 : 0.08
+          })
+          .attr('stroke', '#cbd5e1')
+      } else {
+        node.select('circle, rect').attr('opacity', 0.85)
+        // 恢复：只有 Top 节点显示标签
+        node.select('text').attr('opacity', (n: SimNode) => topIds.has(n.id) ? 1 : 0)
+        link.attr('stroke-opacity', 0.5).attr('stroke', '#cbd5e1')
+      }
     })
 
     // tick 更新位置
+    let tickCount = 0
     simulation.on('tick', () => {
       link
         .attr('x1', d => (d.source as SimNode).x ?? 0)
@@ -504,30 +614,126 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
         .attr('y2', d => (d.target as SimNode).y ?? 0)
 
       node.attr('transform', d => `translate(${d.x ?? 0},${d.y ?? 0})`)
+
+      // 每 10 个 tick 更新域背景圆
+      tickCount++
+      if (tickCount % 10 === 0) {
+        const communityPositions = new Map<number, { xs: number[], ys: number[] }>()
+        simNodes.forEach(n => {
+          if (n.community_id !== null && n.x !== undefined && n.y !== undefined) {
+            if (!communityPositions.has(n.community_id)) {
+              communityPositions.set(n.community_id, { xs: [], ys: [] })
+            }
+            const cp = communityPositions.get(n.community_id)!
+            cp.xs.push(n.x)
+            cp.ys.push(n.y)
+          }
+        })
+
+        // 查找社群的 domain_label
+        const communityLabelMap = new Map<number, string>()
+        for (const c of (analysisResult?.communities ?? [])) {
+          communityLabelMap.set(c.community_id, c.domain_label || `业务域${c.community_id + 1}`)
+        }
+
+        const bgData = Array.from(communityPositions.entries())
+          .filter(([, pos]) => pos.xs.length >= 2)
+          .map(([cid, pos]) => {
+            const cx = pos.xs.reduce((a, b) => a + b, 0) / pos.xs.length
+            const cy = pos.ys.reduce((a, b) => a + b, 0) / pos.ys.length
+            const maxDist = Math.max(40, ...pos.xs.map((x, i) =>
+              Math.sqrt((x - cx) ** 2 + (pos.ys[i] - cy) ** 2)
+            ))
+            return { cid, cx, cy, r: maxDist + 30, label: communityLabelMap.get(cid) || '' }
+          })
+
+        // 背景圆
+        domainBgGroup.selectAll<SVGCircleElement, typeof bgData[0]>('circle')
+          .data(bgData, d => String(d.cid))
+          .join('circle')
+          .attr('cx', d => d.cx)
+          .attr('cy', d => d.cy)
+          .attr('r', d => d.r)
+          .attr('fill', d => COMMUNITY_COLORS[d.cid % COMMUNITY_COLORS.length])
+          .attr('opacity', 0.08)
+          .attr('stroke', d => COMMUNITY_COLORS[d.cid % COMMUNITY_COLORS.length])
+          .attr('stroke-opacity', 0.3)
+          .attr('stroke-width', 1.5)
+          .attr('stroke-dasharray', '6 3')
+
+        // 域名标签
+        domainBgGroup.selectAll<SVGTextElement, typeof bgData[0]>('text')
+          .data(bgData, d => String(d.cid))
+          .join('text')
+          .attr('x', d => d.cx)
+          .attr('y', d => d.cy - d.r + 16)
+          .attr('text-anchor', 'middle')
+          .attr('font-size', '11px')
+          .attr('font-weight', '500')
+          .attr('fill', d => COMMUNITY_COLORS[d.cid % COMMUNITY_COLORS.length])
+          .attr('opacity', 0.6)
+          .attr('pointer-events', 'none')
+          .text(d => d.label.length > 6 ? d.label.slice(0, 6) + '…' : d.label)
+      }
     })
 
     return () => {
       simulation.stop()
     }
-  }, [nodes, edges, colorMode])
+  }, [nodes, edges, analysisResult])
 
-  // ── 节点颜色 ──
-  function getNodeColor(d: SimNode | KGNode): string {
-    if (colorMode === 'community' && d.community_id !== null) {
-      return COMMUNITY_COLORS[d.community_id % COMMUNITY_COLORS.length]
+  // ── 人物画像列表加载 ──
+
+  const loadPersonProfiles = useCallback(async () => {
+    setPersonProfilesLoading(true)
+    try {
+      const res = await api.get('/knowledge-graph/entities', {
+        params: { entity_type: 'person', page_size: 100 },
+      })
+      setPersonProfiles(
+        (res.data || []).map((e: KGNode) => ({
+          id: e.id,
+          name: e.name,
+          mention_count: e.mention_count,
+        }))
+      )
+    } catch {
+      setPersonProfiles([])
     }
-    return ENTITY_COLORS[d.entity_type] || '#94a3b8'
-  }
+    setPersonProfilesLoading(false)
+  }, [])
 
-  function getNodeRadius(d: SimNode | KGNode): number {
-    const score = ('importance_score' in d) ? (d as any).importance_score : 0
-    // 基于重要性评分：score 0~1 映射到半径 6~28
-    return Math.max(6, Math.min(28, 6 + score * 22))
-  }
+  const loadPersonProfileDetail = useCallback(async (name: string) => {
+    setSelectedProfileName(name)
+    setSelectedProfileLoading(true)
+    try {
+      const res = await api.get('/profile/by-name', { params: { name } })
+      setSelectedProfileData(res.data)
+    } catch {
+      setSelectedProfileData(null)
+    }
+    setSelectedProfileLoading(false)
+  }, [])
+
+  // 切换到 profiles tab 时自动加载列表
+  useEffect(() => {
+    if (rightTab === 'profiles' && personProfiles.length === 0) {
+      loadPersonProfiles()
+    }
+  }, [rightTab, personProfiles.length, loadPersonProfiles])
 
   // ── 事件处理 ──
 
   const handleBuildAndAnalyze = async () => {
+    // 首次生成且没有 profile 时，弹出向导
+    if (!kgProfile && kgProfileLoaded) {
+      setShowWizard(true)
+      return
+    }
+    await startBuild()
+  }
+
+  const startBuild = async () => {
     setBuildProgress(0)
     setBuildMessage('正在启动构建任务...')
     try {
@@ -535,7 +741,6 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
       if (startRes.data.status === 'running') {
         toast('构建任务已在运行中', { icon: 'ℹ️' })
       }
-      // 复用轮询逻辑
       await pollBuildProgress()
     } catch (err: any) {
       const detail = err?.response?.data?.detail || err?.message || '未知错误'
@@ -543,6 +748,18 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
       setBuilding(false)
       setBuildProgress(0)
       setBuildMessage('')
+    }
+  }
+
+  const handleWizardSubmit = async (data: { user_name: string; user_role: string; user_department: string; user_description: string; focus_people: string[]; focus_projects: string[]; data_sources: string[]; time_range_days: number }) => {
+    try {
+      await api.post('/knowledge-graph/profile', data)
+      setKgProfile(data)
+      setShowWizard(false)
+      toast.success('配置已保存')
+      await startBuild()
+    } catch {
+      toast.error('保存配置失败')
     }
   }
 
@@ -574,8 +791,8 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
     setLinkedAssets([])
     try {
       const res = await api.get(`/knowledge-graph/entities/${node.id}`)
-      setSelectedRelations(res.data.relations)
-      setRelatedNodes(res.data.related_entities)
+      setSelectedRelations(res.data.relations || [])
+      setRelatedNodes(res.data.related_entities || [])
     } catch {
       setSelectedRelations([])
       setRelatedNodes([])
@@ -597,24 +814,6 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
       } finally {
         setProfileLoading(false)
       }
-    }
-  }
-
-  const handleSearch = async () => {
-    if (!searchQuery.trim()) {
-      fetchGraph()
-      return
-    }
-    try {
-      const res = await api.post('/knowledge-graph/search', {
-        query: searchQuery,
-        entity_type: typeFilter || null,
-        limit: 100,
-      })
-      setNodes(res.data)
-      setEdges([])
-    } catch {
-      toast.error('搜索失败')
     }
   }
 
@@ -643,27 +842,44 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
     )
   }
 
-  // 高亮某些实体（从洞察/风险卡片点击）
-  const highlightEntities = (entityIds: number[]) => {
+  // 高亮某些实体（从洞察/风险卡片点击，切换逻辑）
+  const highlightEntities = (entityIds: number[], key: string) => {
     if (!svgRef.current) return
-    const idSet = new Set(entityIds)
     const svg = d3.select(svgRef.current)
-    svg.selectAll('.nodes g circle')
-      .attr('opacity', (d: any) => idSet.has(d.id) ? 1 : 0.15)
-      .attr('stroke', (d: any) => idSet.has(d.id) ? '#1e1b4b' : 'white')
-      .attr('stroke-width', (d: any) => idSet.has(d.id) ? 3 : 1.5)
-    svg.selectAll('.nodes g text')
-      .attr('opacity', (d: any) => idSet.has(d.id) ? 1 : 0.15)
+    const topIds = topIdsRef.current
 
-    // 3 秒后恢复
-    setTimeout(() => {
+    // 再次点击同一项 → 取消高亮
+    if (activeInsightKey === key) {
+      setActiveInsightKey(null)
+      activeHighlightRef.current = null
       svg.selectAll('.nodes g circle')
         .attr('opacity', 0.85)
         .attr('stroke', 'white')
         .attr('stroke-width', 1.5)
       svg.selectAll('.nodes g text')
-        .attr('opacity', 1)
-    }, 3000)
+        .attr('opacity', (d: any) => topIds.has(d.id) ? 1 : 0)
+      svg.selectAll('.links line')
+        .attr('stroke-opacity', 0.5)
+        .attr('stroke', '#cbd5e1')
+      return
+    }
+
+    // 点击新的项 → 切换高亮
+    setActiveInsightKey(key)
+    const idSet = new Set(entityIds)
+    activeHighlightRef.current = { key, ids: idSet }
+    svg.selectAll('.nodes g circle')
+      .attr('opacity', (d: any) => idSet.has(d.id) ? 1 : 0.15)
+      .attr('stroke', (d: any) => idSet.has(d.id) ? '#1e1b4b' : 'white')
+      .attr('stroke-width', (d: any) => idSet.has(d.id) ? 3 : 1.5)
+    svg.selectAll('.nodes g text')
+      .attr('opacity', (d: any) => idSet.has(d.id) ? 1 : 0.1)
+    svg.selectAll('.links line')
+      .attr('stroke-opacity', (d: any) => {
+        const sid = (d.source as any).id ?? d.source_entity_id
+        const tid = (d.target as any).id ?? d.target_entity_id
+        return idSet.has(sid) && idSet.has(tid) ? 0.8 : 0.08
+      })
   }
 
   // 生成/更新画像
@@ -687,8 +903,20 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
     }
   }
 
-  // 获取社群选项：过滤掉成员数 < 3 的小社群
-  const communityOptions = (analysisResult?.communities ?? []).filter(c => c.member_count >= 3)
+  // 获取社群选项：过滤掉成员数 < 2 的小社群
+  const allCommunities = analysisResult?.communities ?? []
+  const communityOptions = allCommunities.filter(c => c.member_count >= 2)
+
+  // ── 节点颜色（始终按实体类型着色） ──
+  function getNodeColor(d: SimNode | KGNode): string {
+    return ENTITY_COLORS[d.entity_type] || '#94a3b8'
+  }
+
+  function getNodeRadius(d: SimNode | KGNode): number {
+    const score = ('importance_score' in d) ? (d as any).importance_score : 0
+    // 基于重要性评分：score 0~1 映射到半径 6~28
+    return Math.max(6, Math.min(28, 6 + score * 22))
+  }
 
   // 当前选中的域名称
   const activeDomainLabel = domainTab === 'all'
@@ -696,7 +924,7 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
     : (() => {
         const c = communityOptions.find(c => String(c.community_id) === domainTab)
         if (!c) return '全部业务域'
-        const raw = c.domain_label || c.label || `域${c.community_id + 1}`
+        const raw = c.domain_label || `业务域${c.community_id + 1}`
         return raw.length > 8 ? raw.slice(0, 8) : raw
       })()
 
@@ -706,83 +934,55 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
       <div className="bg-white rounded-xl shadow-sm px-4 py-2.5 flex items-center gap-2 flex-wrap">
         {!embedded && <h1 className="text-lg font-bold text-gray-800 mr-2">数据图谱</h1>}
 
-        {/* 搜索 */}
-        <div className="relative">
-          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input
-            type="text"
-            placeholder="搜索实体..."
-            className="pl-8 pr-3 py-1.5 border border-gray-200 rounded-lg text-sm w-36 focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300 transition-all"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-          />
-        </div>
-
-        {/* 分隔线 */}
-        <div className="w-px h-6 bg-gray-200" />
-
-        {/* 类型过滤 */}
-        <select
-          value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value)}
-          className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm bg-white hover:border-gray-300 transition-colors"
-        >
-          <option value="">全部类型</option>
-          {Object.entries(ENTITY_LABELS).map(([k, v]) => (
-            <option key={k} value={k}>{v}</option>
-          ))}
-        </select>
-
-        {/* 业务域过滤 — 下拉选择器替代Tab栏 */}
+        {/* 业务域彩色切片 */}
         {communityOptions.length > 0 && (
-          <select
-            value={domainTab}
-            onChange={(e) => {
-              setDomainTab(e.target.value)
-              setCommunityFilter(e.target.value === 'all' ? '' : e.target.value)
-            }}
-            className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm bg-white hover:border-gray-300 transition-colors"
-          >
-            <option value="all">全部业务域</option>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <button
+              type="button"
+              onClick={() => { setDomainTab('all'); setCommunityFilter('') }}
+              className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all ${
+                domainTab === 'all'
+                  ? 'bg-gray-800 text-white shadow-sm'
+                  : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+              }`}
+            >
+              全部
+            </button>
             {communityOptions.map(c => {
-              const label = c.domain_label || c.label || `域${c.community_id + 1}`
+              const domainColor = COMMUNITY_COLORS[c.community_id % COMMUNITY_COLORS.length]
+              const label = c.domain_label || `业务域${c.community_id + 1}`
+              const displayLabel = label.length > 8 ? label.slice(0, 8) + '…' : label
+              const isActive = domainTab === String(c.community_id)
               return (
-                <option key={c.community_id} value={String(c.community_id)}>
-                  {label.length > 10 ? label.slice(0, 10) + '…' : label} ({c.member_count})
-                </option>
+                <button
+                  key={c.community_id}
+                  type="button"
+                  onClick={() => {
+                    const val = String(c.community_id)
+                    setDomainTab(val)
+                    setCommunityFilter(val)
+                  }}
+                  className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all flex items-center gap-1.5 ${
+                    isActive ? 'text-white shadow-sm' : 'text-gray-600 hover:opacity-80'
+                  }`}
+                  style={isActive
+                    ? { backgroundColor: domainColor }
+                    : { backgroundColor: domainColor + '18', color: domainColor }
+                  }
+                >
+                  <span
+                    className="w-2 h-2 rounded-full shrink-0"
+                    style={{ backgroundColor: isActive ? 'white' : domainColor }}
+                  />
+                  {displayLabel}
+                  <span className={`text-[10px] ${isActive ? 'text-white/80' : 'opacity-60'}`}>
+                    {c.member_count}
+                  </span>
+                </button>
               )
             })}
-          </select>
+          </div>
         )}
-
-        {/* 显示数量 */}
-        <select
-          value={nodeLimit}
-          onChange={(e) => setNodeLimit(Number(e.target.value))}
-          className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm bg-white hover:border-gray-300 transition-colors"
-        >
-          <option value={30}>30 个</option>
-          <option value={50}>50 个</option>
-          <option value={100}>100 个</option>
-          <option value={200}>全部</option>
-        </select>
-
-        {/* 着色模式 */}
-        <div className="flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5">
-          <button
-            onClick={() => setColorMode('type')}
-            className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${colorMode === 'type' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-          >
-            类型
-          </button>
-          <button
-            onClick={() => setColorMode('community')}
-            className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${colorMode === 'community' ? 'bg-white text-indigo-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-          >
-            域
-          </button>
-        </div>
 
         {/* 右侧：统计 + 时间 + 操作 */}
         <div className="flex items-center gap-2 ml-auto">
@@ -818,7 +1018,18 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
                 <span className="text-xs text-gray-500 whitespace-nowrap">{buildMessage || `${buildProgress}%`}</span>
               </div>
             )}
+            {kgProfile && (
+              <button
+                type="button"
+                onClick={() => setShowWizard(true)}
+                title="图谱配置"
+                className="flex items-center gap-1 px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition-colors"
+              >
+                <Settings size={14} />
+              </button>
+            )}
             <button
+              type="button"
               onClick={handleBuildAndAnalyze}
               disabled={building}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm font-medium transition-colors"
@@ -840,22 +1051,10 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
           <div className="absolute top-3 left-3 z-10 flex items-center gap-3 bg-white/90 backdrop-blur-sm rounded-lg px-3 py-1.5 shadow-sm border border-gray-100">
             {Object.entries(ENTITY_LABELS).map(([type, label]) => (
               <div key={type} className="flex items-center gap-1 text-xs text-gray-500">
-                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: ENTITY_COLORS[type] }} />
+                <span className={`w-2 h-2 flex-shrink-0 ${type === 'item' ? 'rounded-sm' : 'rounded-full'}`} style={{ backgroundColor: ENTITY_COLORS[type] }} />
                 {label}
               </div>
             ))}
-            {domainTab !== 'all' && (
-              <>
-                <div className="w-px h-3 bg-gray-300" />
-                <span className="text-xs font-medium text-indigo-600">{activeDomainLabel}</span>
-                <button
-                  onClick={() => { setDomainTab('all'); setCommunityFilter('') }}
-                  className="text-gray-400 hover:text-gray-600"
-                >
-                  <X size={12} />
-                </button>
-              </>
-            )}
           </div>
 
           {loading ? (
@@ -962,11 +1161,11 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
                 )}
 
                 {/* 关联资产 */}
-                {linkedAssets.length > 0 && (
+                {linkedAssets.filter(a => a.asset_type !== 'communication').length > 0 && (
                   <div>
                     <p className="text-sm font-medium text-gray-700 mb-2">关联资产</p>
                     <div className="space-y-1">
-                      {linkedAssets.map(asset => (
+                      {linkedAssets.filter(a => a.asset_type !== 'communication').map(asset => (
                         <div
                           key={`${asset.asset_type}-${asset.id}`}
                           onClick={() => handleOpenAsset(asset)}
@@ -1003,39 +1202,19 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
                             </div>
                           </div>
                         )}
-                        {profileData.projects.length > 0 && (
+                        {profileData.items.length > 0 && (
                           <div>
-                            <p className="text-xs text-gray-500 mb-1">参与项目</p>
+                            <p className="text-xs text-gray-500 mb-1">关联事项</p>
                             <div className="flex flex-wrap gap-1">
-                              {profileData.projects.slice(0, 6).map(p => (
-                                <span key={p.id} className="px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full text-xs">{p.name}</span>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                        {profileData.topics.length > 0 && (
-                          <div>
-                            <p className="text-xs text-gray-500 mb-1">关注话题</p>
-                            <div className="flex flex-wrap gap-1">
-                              {profileData.topics.slice(0, 6).map(t => (
-                                <span key={t.id} className="px-2 py-0.5 bg-green-50 text-green-700 rounded-full text-xs">{t.name}</span>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                        {profileData.communities.length > 0 && (
-                          <div>
-                            <p className="text-xs text-gray-500 mb-1">所属社群</p>
-                            <div className="flex flex-wrap gap-1">
-                              {profileData.communities.slice(0, 6).map(c => (
-                                <span key={c.id} className="px-2 py-0.5 bg-pink-50 text-pink-700 rounded-full text-xs">{c.name}</span>
+                              {profileData.items.slice(0, 8).map(item => (
+                                <span key={item.id} className="px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full text-xs">{item.name}</span>
                               ))}
                             </div>
                           </div>
                         )}
                         {profileData.leadership_insight && (
                           <div>
-                            <p className="text-xs text-gray-500 mb-1">领导力洞察</p>
+                            <p className="text-xs text-gray-500 mb-1">工作风格</p>
                             <div className="bg-indigo-50 rounded-lg p-2 text-xs text-gray-700 max-h-32 overflow-y-auto">
                               {profileData.leadership_insight.report_markdown
                                 ? profileData.leadership_insight.report_markdown.slice(0, 300) + '...'
@@ -1105,6 +1284,29 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
               </div>
               {rightTab === 'risks' && <div className="absolute bottom-0 left-2 right-2 h-0.5 bg-red-500 rounded-full" />}
             </button>
+            <button
+              onClick={() => setRightTab('domains')}
+              className={`flex-1 py-2.5 text-sm font-medium transition-colors relative ${rightTab === 'domains' ? 'text-purple-600' : 'text-gray-400 hover:text-gray-600'}`}
+            >
+              <div className="flex items-center justify-center gap-1.5">
+                <Network size={14} />
+                域
+                {communityOptions.length > 0 && (
+                  <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded-full text-[10px] font-semibold">{communityOptions.length}</span>
+                )}
+              </div>
+              {rightTab === 'domains' && <div className="absolute bottom-0 left-2 right-2 h-0.5 bg-purple-500 rounded-full" />}
+            </button>
+            <button
+              onClick={() => setRightTab('profiles')}
+              className={`flex-1 py-2.5 text-sm font-medium transition-colors relative ${rightTab === 'profiles' ? 'text-indigo-600' : 'text-gray-400 hover:text-gray-600'}`}
+            >
+              <div className="flex items-center justify-center gap-1.5">
+                <UserSearch size={14} />
+                画像
+              </div>
+              {rightTab === 'profiles' && <div className="absolute bottom-0 left-2 right-2 h-0.5 bg-indigo-600 rounded-full" />}
+            </button>
           </div>
 
           {/* Tab 内容 */}
@@ -1113,24 +1315,32 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
             {rightTab === 'insights' && (
               analysisResult && analysisResult.insights.length > 0 ? (
                 <div className="space-y-2.5">
-                  {analysisResult.insights.map((item, idx) => (
-                    <div
-                      key={idx}
-                      className="bg-gradient-to-br from-indigo-50 to-blue-50 border border-indigo-100 rounded-lg p-3 cursor-pointer hover:shadow-md hover:border-indigo-200 transition-all group"
-                      onClick={() => item.related_entity_ids.length > 0 && highlightEntities(item.related_entity_ids)}
-                    >
-                      <p className="text-sm font-medium text-gray-800 group-hover:text-indigo-700 transition-colors">{item.title}</p>
-                      <p className="text-xs text-gray-500 mt-1.5 leading-relaxed">{item.description}</p>
-                      <div className="flex items-center justify-between mt-2">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${SEVERITY_CONFIG[item.severity]?.text || 'text-gray-500'} ${SEVERITY_CONFIG[item.severity]?.bg || 'bg-gray-50'} ${SEVERITY_CONFIG[item.severity]?.border || 'border-gray-200'} border`}>
-                          {item.severity === 'high' ? '重要' : item.severity === 'medium' ? '一般' : '参考'}
-                        </span>
-                        {item.related_entity_ids.length > 0 && (
-                          <span className="text-[10px] text-indigo-400">点击定位 →</span>
-                        )}
+                  {analysisResult.insights.map((item, idx) => {
+                    const insightKey = `insight-${idx}`
+                    const isActive = activeInsightKey === insightKey
+                    return (
+                      <div
+                        key={idx}
+                        className={`border rounded-lg p-3 cursor-pointer hover:shadow-md transition-all group ${
+                          isActive
+                            ? 'bg-indigo-100 border-indigo-400 shadow-md ring-2 ring-indigo-300'
+                            : 'bg-gradient-to-br from-indigo-50 to-blue-50 border-indigo-100 hover:border-indigo-200'
+                        }`}
+                        onClick={() => item.related_entity_ids.length > 0 && highlightEntities(item.related_entity_ids, insightKey)}
+                      >
+                        <p className={`text-sm font-medium transition-colors ${isActive ? 'text-indigo-700' : 'text-gray-800 group-hover:text-indigo-700'}`}>{item.title}</p>
+                        <p className="text-xs text-gray-500 mt-1.5 leading-relaxed">{item.description}</p>
+                        <div className="flex items-center justify-between mt-2">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${SEVERITY_CONFIG[item.severity]?.text || 'text-gray-500'} ${SEVERITY_CONFIG[item.severity]?.bg || 'bg-gray-50'} ${SEVERITY_CONFIG[item.severity]?.border || 'border-gray-200'} border`}>
+                            {item.severity === 'high' ? '重要' : item.severity === 'medium' ? '一般' : '参考'}
+                          </span>
+                          {item.related_entity_ids.length > 0 && (
+                            <span className="text-[10px] text-indigo-400">{isActive ? '点击取消' : '点击定位 →'}</span>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               ) : (
                 <div className="h-full flex flex-col items-center justify-center text-gray-400 gap-2 py-12">
@@ -1176,11 +1386,17 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
                         <div className="space-y-2">
                           {risks.map((item, idx) => {
                             const sevCfg = SEVERITY_CONFIG[item.severity] || SEVERITY_CONFIG.medium
+                            const riskKey = `risk-${category}-${idx}`
+                            const isActive = activeInsightKey === riskKey
                             return (
                               <div
                                 key={idx}
-                                className={`${sevCfg.bg} border ${sevCfg.border} rounded-lg p-2.5 cursor-pointer hover:shadow-md transition-all group`}
-                                onClick={() => item.related_entity_ids.length > 0 && highlightEntities(item.related_entity_ids)}
+                                className={`border rounded-lg p-2.5 cursor-pointer hover:shadow-md transition-all group ${
+                                  isActive
+                                    ? `${sevCfg.bg} ${sevCfg.border} ring-2 ring-offset-1 shadow-md ${item.severity === 'high' ? 'ring-red-300' : item.severity === 'medium' ? 'ring-orange-300' : 'ring-blue-300'}`
+                                    : `${sevCfg.bg} ${sevCfg.border}`
+                                }`}
+                                onClick={() => item.related_entity_ids.length > 0 && highlightEntities(item.related_entity_ids, riskKey)}
                               >
                                 <div className="flex items-start gap-2">
                                   <AlertTriangle size={13} className={`${sevCfg.text} mt-0.5 shrink-0`} />
@@ -1197,6 +1413,9 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
                                         → {item.suggested_action}
                                       </p>
                                     )}
+                                    {item.related_entity_ids.length > 0 && (
+                                      <p className="text-[10px] mt-1.5 text-gray-400">{isActive ? '点击取消定位' : '点击定位 →'}</p>
+                                    )}
                                   </div>
                                 </div>
                               </div>
@@ -1211,6 +1430,163 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
                 <div className="h-full flex flex-col items-center justify-center text-gray-400 gap-2 py-12">
                   <AlertTriangle size={24} className="text-gray-300" />
                   <p className="text-xs text-center">点击「重新生成」<br />检测业务风险</p>
+                </div>
+              )
+            )}
+
+            {/* 域 Tab — 社群列表 */}
+            {rightTab === 'domains' && (
+              communityOptions.length > 0 ? (
+                <div className="space-y-2">
+                  {communityOptions.map((c) => {
+                    const domainColor = COMMUNITY_COLORS[c.community_id % COMMUNITY_COLORS.length]
+                    const label = c.domain_label || `业务域${c.community_id + 1}`
+                    const isActive = domainTab === String(c.community_id)
+                    return (
+                      <button
+                        type="button"
+                        key={c.community_id}
+                        onClick={() => {
+                          setDomainTab(String(c.community_id))
+                          setCommunityFilter(String(c.community_id))
+                        }}
+                        className={`w-full text-left p-3 rounded-lg border transition-all hover:shadow-md ${isActive ? 'border-indigo-300 bg-indigo-50/50 shadow-sm' : 'border-gray-200 hover:border-gray-300'}`}
+                      >
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: domainColor }} />
+                          <span className="text-sm font-medium text-gray-800 truncate">{label}</span>
+                          <span className="ml-auto text-[10px] text-gray-400 shrink-0">{c.member_count} 实体</span>
+                        </div>
+                        {c.top_entities.length > 0 && (
+                          <div className="flex flex-wrap gap-1 ml-4">
+                            {c.top_entities.slice(0, 5).map((name) => {
+                              const nodeInfo = nodes.find(n => n.name === name)
+                              const isItem = nodeInfo?.entity_type === 'item'
+                              return (
+                                <span key={name} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-[10px]">
+                                  <span className={`w-1.5 h-1.5 shrink-0 ${isItem ? 'rounded-sm' : 'rounded-full'}`} style={{ backgroundColor: isItem ? '#f59e0b' : '#6366f1' }} />
+                                  {name}
+                                </span>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </button>
+                    )
+                  })}
+                  {domainTab !== 'all' && (
+                    <button
+                      type="button"
+                      onClick={() => { setDomainTab('all'); setCommunityFilter('') }}
+                      className="w-full py-2 text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+                    >
+                      显示全部域
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center text-gray-400 gap-2 py-12">
+                  <Network size={24} className="text-gray-300" />
+                  <p className="text-xs text-center">点击「重新生成」<br />发现业务域</p>
+                </div>
+              )
+            )}
+
+            {/* 人物画像 Tab */}
+            {rightTab === 'profiles' && (
+              personProfilesLoading ? (
+                <div className="flex items-center justify-center py-12 text-gray-400">
+                  <Loader2 size={20} className="animate-spin mr-2" /> 加载中...
+                </div>
+              ) : selectedProfileName && selectedProfileData ? (
+                /* 画像详情 */
+                <div className="space-y-3">
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedProfileName(null); setSelectedProfileData(null) }}
+                    className="text-xs text-indigo-600 hover:text-indigo-800 mb-1"
+                  >
+                    ← 返回列表
+                  </button>
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center">
+                      <span className="text-indigo-700 font-semibold">{selectedProfileData.name[0]}</span>
+                    </div>
+                    <div>
+                      <p className="font-semibold text-gray-800">{selectedProfileData.name}</p>
+                      <p className="text-xs text-gray-400">被提及 {selectedProfileData.mention_count} 次</p>
+                    </div>
+                  </div>
+
+                  {/* 合作者 */}
+                  {selectedProfileData.collaborators.length > 0 && (
+                    <div>
+                      <p className="text-xs text-gray-500 mb-1">合作者</p>
+                      <div className="flex flex-wrap gap-1">
+                        {selectedProfileData.collaborators.slice(0, 8).map((c) => (
+                          <span
+                            key={c.id}
+                            onClick={() => loadPersonProfileDetail(c.name)}
+                            className="px-2 py-0.5 rounded-full text-xs bg-indigo-50 text-indigo-700 cursor-pointer hover:bg-indigo-100 transition-colors"
+                          >
+                            {c.name}
+                          </span>
+                        ))}
+                        {selectedProfileData.collaborators.length > 8 && (
+                          <span className="px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-500">
+                            +{selectedProfileData.collaborators.length - 8}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 领导力洞察 */}
+                  {selectedProfileData.leadership_insight?.report_markdown ? (
+                    <div>
+                      <p className="text-xs text-gray-500 mb-1">人物画像分析</p>
+                      {/* 六维雷达图 */}
+                      {selectedProfileData.leadership_insight.dimensions && Object.keys(selectedProfileData.leadership_insight.dimensions).length > 0 && (
+                        <ProfileRadarChart dimensions={selectedProfileData.leadership_insight.dimensions as Record<string, number>} />
+                      )}
+                      <div className="bg-gray-50 rounded-lg p-3 text-xs text-gray-700 max-h-48 overflow-y-auto leading-relaxed whitespace-pre-wrap">
+                        {selectedProfileData.leadership_insight.report_markdown}
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-400 text-center py-2">暂无人物画像分析数据</p>
+                  )}
+                </div>
+              ) : selectedProfileLoading ? (
+                <div className="flex items-center justify-center py-12 text-gray-400">
+                  <Loader2 size={20} className="animate-spin mr-2" /> 加载中...
+                </div>
+              ) : personProfiles.length > 0 ? (
+                /* 人物列表 */
+                <div className="space-y-1.5">
+                  {personProfiles.map((person) => (
+                    <button
+                      type="button"
+                      key={person.id}
+                      onClick={() => loadPersonProfileDetail(person.name)}
+                      className="w-full text-left p-2.5 rounded-lg border border-gray-200 hover:border-indigo-200 hover:bg-indigo-50/50 transition-all"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center shrink-0">
+                          <span className="text-indigo-700 font-semibold text-xs">{person.name[0]}</span>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-gray-800 truncate">{person.name}</p>
+                          <p className="text-[10px] text-gray-400">提及 {person.mention_count} 次</p>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center text-gray-400 gap-2 py-12">
+                  <UserSearch size={24} className="text-gray-300" />
+                  <p className="text-xs text-center">暂无人物画像<br />请先构建知识图谱</p>
                 </div>
               )
             )}
@@ -1270,7 +1646,7 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
                 </div>
 
                 {meetingDetail.uploader_name && (
-                  <div><p className="text-sm text-gray-500">上传人</p><p className="text-sm text-gray-800 font-medium">{meetingDetail.uploader_name}</p></div>
+                  <div><p className="text-sm text-indigo-600 font-medium">资产所有人</p><p className="text-sm text-gray-800 font-medium">{meetingDetail.uploader_name}</p></div>
                 )}
                 {meetingDetail.initiator && (
                   <div><p className="text-sm text-gray-500">组织者/发送者</p><p className="text-sm text-gray-800 font-medium">{meetingDetail.initiator}</p></div>
@@ -1394,7 +1770,7 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
                   <p className="text-sm text-gray-800 font-medium">{SOURCE_TYPE_LABELS[assetDetail.source_type] || assetDetail.source_type}</p>
                 </div>
                 {assetDetail.uploader_name && (
-                  <div><p className="text-sm text-gray-500">上传人</p><p className="text-sm text-gray-800 font-medium">{assetDetail.uploader_name}</p></div>
+                  <div><p className="text-sm text-indigo-600 font-medium">资产所有人</p><p className="text-sm text-gray-800 font-medium">{assetDetail.uploader_name}</p></div>
                 )}
                 {assetDetail.author && (
                   <div><p className="text-sm text-gray-500">作者</p><p className="text-sm text-gray-800 font-medium">{assetDetail.author}</p></div>
@@ -1522,6 +1898,15 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
         <div className="fixed inset-0 bg-black/70 z-[60] flex items-center justify-center" onClick={() => setImagePreview(null)}>
           <img src={imagePreview} alt="预览" className="max-w-[90vw] max-h-[90vh] rounded-lg shadow-2xl" />
         </div>
+      )}
+
+      {/* KG Profile 向导 */}
+      {showWizard && (
+        <KGProfileWizard
+          defaultValues={kgProfile as any}
+          onSubmit={handleWizardSubmit}
+          onClose={() => setShowWizard(false)}
+        />
       )}
     </div>
   )

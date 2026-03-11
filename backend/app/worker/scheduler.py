@@ -1,128 +1,77 @@
-"""APScheduler 调度器初始化。"""
+"""调度器：数据同步由登录触发，日程提醒保留后台定时（每2小时）。"""
 
 import logging
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from app.config import settings
-
 logger = logging.getLogger(__name__)
 
 scheduler = AsyncIOScheduler()
 
+# 防止同一用户短时间内重复触发（存储 owner_id -> 是否正在同步）
+_syncing_users: set[str] = set()
+
 
 def init_scheduler() -> None:
-    """初始化定时任务并启动调度器。"""
-    from app.worker.tasks import (
-        etl_sync_job,
-        cloud_folder_sync_job,
-        keyword_sync_job,
-        process_pending_documents_job,
-        todo_extract_job,
-        todo_sync_status_job,
-        kg_build_job,
-        persona_generate_job,
-        structured_table_sync_job,
-        calendar_reminder_job,
-    )
+    """启动定时调度器，仅保留日程提醒（每2小时）。"""
+    from app.worker.tasks import calendar_reminder_job
 
     scheduler.add_job(
-        etl_sync_job,
-        "interval",
-        minutes=settings.etl_cron_minutes,
-        id="etl_sync_job",
-        replace_existing=True,
-        max_instances=1,
-    )
-    scheduler.add_job(
-        cloud_folder_sync_job,
-        "interval",
-        minutes=settings.etl_cron_minutes,
-        id="cloud_folder_sync_job",
-        replace_existing=True,
-        max_instances=1,
-    )
-    # 关键词同步：每60分钟
-    scheduler.add_job(
-        keyword_sync_job,
-        "interval",
-        minutes=60,
-        id="keyword_sync_job",
-        replace_existing=True,
-        max_instances=1,
-    )
-    # 待办自动提取：每60分钟
-    scheduler.add_job(
-        todo_extract_job,
-        "interval",
-        minutes=60,
-        id="todo_extract_job",
-        replace_existing=True,
-        max_instances=1,
-    )
-    # 飞书任务状态同步：每30分钟
-    scheduler.add_job(
-        todo_sync_status_job,
-        "interval",
-        minutes=30,
-        id="todo_sync_status_job",
-        replace_existing=True,
-        max_instances=1,
-    )
-    # 知识图谱自动构建：每120分钟
-    scheduler.add_job(
-        kg_build_job,
-        "interval",
-        minutes=120,
-        id="kg_build_job",
-        replace_existing=True,
-        max_instances=1,
-    )
-    # 结构化数据表同步：每120分钟（多维表格+飞书表格）
-    scheduler.add_job(
-        structured_table_sync_job,
-        "interval",
-        minutes=120,
-        id="structured_table_sync_job",
-        replace_existing=True,
-        max_instances=1,
-    )
-    # 人物画像自动生成：每180分钟
-    scheduler.add_job(
-        persona_generate_job,
-        "interval",
-        minutes=180,
-        id="persona_generate_job",
-        replace_existing=True,
-        max_instances=1,
-    )
-    # 日程提醒：每5分钟检查
-    scheduler.add_job(
         calendar_reminder_job,
         "interval",
-        minutes=5,
+        minutes=120,
         id="calendar_reminder_job",
         replace_existing=True,
         max_instances=1,
     )
-    # 待解析文档后台处理：每30分钟
-    scheduler.add_job(
-        process_pending_documents_job,
-        "interval",
-        minutes=30,
-        id="process_pending_documents_job",
-        replace_existing=True,
-        max_instances=1,
-    )
     scheduler.start()
-    logger.info(
-        "调度器已启动，ETL/云文件夹同步间隔: %d 分钟, 数据表同步: 120分钟, KG构建: 120分钟, 画像生成: 180分钟",
-        settings.etl_cron_minutes,
-    )
+    logger.info("调度器已启动（日程提醒: 每2小时，其余同步由登录触发）")
 
 
 def shutdown_scheduler() -> None:
-    """关闭调度器。"""
+    """关闭调度器并清理状态。"""
     if scheduler.running:
         scheduler.shutdown(wait=False)
-        logger.info("调度器已关闭")
+    _syncing_users.clear()
+    logger.info("调度器已关闭")
+
+
+async def trigger_login_sync(owner_id: str) -> None:
+    """用户登录后触发一次全量同步（后台执行，不阻塞登录响应）。
+
+    包含：ETL同步、云文件夹同步、待办提取、飞书任务状态同步、结构化数据表同步。
+    """
+    if owner_id in _syncing_users:
+        logger.info("用户 %s 的同步任务仍在执行中，跳过本次触发", owner_id)
+        return
+
+    _syncing_users.add(owner_id)
+    logger.info("用户 %s 登录，触发全量同步", owner_id)
+
+    try:
+        from app.worker.tasks import (
+            etl_sync_job,
+            cloud_folder_sync_job,
+            todo_extract_job,
+            todo_sync_status_job,
+            structured_table_sync_job,
+        )
+
+        jobs = [
+            ("ETL同步", etl_sync_job),
+            ("云文件夹同步", cloud_folder_sync_job),
+            ("待办提取", todo_extract_job),
+            ("飞书任务状态同步", todo_sync_status_job),
+            ("结构化数据表同步", structured_table_sync_job),
+        ]
+
+        for name, job_fn in jobs:
+            try:
+                await job_fn()
+                logger.info("登录同步 [%s] 完成", name)
+            except Exception as e:
+                logger.error("登录同步 [%s] 失败: %s", name, e)
+
+        logger.info("用户 %s 登录同步全部完成", owner_id)
+    finally:
+        _syncing_users.discard(owner_id)

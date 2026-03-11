@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 
@@ -511,205 +512,6 @@ async def cloud_folder_sync_job() -> None:
     logger.info("云文件夹同步任务完成")
 
 
-async def keyword_sync_job() -> None:
-    """定时任务：执行所有用户的关键词同步规则，搜索云盘+知识空间中匹配的文档并导入。"""
-    from app.models.keyword_sync_rule import KeywordSyncRule
-    from app.services.keyword_sync import sync_all_keyword_rules
-
-    logger.info("关键词同步任务开始")
-
-    # 获取所有有启用规则的用户
-    async with async_session() as db:
-        result = await db.execute(
-            select(KeywordSyncRule.owner_id)
-            .where(KeywordSyncRule.is_enabled == True)  # noqa: E712
-            .distinct()
-        )
-        owner_ids = [row[0] for row in result.all()]
-
-    if not owner_ids:
-        logger.info("没有启用的关键词规则，跳过")
-        return
-
-    total_imported = 0
-    for owner_id in owner_ids:
-        try:
-            async with async_session() as db:
-                user_token = await _resolve_user_token(owner_id, db)
-                if not user_token:
-                    user_token = await _try_refresh_token(owner_id, db)
-                if not user_token:
-                    logger.warning("用户 %s 无可用 token，跳过关键词同步", owner_id)
-                    continue
-
-                user_result = await db.execute(
-                    select(User).where(User.feishu_open_id == owner_id)
-                )
-                user = user_result.scalar_one_or_none()
-                uploader_name = user.name if user else None
-
-                results = await sync_all_keyword_rules(
-                    owner_id, db, user_token, uploader_name,
-                )
-                for r in results:
-                    total_imported += r.imported
-
-        except Exception as e:
-            logger.warning("用户 %s 关键词同步失败: %s", owner_id, e)
-
-    logger.info("关键词同步任务完成，共导入 %d 篇文档", total_imported)
-
-
-async def process_pending_documents_job() -> None:
-    """定时任务：处理 parse_status='pending' 的文档，获取内容并进行 LLM 解析 + 向量生成。
-
-    每次最多处理 20 篇，避免一次跑太久。
-    """
-    from app.models.document import Document
-    from app.services.cloud_doc_import import cloud_doc_import_service
-
-    logger.info("开始处理待解析文档")
-
-    async with async_session() as db:
-        result = await db.execute(
-            select(Document)
-            .where(Document.parse_status == "pending")
-            .order_by(Document.created_at.asc())
-            .limit(20)
-        )
-        docs = result.scalars().all()
-
-    if not docs:
-        logger.info("没有待解析的文档，跳过")
-        return
-
-    logger.info("发现 %d 篇待解析文档", len(docs))
-
-    for doc in docs:
-        try:
-            async with async_session() as db:
-                doc_obj = await db.get(Document, doc.id)
-                if not doc_obj or doc_obj.parse_status != "pending":
-                    continue
-
-                # 标记为 processing
-                doc_obj.parse_status = "processing"
-                await db.commit()
-
-                # 获取文档所有者的 token
-                user_token = await _resolve_user_token(doc_obj.owner_id, db)
-                if not user_token:
-                    user_token = await _try_refresh_token(doc_obj.owner_id, db)
-
-                if not user_token or not doc_obj.feishu_record_id:
-                    doc_obj.parse_status = "failed"
-                    await db.commit()
-                    logger.warning("文档 %d 无可用 token 或 record_id，标记失败", doc_obj.id)
-                    continue
-
-                # 调用 Block API 获取内容
-                try:
-                    doc_content = await cloud_doc_import_service._fetch_doc_content(
-                        doc_obj.feishu_record_id, user_token,
-                    )
-                except Exception as e:
-                    logger.warning("获取文档内容失败 [%s]: %s", doc_obj.feishu_record_id, e)
-                    doc_obj.parse_status = "failed"
-                    await db.commit()
-                    continue
-
-                title = doc_content.get("title") or doc_obj.title or "未命名"
-                content_text = doc_content.get("content_text", "")
-                if not content_text.strip():
-                    content_text = f"[空文档] {title}"
-
-                # LLM 解析
-                parsed = await cloud_doc_import_service._llm_parse(content_text, "docx")
-
-                # 生成向量
-                embedding = await cloud_doc_import_service._generate_embedding(title, content_text)
-
-                # 更新文档
-                doc_obj.title = parsed.get("title") or title
-                doc_obj.content_text = content_text
-                doc_obj.summary = parsed.get("summary")
-                doc_obj.author = parsed.get("author")
-                if isinstance(parsed.get("tags"), list):
-                    doc_obj.keywords = parsed["tags"]
-                if embedding:
-                    doc_obj.content_vector = embedding
-                # 更新飞书时间
-                created_time = doc_content.get("created_time")
-                modified_time = doc_content.get("modified_time")
-                if created_time:
-                    doc_obj.feishu_created_at = datetime.fromtimestamp(int(created_time))
-                if modified_time:
-                    doc_obj.feishu_updated_at = datetime.fromtimestamp(int(modified_time))
-                doc_obj.parse_status = "done"
-                doc_obj.synced_at = datetime.utcnow()
-                await db.commit()
-
-                logger.info("文档 %d 解析完成: %s", doc_obj.id, doc_obj.title)
-
-        except Exception as e:
-            logger.error("处理文档 %d 失败: %s", doc.id, e, exc_info=True)
-            try:
-                async with async_session() as db:
-                    doc_obj = await db.get(Document, doc.id)
-                    if doc_obj:
-                        doc_obj.parse_status = "failed"
-                        await db.commit()
-            except Exception:
-                pass
-
-    logger.info("待解析文档处理完成")
-
-
-async def keyword_sync_single_user(owner_id: str) -> dict:
-    """手动触发单个用户的关键词同步。返回统计信息。"""
-    from app.services.keyword_sync import sync_all_keyword_rules
-
-    async with async_session() as db:
-        user_token = await _resolve_user_token(owner_id, db)
-        if not user_token:
-            user_token = await _try_refresh_token(owner_id, db)
-        if not user_token:
-            return {"error": "无可用的飞书 Token，请重新登录"}
-
-        user_result = await db.execute(
-            select(User).where(User.feishu_open_id == owner_id)
-        )
-        user = user_result.scalar_one_or_none()
-        uploader_name = user.name if user else None
-
-        results = await sync_all_keyword_rules(
-            owner_id, db, user_token, uploader_name,
-        )
-
-    total_matched = sum(r.matched for r in results)
-    total_imported = sum(r.imported for r in results)
-    total_skipped = sum(r.skipped for r in results)
-    total_failed = sum(r.failed for r in results)
-
-    return {
-        "rules_count": len(results),
-        "total_matched": total_matched,
-        "total_imported": total_imported,
-        "total_skipped": total_skipped,
-        "total_failed": total_failed,
-        "details": [
-            {
-                "keyword": r.keyword,
-                "matched": r.matched,
-                "imported": r.imported,
-                "skipped": r.skipped,
-                "failed": r.failed,
-            }
-            for r in results
-        ],
-    }
-
-
 async def todo_extract_job() -> None:
     """定时任务：为所有活跃用户自动提取待办（去重）。"""
     from app.models.user import User
@@ -728,7 +530,7 @@ async def todo_extract_job() -> None:
     for user in users:
         try:
             async with async_session() as db:
-                items = await extract_and_save(db, user.feishu_open_id, user.name, days=3)
+                items = await extract_and_save(db, user.feishu_open_id, user.name, days=2)
                 total_extracted += len(items)
                 if items:
                     logger.info("用户 %s 自动提取 %d 条待办", user.name, len(items))
@@ -783,34 +585,9 @@ async def todo_sync_status_job() -> None:
 
 
 async def kg_build_job() -> None:
-    """定时任务：自动增量构建知识图谱。"""
-    from app.services.kg_builder import build_knowledge_graph
-
-    logger.info("知识图谱自动构建任务开始")
-
-    async with async_session() as db:
-        result = await db.execute(
-            select(User).where(User.feishu_access_token.isnot(None))
-        )
-        users = result.scalars().all()
-
-    total_entities = 0
-    total_relations = 0
-    for user in users:
-        try:
-            async with async_session() as db:
-                result = await build_knowledge_graph(db, user.feishu_open_id, incremental=True)
-                total_entities += result.get("entities_added", 0)
-                total_relations += result.get("relations_added", 0)
-                if result.get("entities_added", 0) > 0:
-                    logger.info(
-                        "用户 %s KG构建: +%d 实体, +%d 关系",
-                        user.name, result["entities_added"], result["relations_added"],
-                    )
-        except Exception as e:
-            logger.warning("用户 %s KG构建失败: %s", user.feishu_open_id, e)
-
-    logger.info("知识图谱自动构建完成，共新增 %d 实体, %d 关系", total_entities, total_relations)
+    """定时任务：已禁用自动 KG 构建，仅用户手动触发。"""
+    logger.info("KG 自动构建已禁用，请通过知识图谱页面手动触发")
+    return
 
 
 async def structured_table_sync_job() -> None:
@@ -901,10 +678,14 @@ async def persona_generate_job() -> None:
 
 
 async def calendar_reminder_job() -> None:
-    """定时任务：检查即将开始的日程，通过飞书机器人发送提醒。"""
+    """定时任务：检查即将开始的日程，生成 AI 会前简报并通过飞书机器人推送。"""
     import json
+    from app.config import settings
     from app.models.calendar_reminder import CalendarReminderPref
     from app.services.feishu import feishu_client, FeishuAPIError
+    from app.services.calendar import gather_meeting_context, build_brief_prompt
+    from app.services.llm import create_openai_client
+    from app.api.deps import get_visible_owner_ids
 
     logger.info("日程提醒任务开始")
 
@@ -927,7 +708,7 @@ async def calendar_reminder_job() -> None:
             continue
 
         try:
-            now = datetime.utcnow()
+            now = datetime.now(tz=ZoneInfo("Asia/Shanghai"))
             # 查找 N 分钟后的事件
             window_start = now + timedelta(minutes=max(0, pref.minutes_before - 5))
             window_end = now + timedelta(minutes=pref.minutes_before + 5)
@@ -941,17 +722,22 @@ async def calendar_reminder_job() -> None:
                 if not event_id:
                     continue
 
+                # 跳过已取消的事件
+                if event.get("status") == "cancelled":
+                    continue
+
                 # 跳过已提醒的事件
                 if pref.last_reminded_event_id == event_id:
                     continue
 
                 summary = event.get("summary", "无标题会议")
+                description = event.get("description")
                 start_info = event.get("start_time", {})
                 start_ts = start_info.get("timestamp")
                 if not start_ts:
                     continue
 
-                start_dt = datetime.fromtimestamp(int(start_ts))
+                start_dt = datetime.fromtimestamp(int(start_ts), tz=ZoneInfo("Asia/Shanghai"))
                 time_str = start_dt.strftime("%H:%M")
 
                 location = ""
@@ -959,31 +745,99 @@ async def calendar_reminder_job() -> None:
                 if loc_info:
                     location = loc_info.get("name") or loc_info.get("address") or ""
 
-                attendee_count = len(event.get("attendees", []))
+                # 解析参会人名单
+                attendee_names = []
+                raw_attendees = event.get("attendees", [])
+                for att in raw_attendees:
+                    name = att.get("display_name") or att.get("name")
+                    if name:
+                        attendee_names.append(name)
 
-                # 构建飞书消息卡片
+                # ── 生成 AI 会前简报 ──
+                brief_text = ""
+                try:
+                    async with async_session() as db:
+                        owner_id = user.feishu_open_id
+                        visible_ids = await get_visible_owner_ids(user, db)
+
+                        context = await gather_meeting_context(
+                            db=db,
+                            owner_id=owner_id,
+                            visible_ids=visible_ids,
+                            event_summary=summary,
+                            event_description=description,
+                            attendee_names=attendee_names,
+                        )
+
+                        system_prompt = build_brief_prompt(
+                            event_summary=summary,
+                            event_description=description,
+                            start_time=start_dt,
+                            attendee_names=attendee_names,
+                            context=context,
+                        )
+
+                    client = create_openai_client(
+                        api_key=settings.agent_llm_api_key,
+                        base_url=settings.agent_llm_base_url,
+                        timeout=120.0,
+                    )
+                    messages = [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": f"请为我的会议「{summary}」生成简洁的会前准备简报，控制在 500 字以内。"},
+                    ]
+                    resp = await client.chat.completions.create(
+                        model=settings.agent_llm_model,
+                        messages=messages,
+                    )
+                    brief_text = resp.choices[0].message.content or ""
+                    logger.info("已为 %s 生成会前简报: %s (长度: %d)", user.name, summary, len(brief_text))
+                except Exception as e:
+                    logger.warning("为 %s 生成会前简报失败: %s，将发送基础提醒", user.name, e)
+
+                # ── 构建飞书消息卡片 ──
+                elements = [
+                    {
+                        "tag": "div",
+                        "text": {
+                            "tag": "lark_md",
+                            "content": (
+                                f"⏰ **时间**: {time_str}\n"
+                                f"📍 **地点**: {location or '未指定'}\n"
+                                f"👥 **参会人**: {'、'.join(attendee_names[:8]) or '未知'}"
+                                + (f" 等{len(attendee_names)}人" if len(attendee_names) > 8 else "")
+                            ),
+                        },
+                    },
+                ]
+
+                if brief_text:
+                    # 飞书卡片文本限制，截断过长内容
+                    truncated = brief_text[:2000]
+                    elements.append({"tag": "hr"})
+                    elements.append({
+                        "tag": "div",
+                        "text": {
+                            "tag": "lark_md",
+                            "content": f"**📋 AI 会前简报**\n\n{truncated}",
+                        },
+                    })
+                else:
+                    elements.append({
+                        "tag": "div",
+                        "text": {
+                            "tag": "lark_md",
+                            "content": f"💡 距离会议开始还有约 **{pref.minutes_before} 分钟**",
+                        },
+                    })
+
                 card = {
                     "config": {"wide_screen_mode": True},
                     "header": {
                         "title": {"tag": "plain_text", "content": f"📅 会议提醒: {summary}"},
                         "template": "blue",
                     },
-                    "elements": [
-                        {
-                            "tag": "div",
-                            "text": {
-                                "tag": "lark_md",
-                                "content": f"⏰ **时间**: {time_str}\n📍 **地点**: {location or '未指定'}\n👥 **参会人数**: {attendee_count} 人",
-                            },
-                        },
-                        {
-                            "tag": "div",
-                            "text": {
-                                "tag": "lark_md",
-                                "content": f"💡 距离会议开始还有约 **{pref.minutes_before} 分钟**，建议提前查看会前简报做好准备。",
-                            },
-                        },
-                    ],
+                    "elements": elements,
                 }
 
                 content = json.dumps(card, ensure_ascii=False)
@@ -1005,10 +859,10 @@ async def calendar_reminder_job() -> None:
                         p = result.scalar_one_or_none()
                         if p:
                             p.last_reminded_event_id = event_id
-                            p.last_reminded_at = datetime.utcnow()
+                            p.last_reminded_at = datetime.now(tz=ZoneInfo("Asia/Shanghai"))
                             await db.commit()
 
-                    logger.info("已向 %s 发送会议提醒: %s", user.name, summary)
+                    logger.info("已向 %s 发送会议提醒+简报: %s", user.name, summary)
                 except FeishuAPIError as e:
                     logger.warning("向 %s 发送提醒失败: %s", user.name, e)
 

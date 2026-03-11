@@ -3,7 +3,7 @@
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import select, and_, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,6 +51,7 @@ class SearchResponse(BaseModel):
 
 @router.get("", response_model=SearchResponse, summary="全局关键词搜索")
 async def global_search(
+    request: Request,
     q: str | None = Query(None, max_length=200, description="搜索关键词"),
     tag_ids: str | None = Query(None, description="标签ID，逗号分隔"),
     content_types: str | None = Query(None, description="内容类型，逗号分隔"),
@@ -94,7 +95,7 @@ async def global_search(
             ))
 
     # 2. 统一内容搜索（带标签过滤和权限）
-    visible_ids = await get_visible_owner_ids(current_user, db)
+    visible_ids = await get_visible_owner_ids(current_user, db, request)
     results = await unified_search(
         db=db,
         keyword=keyword or None,

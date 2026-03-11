@@ -28,6 +28,9 @@ from app.schemas.settings import (
     NotificationPrefOut,
     NotificationPrefUpdate,
     ProfileOut,
+    SharedToMeDepartment,
+    SharedToMeOut,
+    SharedToMeUser,
     SharingOut,
     SharingUpdate,
 )
@@ -110,6 +113,62 @@ async def update_sharing(
     return SharingOut(
         target_user_ids=body.target_user_ids,
         target_department_ids=body.target_department_ids,
+    )
+
+
+@router.get("/shared-to-me", response_model=SharedToMeOut)
+async def get_shared_to_me(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """查询谁把数据分享给了我（只读）。"""
+    # 1. 直接分享给我的人
+    r1 = await db.execute(
+        select(User.id, User.name)
+        .join(UserVisibilityOverride, UserVisibilityOverride.user_id == User.id)
+        .where(UserVisibilityOverride.target_user_id == user.id)
+    )
+    shared_by_users = [
+        SharedToMeUser(user_id=row[0], user_name=row[1])
+        for row in r1.fetchall()
+    ]
+
+    # 2. 查我所在的部门
+    my_dept_q = await db.execute(
+        select(UserDepartment.department_id).where(UserDepartment.user_id == user.id)
+    )
+    my_dept_ids = [row[0] for row in my_dept_q.fetchall()]
+
+    # 3. 通过我所在部门分享给我的人（按部门分组）
+    shared_by_departments: list[SharedToMeDepartment] = []
+    if my_dept_ids:
+        for dept_id in my_dept_ids:
+            dept_q = await db.execute(
+                select(Department.name).where(Department.id == dept_id)
+            )
+            dept_name = dept_q.scalar_one_or_none() or f"部门#{dept_id}"
+
+            r2 = await db.execute(
+                select(User.id, User.name)
+                .join(UserDeptSharing, UserDeptSharing.user_id == User.id)
+                .where(UserDeptSharing.department_id == dept_id)
+            )
+            dept_users = [
+                SharedToMeUser(user_id=row[0], user_name=row[1])
+                for row in r2.fetchall()
+            ]
+            if dept_users:
+                shared_by_departments.append(
+                    SharedToMeDepartment(
+                        department_id=dept_id,
+                        department_name=dept_name,
+                        users=dept_users,
+                    )
+                )
+
+    return SharedToMeOut(
+        shared_by_users=shared_by_users,
+        shared_by_departments=shared_by_departments,
     )
 
 
@@ -336,11 +395,44 @@ async def preview_keyword_docs(
     valid_docs = [d for d in docs if d.get("token")]
     meta_map: dict[str, dict] = {}
     if valid_docs:
+        # wiki 类型文档需要先解析 obj_token，batch_get_doc_meta 不支持 doc_type="wiki"
+        wiki_obj_map: dict[str, dict] = {}
+        wiki_docs_no_owner = [d for d in valid_docs if d.get("type") == "wiki" and not d.get("owner_id")]
+        if wiki_docs_no_owner:
+            import asyncio
+            async def _resolve_wiki(tok: str):
+                try:
+                    node = await feishu_client.get_wiki_node_info(tok, user_access_token=user_token)
+                    return tok, node.get("obj_token", ""), node.get("obj_type", "docx")
+                except Exception:
+                    return tok, "", ""
+            resolved = await asyncio.gather(*[_resolve_wiki(d["token"]) for d in wiki_docs_no_owner[:30]])
+            for wt, obj_tok, obj_typ in resolved:
+                if obj_tok:
+                    wiki_obj_map[wt] = {"obj_token": obj_tok, "obj_type": obj_typ}
+
         try:
-            meta_map = await feishu_client.batch_get_doc_meta(
-                docs=[{"token": d["token"], "type": d.get("type", "docx")} for d in valid_docs],
+            meta_docs = []
+            obj_to_wiki: dict[str, str] = {}
+            for d in valid_docs:
+                tok = d["token"]
+                if tok in wiki_obj_map:
+                    obj_tok = wiki_obj_map[tok]["obj_token"]
+                    meta_docs.append({"token": obj_tok, "type": wiki_obj_map[tok]["obj_type"]})
+                    obj_to_wiki[obj_tok] = tok
+                else:
+                    meta_docs.append({"token": tok, "type": d.get("type", "docx")})
+            raw_meta = await feishu_client.batch_get_doc_meta(
+                docs=meta_docs,
                 user_access_token=user_token,
             )
+            # wiki obj_token 结果映射回原始 wiki token
+            for obj_tok, wiki_tok in obj_to_wiki.items():
+                if obj_tok in raw_meta:
+                    meta_map[wiki_tok] = raw_meta[obj_tok]
+            for tok, meta in raw_meta.items():
+                if tok not in obj_to_wiki:
+                    meta_map[tok] = meta
         except Exception as e:
             logger.warning("batch_get_doc_meta 失败: %s", e)
 
@@ -390,6 +482,8 @@ async def fast_import_keyword_docs(
             "name": doc.name,
             "type": doc.doc_type,
             "url": doc.url,
+            "owner_id": doc.owner_id,
+            "owner_name": doc.owner_name,
         }
         _, status = await cloud_doc_import_service.fast_import_item(
             file_info=file_info,
@@ -407,16 +501,6 @@ async def fast_import_keyword_docs(
 
     return {"imported": imported, "skipped": skipped, "failed": failed,
             "message": f"已导入 {imported} 篇，跳过 {skipped} 篇，内容解析将在后台完成"}
-
-
-@router.post("/keyword-rules/sync")
-async def trigger_keyword_sync(
-    user: Annotated[User, Depends(get_current_user)],
-):
-    """手动触发当前用户所有关键词规则的同步（后台执行）。"""
-    from app.worker.tasks import keyword_sync_single_user
-    asyncio.create_task(keyword_sync_single_user(user.feishu_open_id))
-    return {"message": "关键词同步已触发，后台执行中"}
 
 
 @router.post("/keyword-rules/{rule_id}/sync")

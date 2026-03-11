@@ -5,10 +5,15 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import os
 from datetime import datetime
+from pathlib import Path
+from uuid import uuid4
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import settings
 
 from app.models.structured_table import StructuredTable, StructuredTableRow
 from app.services.feishu import feishu_client
@@ -92,6 +97,57 @@ async def _generate_summary(rows_sample: list[dict], table_name: str) -> str:
         return ""
 
 
+async def _get_feishu_doc_owner_info(
+    token: str, doc_type: str, user_access_token: str | None, db: AsyncSession | None = None,
+) -> dict:
+    """通过 batch_get_doc_meta 获取飞书文档/多维表格的原始所有者信息。
+
+    返回: {"id": "ou_xxx", "name": "张三"} 或空 dict。
+    飞书 batch_query API 通常不返回 owner_display_name，所以通过 owner_id 查 User 表解析。
+    """
+    if not user_access_token:
+        logger.warning("_get_feishu_doc_owner_info: 无 user_access_token，跳过")
+        return {}
+    try:
+        meta_map = await feishu_client.batch_get_doc_meta(
+            [{"token": token, "type": doc_type}],
+            user_access_token,
+        )
+        meta = meta_map.get(token, {})
+        logger.info(
+            "batch_get_doc_meta 返回: token=%s, meta=%s",
+            token, {k: v for k, v in meta.items() if k != "url"},
+        )
+        feishu_owner_id = meta.get("owner_id", "")
+        if not feishu_owner_id:
+            logger.warning("batch_get_doc_meta 未返回 owner_id, token=%s", token)
+            return {}
+
+        # 优先用 API 返回的 owner_display_name
+        owner_name = meta.get("owner_name", "")
+        if owner_name:
+            return {"id": feishu_owner_id, "name": owner_name}
+
+        # 飞书 API 不返回名称时，通过 owner_id 查 User 表
+        if db:
+            from app.models.user import User
+            result = await db.execute(
+                select(User.name).where(User.feishu_open_id == feishu_owner_id)
+            )
+            row = result.scalar_one_or_none()
+            if row:
+                logger.info("从 User 表解析 owner: owner_id=%s -> name=%s", feishu_owner_id, row)
+                return {"id": feishu_owner_id, "name": row}
+            else:
+                logger.warning("User 表未找到 feishu_open_id=%s", feishu_owner_id)
+
+        # 有 id 但没解析出名称
+        return {"id": feishu_owner_id, "name": ""}
+    except Exception as e:
+        logger.warning("获取飞书文档所有者失败: %s", e, exc_info=True)
+        return {}
+
+
 async def import_from_bitable(
     db: AsyncSession,
     owner_id: str,
@@ -150,6 +206,14 @@ async def import_from_bitable(
     table_obj.row_count = len(records)
     table_obj.column_count = len(schema_info)
     table_obj.synced_at = datetime.utcnow()
+
+    # 获取飞书多维表格原始所有者信息
+    owner_info = await _get_feishu_doc_owner_info(app_token, "bitable", user_access_token, db)
+    if owner_info:
+        ef = dict(table_obj.extra_fields or {})
+        ef["_original_owner"] = owner_info
+        ef["_feishu_owner_name"] = owner_info.get("name", "")
+        table_obj.extra_fields = ef
 
     await db.flush()  # 获取 table_obj.id
 
@@ -260,6 +324,14 @@ async def import_from_spreadsheet(
     table_obj.column_count = len(headers)
     table_obj.synced_at = datetime.utcnow()
 
+    # 获取飞书表格原始所有者信息
+    owner_info = await _get_feishu_doc_owner_info(spreadsheet_token, "sheet", user_access_token, db)
+    if owner_info:
+        ef = dict(table_obj.extra_fields or {})
+        ef["_original_owner"] = owner_info
+        ef["_feishu_owner_name"] = owner_info.get("name", "")
+        table_obj.extra_fields = ef
+
     await db.flush()
 
     # 5. 逐行创建
@@ -304,6 +376,14 @@ async def import_from_local_file(
     if not headers:
         raise ValueError("文件为空或无法解析列名")
 
+    # 保存原始文件到磁盘
+    ext = Path(file_name).suffix
+    save_dir = os.path.join(settings.upload_dir, owner_id, "structured")
+    os.makedirs(save_dir, exist_ok=True)
+    saved_path = os.path.join(save_dir, f"{uuid4()}{ext}")
+    with open(saved_path, "wb") as f:
+        f.write(file_content)
+
     schema_info = [
         {"field_id": f"col_{i}", "field_name": h, "field_type": "text"}
         for i, h in enumerate(headers)
@@ -314,6 +394,7 @@ async def import_from_local_file(
         name=file_name,
         source_type="local",
         file_name=file_name,
+        file_path=saved_path,
         schema_info=schema_info,
         row_count=len(data_rows),
         column_count=len(headers),

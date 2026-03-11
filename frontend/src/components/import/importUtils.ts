@@ -57,7 +57,7 @@ export const CATEGORY_CONFIG: Record<ImportCategory, FileClassification> = {
     categoryName: '文档资产',
     extensions: ['PDF', 'Word', 'Markdown', 'PPT'],
     icon: 'FileText',
-    description: '解析长篇报告与制度文件',
+    description: '归档您的重要文档资料',
   },
   structured: {
     category: 'structured',

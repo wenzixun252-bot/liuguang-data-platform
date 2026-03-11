@@ -4,14 +4,17 @@ import math
 from datetime import datetime, timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import cast, Date, distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, get_visible_owner_ids
-from app.models.asset import CloudFolderSource, ETLDataSource
+
+from app.models.asset import ETLDataSource, CloudFolderSource
+from app.models.cleaning_rule import CleaningRule
 from app.models.communication import Communication
 from app.models.document import Document
+from app.models.extraction_rule import ExtractionRule
 from app.models.knowledge_graph import KGEntity, KGRelation
 from app.models.structured_table import StructuredTable
 from app.models.tag import ContentTag
@@ -23,11 +26,12 @@ router = APIRouter(prefix="/api/assets", tags=["统计"])
 
 @router.get("/stats", response_model=AssetStatsResponse, summary="统一看板统计")
 async def get_asset_stats(
+    request: Request,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> AssetStatsResponse:
     """返回三张表的聚合统计数据。"""
-    visible_ids = await get_visible_owner_ids(current_user, db)
+    visible_ids = await get_visible_owner_ids(current_user, db, request)
 
     async def _count(model, extra_filter=None) -> int:
         stmt = select(func.count()).select_from(model)
@@ -113,11 +117,12 @@ def _level(score: int) -> str:
 
 @router.get("/score", response_model=AssetScoreResponse, summary="个人数据资产评分")
 async def get_asset_score(
+    request: Request,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> AssetScoreResponse:
-    """计算当前用户的数据资产归档评分（7个维度）。"""
-    visible_ids = await get_visible_owner_ids(current_user, db)
+    """计算当前用户的数据资产归档评分（6个维度）。"""
+    visible_ids = await get_visible_owner_ids(current_user, db, request)
 
     async def _count(model, extra_filter=None) -> int:
         stmt = select(func.count()).select_from(model)
@@ -134,7 +139,7 @@ async def get_asset_score(
     total_count = doc_count + comm_count + table_count
     volume_score = _log_score(total_count, 500)
 
-    # --- 2. Quality ---
+    # --- 2. Quality (内容质量指数 = 基础质量70% + 社群热度加分30%) ---
     quality_vals: list[float] = []
     for model in [Document, Communication, StructuredTable]:
         stmt = select(func.avg(model.quality_score)).select_from(model).where(model.quality_score.is_not(None))
@@ -143,61 +148,153 @@ async def get_asset_score(
         avg_val = (await db.execute(stmt)).scalar()
         if avg_val is not None:
             quality_vals.append(float(avg_val))
-    quality_score = int(sum(quality_vals) / len(quality_vals) * 100) if quality_vals else 0
+    quality_base = int(sum(quality_vals) / len(quality_vals) * 70) if quality_vals else 0
 
-    # --- 3. Knowledge Graph ---
+    # 社群热度：我的文档被他人归档次数，作为内容质量加分项
+    my_owner_id = current_user.feishu_open_id
+    community_total = 0
+
+    my_doc_frids_stmt = (
+        select(distinct(Document.feishu_record_id))
+        .where(
+            Document.feishu_record_id.isnot(None),
+            Document.extra_fields["_original_owner"]["id"].astext == my_owner_id,
+        )
+    )
+    my_doc_frids = [r[0] for r in (await db.execute(my_doc_frids_stmt)).all()]
+
+    if my_doc_frids:
+        doc_others_stmt = (
+            select(func.count())
+            .select_from(Document)
+            .where(
+                Document.feishu_record_id.in_(my_doc_frids),
+                Document.owner_id != my_owner_id,
+            )
+        )
+        community_total += (await db.execute(doc_others_stmt)).scalar() or 0
+
+    from sqlalchemy import tuple_
+    my_st_keys_stmt = (
+        select(StructuredTable.source_app_token, StructuredTable.source_table_id)
+        .where(
+            StructuredTable.source_app_token.isnot(None),
+            StructuredTable.source_table_id.isnot(None),
+            StructuredTable.extra_fields["_original_owner"]["id"].astext == my_owner_id,
+        )
+    )
+    my_st_keys = list({(r[0], r[1]) for r in (await db.execute(my_st_keys_stmt)).all()})
+
+    if my_st_keys:
+        st_others_stmt = (
+            select(func.count())
+            .select_from(StructuredTable)
+            .where(
+                tuple_(StructuredTable.source_app_token, StructuredTable.source_table_id).in_(my_st_keys),
+                StructuredTable.owner_id != my_owner_id,
+            )
+        )
+        community_total += (await db.execute(st_others_stmt)).scalar() or 0
+
+    community_bonus = min(30, int(_log_score(community_total, 50) * 0.3))
+    quality_score = min(100, quality_base + community_bonus)
+
+    # --- 3. Knowledge Graph (生成即80分，达到阈值给满分) ---
     entity_count = await _count(KGEntity)
     relation_count = await _count(KGRelation)
     kg_total = entity_count + relation_count
-    knowledge_score = _log_score(kg_total, 200)
+    if kg_total == 0:
+        knowledge_score = 0
+    else:
+        knowledge_score = 80
+        if entity_count >= 20 or relation_count >= 15:
+            knowledge_score += 10
+        if entity_count >= 50 or relation_count >= 30:
+            knowledge_score += 10
+    knowledge_score = min(100, knowledge_score)
 
-    # --- 4. Tag Coverage ---
-    tagged_stmt = select(func.count(distinct(ContentTag.content_id))).select_from(ContentTag)
-    tagged_count = (await db.execute(tagged_stmt)).scalar() or 0
+    # --- 4. Tag Coverage (only count tags on user's own content) ---
+    tagged_count = 0
+    for ct, model in [("document", Document), ("communication", Communication), ("structured_table", StructuredTable)]:
+        ct_stmt = (
+            select(func.count(distinct(ContentTag.content_id)))
+            .where(ContentTag.content_type == ct)
+            .where(ContentTag.content_id.in_(
+                select(model.id).where(model.owner_id.in_(visible_ids))
+                if visible_ids is not None
+                else select(model.id)
+            ))
+        )
+        tagged_count += (await db.execute(ct_stmt)).scalar() or 0
     tags_score = _ratio_score(tagged_count, total_count) if total_count > 0 else 0
 
-    # --- 5. Activity (last 30 days) ---
+    # --- 5. Activity (last 30 days, log scale on absolute count) ---
     thirty_days_ago = datetime.utcnow() - timedelta(days=30)
     recent_count = 0
     for model in [Document, Communication, StructuredTable]:
         recent_count += await _count(model, model.created_at >= thirty_days_ago)
-    activity_ratio = recent_count / total_count if total_count > 0 else 0
-    activity_score = min(100, int(activity_ratio / 0.3 * 100))
+    activity_score = _log_score(recent_count, 100)
 
-    # --- 6. Vectorization ---
-    vectorized_count = 0
-    for model in [Document, Communication, StructuredTable]:
-        vectorized_count += await _count(model, model.content_vector.is_not(None))
-    vectorization_score = _ratio_score(vectorized_count, total_count)
+    # --- 6. Source Activation (3 types: 会话多维表格, 会议多维表格, 云文件夹) ---
+    source_types_total = 3
+    active_types = 0
 
-    # --- 7. Source Activation ---
-    activated_types: set[str] = set()
-    etl_stmt = select(distinct(ETLDataSource.asset_type)).where(ETLDataSource.is_enabled == True)  # noqa: E712
-    if visible_ids is not None:
-        etl_stmt = etl_stmt.where(
-            (ETLDataSource.owner_id.in_(visible_ids)) | (ETLDataSource.owner_id.is_(None))
-        )
-    etl_types = (await db.execute(etl_stmt)).scalars().all()
-    activated_types.update(etl_types)
-    # CloudFolderSource counts as document source
-    cf_stmt = select(func.count()).select_from(CloudFolderSource).where(CloudFolderSource.is_enabled == True)  # noqa: E712
-    if visible_ids is not None:
-        cf_stmt = cf_stmt.where(CloudFolderSource.owner_id.in_(visible_ids))
-    if ((await db.execute(cf_stmt)).scalar() or 0) > 0:
-        activated_types.add("document")
-    active_count = len(activated_types.intersection({"document", "communication", "structured"}))
-    sources_score = int(active_count / 3 * 100)
+    # 6a. 会话多维表格：是否有启用的 asset_type='communication' 的 ETLDataSource
+    comm_etl_stmt = select(func.count()).select_from(ETLDataSource).where(
+        ETLDataSource.is_enabled == True, ETLDataSource.asset_type == "communication"
+    )
+    if ((await db.execute(comm_etl_stmt)).scalar() or 0) > 0:
+        active_types += 1
+
+    # 6b. 会议多维表格：是否有启用的 asset_type='document' 的 ETLDataSource
+    doc_etl_stmt = select(func.count()).select_from(ETLDataSource).where(
+        ETLDataSource.is_enabled == True, ETLDataSource.asset_type == "document"
+    )
+    if ((await db.execute(doc_etl_stmt)).scalar() or 0) > 0:
+        active_types += 1
+
+    # 6c. 云文件夹：用户是否配置了 CloudFolderSource
+    folder_stmt = select(func.count()).select_from(CloudFolderSource).where(
+        CloudFolderSource.owner_id == current_user.feishu_open_id
+    )
+    if ((await db.execute(folder_stmt)).scalar() or 0) > 0:
+        active_types += 1
+
+    sources_score = _ratio_score(active_types, source_types_total)
+
+    # --- 7. Data Rules (是否配置了数据提取规则和清洗规则) ---
+    rules_total = 2  # 提取规则 + 清洗规则
+    rules_active = 0
+
+    extraction_stmt = select(func.count()).select_from(ExtractionRule).where(
+        ExtractionRule.owner_id == current_user.feishu_open_id,
+        ExtractionRule.is_active == True,
+    )
+    has_extraction = ((await db.execute(extraction_stmt)).scalar() or 0) > 0
+    if has_extraction:
+        rules_active += 1
+
+    cleaning_stmt = select(func.count()).select_from(CleaningRule).where(
+        CleaningRule.owner_id == current_user.feishu_open_id,
+        CleaningRule.is_active == True,
+    )
+    has_cleaning = ((await db.execute(cleaning_stmt)).scalar() or 0) > 0
+    if has_cleaning:
+        rules_active += 1
+
+    rules_score = _ratio_score(rules_active, rules_total)
 
     # --- Build dimensions ---
-    avg_quality_str = f"平均质量 {sum(quality_vals) / len(quality_vals):.2f}" if quality_vals else "暂无数据"
+    avg_quality_val = sum(quality_vals) / len(quality_vals) if quality_vals else 0
+    quality_detail = f"内容质量 {avg_quality_val:.2f} · 被引用 {community_total} 次" if quality_vals else "暂无数据"
     dims = [
-        ("volume", "数据量", volume_score, f"共 {total_count} 条数据资产", "/documents", "去导入数据"),
-        ("quality", "数据质量", quality_score, avg_quality_str, None, None),
-        ("knowledge", "知识图谱", knowledge_score, f"{entity_count} 个实体, {relation_count} 条关系", "__action:build_kg", "构建图谱"),
-        ("tags", "标签覆盖", tags_score, f"{tagged_count}/{total_count} 已标签", "/settings", "去管理标签"),
-        ("activity", "活跃度", activity_score, f"近30天新增 {recent_count} 条", "/documents", "去同步数据"),
-        ("vectorization", "AI可搜索", vectorization_score, None, None, None),
-        ("sources", "数据源激活", sources_score, f"已激活 {active_count}/3 类数据源", "/settings", "去开启同步"),
+        ("volume", "数据资产规模", volume_score, f"文档 {doc_count} 篇 · 沟通 {comm_count} 条 · 表格 {table_count} 张", "/data-import", "去导入数据"),
+        ("quality", "内容质量指数", quality_score, quality_detail, None, None),
+        ("knowledge", "知识图谱", knowledge_score, f"{entity_count} 个实体, {relation_count} 条关系", "__action:build_kg" if knowledge_score == 0 else None, "构建图谱" if knowledge_score == 0 else None),
+        ("tags", "标签覆盖", tags_score, f"{tagged_count}/{total_count} 已标签", "/settings?tab=tags", "去管理标签"),
+        ("activity", "活跃度", activity_score, f"近30天新增 {recent_count} 条", "/data-import", "去同步数据"),
+        ("sources", "数据源激活", sources_score, f"已激活 {active_types}/{source_types_total} 类数据源", "/data-import", "去开启同步"),
+        ("rules", "数据治理规则", rules_score, f"提取规则 {'✓' if has_extraction else '✗'} · 清洗规则 {'✓' if has_cleaning else '✗'}", "/data-import?tab=rules", "去配置规则"),
     ]
 
     dimensions: list[ScoreDimension] = []

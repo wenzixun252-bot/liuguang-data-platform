@@ -68,7 +68,9 @@
       "Bash(ipconfig:*)",
       "mcp__ide__getDiagnostics",
       "Bash(bash d:/CC/liuguang-data-platform/.claude/log-change.sh)",
-      "Bash(NO_PROXY=localhost,127.0.0.1 docker compose up -d --build backend)"
+      "Bash(NO_PROXY=localhost,127.0.0.1 docker compose up -d --build backend)",
+      "Bash(find \"d:\\\\CC\\\\liuguang-data-platform\\\\backend\" -name \"*.py\" -type f -exec grep -l \"owner\\\\|creator\" {})",
+      "Bash(python -c \":*)"
     ]
   },
   "hooks": {

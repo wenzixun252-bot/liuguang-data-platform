@@ -16,14 +16,19 @@ class StructuredTableOut(BaseModel):
     source_platform: str | None = None
     source_url: str | None = None
     file_name: str | None = None
+    file_path: str | None = None
     row_count: int = 0
     column_count: int = 0
+    cleaning_rule_id: int | None = None
+    cleaning_rule_name: str | None = None
     keywords: list = []
     sentiment: str | None = None
     quality_score: float | None = None
     duplicate_of: int | None = None
     parse_status: str = "done"
     processed_at: UTCDatetimeOpt = None
+    import_count: int = 1
+    uploader_name: str | None = None
     synced_at: UTCDatetimeOpt = None
     created_at: UTCDatetime
     updated_at: UTCDatetime
@@ -46,9 +51,12 @@ class StructuredTableDetail(BaseModel):
     source_url: str | None = None
     feishu_record_id: str | None = None
     file_name: str | None = None
+    file_path: str | None = None
     schema_info: list | None = None
     row_count: int = 0
     column_count: int = 0
+    cleaning_rule_id: int | None = None
+    cleaning_rule_name: str | None = None
     keywords: list = []
     sentiment: str | None = None
     quality_score: float | None = None
@@ -88,12 +96,14 @@ class ImportBitableRequest(BaseModel):
     """从飞书多维表格导入请求。"""
     app_token: str
     table_id: str
+    cleaning_rule_id: int | None = None
 
 
 class ImportSpreadsheetRequest(BaseModel):
     """从飞书表格导入请求。"""
     spreadsheet_token: str
     sheet_id: str
+    cleaning_rule_id: int | None = None
 
 
 class SearchResultItem(BaseModel):
@@ -116,6 +126,7 @@ class SearchResponse(BaseModel):
 class ImportFromURLRequest(BaseModel):
     """通过飞书链接导入请求。"""
     url: str
+    cleaning_rule_id: int | None = None
 
 
 class URLParseResult(BaseModel):

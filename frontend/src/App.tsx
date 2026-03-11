@@ -1,6 +1,32 @@
+import { Component, type ReactNode } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from 'react-hot-toast'
+
+class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state = { error: null as Error | null }
+  static getDerivedStateFromError(error: Error) { return { error } }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ padding: 40, fontFamily: 'monospace' }}>
+          <h2 style={{ color: 'red' }}>页面出错了</h2>
+          <pre style={{ whiteSpace: 'pre-wrap', background: '#f5f5f5', padding: 16, borderRadius: 8 }}>
+            {this.state.error.message}
+            {'\n\n'}
+            {this.state.error.stack}
+          </pre>
+          <button onClick={() => { this.setState({ error: null }); window.location.reload() }}
+            style={{ marginTop: 16, padding: '8px 16px', background: '#4f46e5', color: 'white', border: 'none', borderRadius: 8, cursor: 'pointer' }}>
+            刷新页面
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+import { TaskProgressProvider } from './hooks/useTaskProgress'
 import Layout from './components/Layout'
 import ProtectedRoute from './components/ProtectedRoute'
 import Login from './pages/Login'
@@ -22,7 +48,9 @@ const queryClient = new QueryClient({
 
 export default function App() {
   return (
+    <ErrorBoundary>
     <QueryClientProvider client={queryClient}>
+      <TaskProgressProvider>
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
@@ -78,6 +106,8 @@ export default function App() {
           },
         }}
       />
+    </TaskProgressProvider>
     </QueryClientProvider>
+    </ErrorBoundary>
   )
 }

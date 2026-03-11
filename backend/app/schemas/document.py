@@ -15,6 +15,7 @@ class DocumentOut(BaseModel):
     source_app_token: str | None = None
     source_table_id: str | None = None
     title: str | None = None
+    original_filename: str | None = None
     content_text: str
     summary: str | None = None
     author: str | None = None
@@ -26,6 +27,8 @@ class DocumentOut(BaseModel):
     sentiment: str | None = None
     quality_score: float | None = None
     duplicate_of: int | None = None
+    key_info: dict | None = None
+    extraction_rule_id: int | None = None
     extra_fields: dict = {}
     feishu_record_id: str | None = None
     parse_status: str = "done"

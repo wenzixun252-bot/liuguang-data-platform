@@ -1,0 +1,128 @@
+<h2>提取规则编辑弹窗</h2>
+<p class="subtitle">用户点击"新建规则"或编辑已有规则时打开的弹窗</p>
+
+<div class="mockup">
+  <div class="mockup-header">规则编辑弹窗</div>
+  <div class="mockup-body" style="font-size:13px;line-height:1.8;max-width:640px;margin:0 auto">
+
+    <!-- 规则名称 -->
+    <div style="margin-bottom:16px">
+      <div style="font-size:12px;color:#6b7280;margin-bottom:4px;font-weight:500">规则名称</div>
+      <div style="padding:8px 12px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;color:#111">能源项目会议</div>
+    </div>
+
+    <!-- 板块快捷选择 -->
+    <div style="margin-bottom:16px">
+      <div style="font-size:12px;color:#6b7280;margin-bottom:6px;font-weight:500">业务板块（选择后自动填充内置字段模板）</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <span style="padding:6px 14px;border-radius:20px;font-size:13px;background:#eef2ff;color:#4f46e5;border:2px solid #818cf8;cursor:pointer;font-weight:500">能源</span>
+        <span style="padding:6px 14px;border-radius:20px;font-size:13px;background:#f9fafb;color:#6b7280;border:1px solid #e5e7eb;cursor:pointer">城乡</span>
+        <span style="padding:6px 14px;border-radius:20px;font-size:13px;background:#f9fafb;color:#6b7280;border:1px solid #e5e7eb;cursor:pointer">不良资产</span>
+      </div>
+      <div style="font-size:11px;color:#9ca3af;margin-top:4px">可多选，字段会合并。选择只是快捷填充，所有字段都可自由调整</div>
+    </div>
+
+    <!-- 提取字段列表 -->
+    <div style="margin-bottom:16px">
+      <div style="font-size:12px;color:#6b7280;margin-bottom:6px;font-weight:500">提取字段</div>
+      <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden">
+        <!-- 通用字段 -->
+        <div style="background:#f0fdf4;padding:4px 12px;font-size:11px;color:#16a34a;font-weight:600;border-bottom:1px solid #e5e7eb">通用字段</div>
+        <div style="padding:8px 12px;border-bottom:1px solid #f3f4f6;display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <span style="font-weight:500">项目名称</span>
+            <span style="color:#9ca3af;font-size:11px;margin-left:6px">提取文中涉及的项目名称</span>
+          </div>
+          <span style="background:#dcfce7;color:#16a34a;padding:1px 6px;border-radius:4px;font-size:10px">内置</span>
+        </div>
+        <div style="padding:8px 12px;border-bottom:1px solid #f3f4f6;display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <span style="font-weight:500">关键决策</span>
+            <span style="color:#9ca3af;font-size:11px;margin-left:6px">重要的决策内容和结论</span>
+          </div>
+          <span style="background:#dcfce7;color:#16a34a;padding:1px 6px;border-radius:4px;font-size:10px">内置</span>
+        </div>
+        <div style="padding:8px 12px;border-bottom:1px solid #f3f4f6;display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <span style="font-weight:500">行动项</span>
+            <span style="color:#9ca3af;font-size:11px;margin-left:6px">需要执行的任务和待办事项</span>
+          </div>
+          <span style="background:#dcfce7;color:#16a34a;padding:1px 6px;border-radius:4px;font-size:10px">内置</span>
+        </div>
+        <div style="padding:8px 12px;border-bottom:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <span style="font-weight:500">负责人</span>
+            <span style="color:#9ca3af;font-size:11px;margin-left:6px">相关的负责人和参与者</span>
+          </div>
+          <span style="background:#dcfce7;color:#16a34a;padding:1px 6px;border-radius:4px;font-size:10px">内置</span>
+        </div>
+
+        <!-- 能源板块字段 -->
+        <div style="background:#eef2ff;padding:4px 12px;font-size:11px;color:#4f46e5;font-weight:600;border-bottom:1px solid #e5e7eb">能源板块</div>
+        <div style="padding:8px 12px;border-bottom:1px solid #f3f4f6;display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <span style="font-weight:500">装机容量/规模</span>
+            <span style="color:#9ca3af;font-size:11px;margin-left:6px">项目的装机容量或规模信息</span>
+          </div>
+          <div style="display:flex;gap:4px;align-items:center">
+            <span style="background:#e0e7ff;color:#4f46e5;padding:1px 6px;border-radius:4px;font-size:10px">能源</span>
+            <span style="color:#ef4444;cursor:pointer;font-size:14px" title="删除">×</span>
+          </div>
+        </div>
+        <div style="padding:8px 12px;border-bottom:1px solid #f3f4f6;display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <span style="font-weight:500">投资金额</span>
+            <span style="color:#9ca3af;font-size:11px;margin-left:6px">项目投资额度和资金信息</span>
+          </div>
+          <div style="display:flex;gap:4px;align-items:center">
+            <span style="background:#e0e7ff;color:#4f46e5;padding:1px 6px;border-radius:4px;font-size:10px">能源</span>
+            <span style="color:#ef4444;cursor:pointer;font-size:14px">×</span>
+          </div>
+        </div>
+        <div style="padding:8px 12px;border-bottom:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <span style="font-weight:500">项目阶段</span>
+            <span style="color:#9ca3af;font-size:11px;margin-left:6px">前期/建设/运营等阶段</span>
+          </div>
+          <div style="display:flex;gap:4px;align-items:center">
+            <span style="background:#e0e7ff;color:#4f46e5;padding:1px 6px;border-radius:4px;font-size:10px">能源</span>
+            <span style="color:#ef4444;cursor:pointer;font-size:14px">×</span>
+          </div>
+        </div>
+
+        <!-- 自定义字段 -->
+        <div style="background:#fef9c3;padding:4px 12px;font-size:11px;color:#a16207;font-weight:600;border-bottom:1px solid #e5e7eb">自定义字段</div>
+        <div style="padding:8px 12px;border-bottom:1px solid #f3f4f6;display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <span style="font-weight:500">合规风险</span>
+            <span style="color:#9ca3af;font-size:11px;margin-left:6px">识别潜在的合规风险点</span>
+          </div>
+          <div style="display:flex;gap:4px;align-items:center">
+            <span style="background:#fef3c7;color:#a16207;padding:1px 6px;border-radius:4px;font-size:10px">自定义</span>
+            <span style="color:#3b82f6;cursor:pointer;font-size:12px" title="编辑">✎</span>
+            <span style="color:#ef4444;cursor:pointer;font-size:14px">×</span>
+          </div>
+        </div>
+
+        <!-- 添加字段 -->
+        <div style="padding:10px 12px;text-align:center;color:#6366f1;cursor:pointer;font-size:13px;font-weight:500">
+          + 添加自定义字段
+        </div>
+      </div>
+    </div>
+
+    <!-- 额外提示 -->
+    <div style="margin-bottom:16px">
+      <div style="font-size:12px;color:#6b7280;margin-bottom:4px;font-weight:500">额外提取提示（可选）</div>
+      <div style="padding:8px 12px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;color:#9ca3af;font-size:12px;min-height:48px">
+        例如：请特别关注与华锐智呈相关的项目信息，提取时优先识别光伏和风电项目...
+      </div>
+    </div>
+
+    <!-- 按钮 -->
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+      <div style="padding:8px 16px;border:1px solid #e5e7eb;border-radius:8px;color:#6b7280;cursor:pointer;font-size:13px">取消</div>
+      <div style="padding:8px 16px;background:#4f46e5;color:white;border-radius:8px;cursor:pointer;font-size:13px;font-weight:500">保存规则</div>
+    </div>
+  </div>
+</div>

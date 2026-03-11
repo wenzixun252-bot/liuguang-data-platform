@@ -25,23 +25,13 @@ interface ContentLink {
 }
 
 const ENTITY_TYPE_COLORS: Record<string, string> = {
-  person: '#3b82f6',
-  project: '#10b981',
-  topic: '#f59e0b',
-  organization: '#8b5cf6',
-  event: '#ef4444',
-  document: '#06b6d4',
-  community: '#ec4899',
+  person: '#6366f1',
+  item: '#f59e0b',
 }
 
 const ENTITY_TYPE_LABELS: Record<string, string> = {
   person: '人物',
-  project: '项目',
-  topic: '话题',
-  organization: '组织',
-  event: '事件',
-  document: '文档',
-  community: '社群',
+  item: '事项',
 }
 
 export default function KGSidebar({

@@ -5,7 +5,7 @@ import mimetypes
 import os
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -32,6 +32,7 @@ def _apply_visibility(stmt, visible_ids: list[str] | None):
 
 @router.get("/list", response_model=DocumentListResponse, summary="文档列表")
 async def list_documents(
+    request: Request,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
     page: int = Query(1, ge=1),
@@ -43,7 +44,7 @@ async def list_documents(
     uploader_name: str | None = Query(None),
     tag_ids: list[int] = Query(default=[]),
 ) -> DocumentListResponse:
-    visible_ids = await get_visible_owner_ids(current_user, db)
+    visible_ids = await get_visible_owner_ids(current_user, db, request)
 
     base = select(Document)
     count_stmt = select(func.count()).select_from(Document)
@@ -97,6 +98,10 @@ async def list_documents(
         )).all()
         import_count_map = {row.feishu_record_id: row.cnt for row in count_rows}
 
+    # 将 key_info 中的 field_xxx key 翻译为中文 label
+    from app.services.etl.enricher import translate_key_info_batch
+    await translate_key_info_batch(rows, db)
+
     items = []
     for r in rows:
         doc_out = DocumentOut.model_validate(r)
@@ -114,11 +119,12 @@ async def list_documents(
 
 @router.get("/{doc_id}", response_model=DocumentOut, summary="文档详情")
 async def get_document(
+    request: Request,
     doc_id: int,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> DocumentOut:
-    visible_ids = await get_visible_owner_ids(current_user, db)
+    visible_ids = await get_visible_owner_ids(current_user, db, request)
 
     stmt = select(Document).where(Document.id == doc_id)
     stmt = _apply_visibility(stmt, visible_ids)
@@ -131,12 +137,13 @@ async def get_document(
 
 @router.get("/{doc_id}/download", summary="下载本地上传的文档")
 async def download_document(
+    request: Request,
     doc_id: int,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> FileResponse:
     """下载本地上传的文档文件。"""
-    visible_ids = await get_visible_owner_ids(current_user, db)
+    visible_ids = await get_visible_owner_ids(current_user, db, request)
 
     stmt = select(Document).where(Document.id == doc_id)
     stmt = _apply_visibility(stmt, visible_ids)

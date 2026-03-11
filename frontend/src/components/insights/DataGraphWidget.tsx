@@ -35,10 +35,7 @@ interface ProfileData {
   name: string
   mention_count: number
   collaborators: RelItem[]
-  projects: RelItem[]
-  topics: RelItem[]
-  organizations: RelItem[]
-  communities: RelItem[]
+  items: RelItem[]
   leadership_insight: {
     id: number
     report_markdown: string | null
@@ -56,37 +53,22 @@ interface InsightItem {
 
 const ENTITY_COLORS: Record<string, string> = {
   person: '#6366f1',
-  project: '#f59e0b',
-  topic: '#10b981',
-  organization: '#8b5cf6',
-  event: '#ef4444',
-  document: '#3b82f6',
-  community: '#ec4899',
+  item: '#f59e0b',
 }
 
 const ENTITY_LABELS: Record<string, string> = {
   person: '人物',
-  project: '项目',
-  topic: '主题',
-  organization: '组织',
-  event: '事件',
-  document: '文档',
+  item: '事项',
 }
 
 const TAG_COLORS: Record<string, string> = {
   collaborators: 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100',
-  projects: 'bg-amber-50 text-amber-700 hover:bg-amber-100',
-  topics: 'bg-green-50 text-green-700 hover:bg-green-100',
-  organizations: 'bg-purple-50 text-purple-700 hover:bg-purple-100',
-  communities: 'bg-pink-50 text-pink-700 hover:bg-pink-100',
+  items: 'bg-amber-50 text-amber-700 hover:bg-amber-100',
 }
 
 const TAG_LABELS: Record<string, string> = {
   collaborators: '合作者',
-  projects: '项目',
-  topics: '话题',
-  organizations: '组织',
-  communities: '社群',
+  items: '关联事项',
 }
 
 const COMMUNITY_COLORS = [
@@ -498,7 +480,7 @@ export default function DataGraphWidget({ onClose }: { onClose?: () => void }) {
                     )}
 
                     {/* 标签区 */}
-                    {(['collaborators', 'projects', 'topics', 'organizations', 'communities'] as const).map((key) => {
+                    {(['collaborators', 'items'] as const).map((key) => {
                       const items = profile[key]
                       if (!items || items.length === 0) return null
                       return (
@@ -519,10 +501,10 @@ export default function DataGraphWidget({ onClose }: { onClose?: () => void }) {
                       )
                     })}
 
-                    {/* 领导力报告 */}
+                    {/* 人物画像分析 */}
                     {profile.leadership_insight?.report_markdown && (
                       <div>
-                        <p className="text-sm font-medium text-gray-700 mb-2">领导力报告</p>
+                        <p className="text-sm font-medium text-gray-700 mb-2">人物画像分析</p>
                         <div className="bg-gray-50 rounded-lg p-4 text-sm text-gray-700 whitespace-pre-wrap max-h-48 overflow-y-auto">
                           {profile.leadership_insight.report_markdown}
                         </div>
@@ -632,7 +614,7 @@ export default function DataGraphWidget({ onClose }: { onClose?: () => void }) {
                 ) : tagProfile ? (
                   <div className="space-y-3">
                     <p className="text-sm text-gray-500">被提及 {tagProfile.mention_count} 次</p>
-                    {(['collaborators', 'projects', 'topics'] as const).map((key) => {
+                    {(['collaborators', 'items'] as const).map((key) => {
                       const items = tagProfile[key]
                       if (!items || items.length === 0) return null
                       return (

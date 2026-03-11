@@ -2,6 +2,7 @@ import { X, ChevronUp, ChevronDown, RotateCcw } from 'lucide-react'
 import type { WidgetConfig, WidgetId } from '../../hooks/useWidgetConfig'
 
 const WIDGET_LABELS: Record<WidgetId, string> = {
+  'asset-score': '资产评分',
   'data-graph': '数据图谱',
   'trend': '趋势分析',
 }

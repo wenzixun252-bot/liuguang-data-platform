@@ -12,6 +12,8 @@ import type { Message, SourceRef } from '../components/ChatMessages'
 import ChatInput from '../components/ChatInput'
 import type { DataSelection } from '../components/DataPicker'
 import ReportPanel from '../components/ReportPanel'
+import ReportSidebar from '../components/ReportSidebar'
+import type { ReportItem } from '../components/ReportSidebar'
 import KGSidebar from '../components/KGSidebar'
 
 const KnowledgeGraph = lazy(() => import('./KnowledgeGraph'))
@@ -20,10 +22,10 @@ const Todos = lazy(() => import('./Todos'))
 
 // ── Prompt 模板 ─────────────────────────────────────────
 const PROMPT_TEMPLATES = [
-  { label: '数据分析', question: '帮我分析最近一周的工作数据，找出关键趋势' },
-  { label: '内容摘要', question: '总结这周的主要工作内容和产出' },
-  { label: '信息查询', question: '查找关于项目的相关信息和进展' },
-  { label: '会议回顾', question: '回顾最近的会议，列出关键决策和待办事项' },
+  { label: '本周摘要', question: '总结我本周的工作内容，包括参与的会议、产出的文档和关键沟通，按天整理' },
+  { label: '项目进展', question: '帮我梳理目前各项目的最新进展，哪些有风险或延期？相关负责人是谁？' },
+  { label: '会议待办', question: '整理我最近参加的会议中提到的待办事项和行动项，按优先级排列' },
+  { label: '人员协作', question: '最近跟我协作最多的同事有哪些？分别在哪些项目或会议中有交集？' },
 ]
 
 const TABS = [
@@ -72,6 +74,56 @@ export default function Chat() {
     mode: 'all',
     label: '全部',
   })
+
+  // ── 报告侧栏状态 ──────────────────────────────────────
+  const [reports, setReports] = useState<ReportItem[]>([])
+  const [reportsLoading, setReportsLoading] = useState(false)
+  const [activeReport, setActiveReport] = useState<ReportItem | null>(null)
+
+  const fetchReports = useCallback(async () => {
+    setReportsLoading(true)
+    try {
+      const res = await api.get('/reports', { params: { page: 1, page_size: 50 } })
+      setReports(res.data.items || [])
+    } catch {
+      // 静默
+    }
+    setReportsLoading(false)
+  }, [])
+
+  // 初始加载报告列表（和会话列表并行）
+  useEffect(() => {
+    fetchReports()
+  }, [fetchReports])
+
+  const handleReportSelect = useCallback(async (report: ReportItem) => {
+    // 如果是 generating 状态，先刷新获取最新状态
+    if (report.status === 'generating') {
+      try {
+        const res = await api.get(`/reports/${report.id}`)
+        setActiveReport(res.data)
+      } catch {
+        setActiveReport(report)
+      }
+    } else {
+      setActiveReport(report)
+    }
+  }, [])
+
+  const handleReportDeleted = (id: number) => {
+    setReports((prev) => prev.filter((r) => r.id !== id))
+    if (activeReport?.id === id) {
+      setActiveReport(null)
+    }
+  }
+
+  const handleNewReport = () => {
+    setActiveReport(null) // 回到配置表单
+  }
+
+  const handleReportCreated = () => {
+    fetchReports() // 刷新列表
+  }
 
   // ── 加载会话列表 ──────────────────────────────────────
   const fetchConversations = useCallback(async () => {
@@ -187,9 +239,23 @@ export default function Chat() {
 
       const decoder = new TextDecoder()
       let assistantContent = ''
+      let reasoningContent = ''
       let sources: SourceRef[] = []
 
-      setMessages((prev) => [...prev, { role: 'assistant', content: '', sources: [] }])
+      setMessages((prev) => [...prev, { role: 'assistant', content: '', reasoning: '', sources: [] }])
+
+      const updateMsg = () => {
+        setMessages((prev) => {
+          const updated = [...prev]
+          updated[updated.length - 1] = {
+            role: 'assistant',
+            content: assistantContent,
+            reasoning: reasoningContent,
+            sources,
+          }
+          return updated
+        })
+      }
 
       let buffer = ''
       while (true) {
@@ -207,40 +273,20 @@ export default function Chat() {
 
           try {
             const parsed = JSON.parse(raw)
-            if (parsed.type === 'content') {
+            if (parsed.type === 'reasoning') {
+              reasoningContent += parsed.content
+              updateMsg()
+            } else if (parsed.type === 'content') {
               assistantContent += parsed.content
-              setMessages((prev) => {
-                const updated = [...prev]
-                updated[updated.length - 1] = {
-                  role: 'assistant',
-                  content: assistantContent,
-                  sources,
-                }
-                return updated
-              })
+              updateMsg()
             } else if (parsed.type === 'sources') {
               sources = parsed.sources
               setSourceRefs(sources)
               setShowKGSidebar(true)
-              setMessages((prev) => {
-                const updated = [...prev]
-                updated[updated.length - 1] = {
-                  role: 'assistant',
-                  content: assistantContent,
-                  sources,
-                }
-                return updated
-              })
+              updateMsg()
             } else if (parsed.type === 'error') {
               assistantContent += parsed.content
-              setMessages((prev) => {
-                const updated = [...prev]
-                updated[updated.length - 1] = {
-                  role: 'assistant',
-                  content: assistantContent,
-                }
-                return updated
-              })
+              updateMsg()
             }
           } catch {
             // skip
@@ -278,8 +324,17 @@ export default function Chat() {
 
   return (
     <div className="flex h-[calc(100vh-7rem)]">
-      {/* 左侧: 会话列表（日程管家 tab 不显示） */}
-      {scene !== 'calendar' && scene !== 'todos' && (
+      {/* 左侧: 根据场景显示不同侧栏 */}
+      {scene === 'report' ? (
+        <ReportSidebar
+          reports={reports}
+          activeId={activeReport?.id ?? null}
+          loading={reportsLoading}
+          onSelect={handleReportSelect}
+          onNew={handleNewReport}
+          onDeleted={handleReportDeleted}
+        />
+      ) : scene !== 'calendar' && scene !== 'todos' && (
         <ChatSidebar
           conversations={conversations}
           activeId={activeConvId}
@@ -363,7 +418,11 @@ export default function Chat() {
           </div>
         ) : (
           <div className="flex-1 min-h-0">
-            <ReportPanel />
+            <ReportPanel
+              activeReport={activeReport}
+              onReportCreated={handleReportCreated}
+              onClearActive={handleNewReport}
+            />
           </div>
         )}
       </div>

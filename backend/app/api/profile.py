@@ -36,10 +36,7 @@ class ProfileResponse(BaseModel):
     mention_count: int = 0
     # 关联实体
     collaborators: list[RelatedEntityInfo] = []
-    projects: list[RelatedEntityInfo] = []
-    topics: list[RelatedEntityInfo] = []
-    organizations: list[RelatedEntityInfo] = []
-    communities: list[RelatedEntityInfo] = []
+    items: list[RelatedEntityInfo] = []
     # 领导力洞察
     leadership_insight: dict | None = None
 
@@ -116,12 +113,9 @@ async def _build_profile(entity: KGEntity, owner_id: str, db: AsyncSession) -> P
         for e in re_result.scalars().all():
             related_map[e.id] = e
 
-    # 分类整理
+    # 分类整理: person -> collaborators, item -> items
     collaborators = []
-    projects = []
-    topics = []
-    organizations = []
-    communities = []
+    items = []
 
     for r in relations:
         other_id = r.target_entity_id if r.source_entity_id == entity.id else r.source_entity_id
@@ -139,19 +133,12 @@ async def _build_profile(entity: KGEntity, owner_id: str, db: AsyncSession) -> P
 
         if other.entity_type == "person":
             collaborators.append(info)
-        elif other.entity_type == "project":
-            projects.append(info)
-        elif other.entity_type == "topic":
-            topics.append(info)
-        elif other.entity_type == "organization":
-            organizations.append(info)
-        elif other.entity_type == "community":
-            communities.append(info)
+        else:
+            items.append(info)
 
     # 按权重排序
     collaborators.sort(key=lambda x: x.weight, reverse=True)
-    projects.sort(key=lambda x: x.weight, reverse=True)
-    topics.sort(key=lambda x: x.weight, reverse=True)
+    items.sort(key=lambda x: x.weight, reverse=True)
 
     # 查找领导力洞察（按名字匹配）
     insight_result = await db.execute(
@@ -177,9 +164,6 @@ async def _build_profile(entity: KGEntity, owner_id: str, db: AsyncSession) -> P
         entity_type=entity.entity_type,
         mention_count=entity.mention_count,
         collaborators=collaborators,
-        projects=projects,
-        topics=topics,
-        organizations=organizations,
-        communities=communities,
+        items=items,
         leadership_insight=insight_data,
     )

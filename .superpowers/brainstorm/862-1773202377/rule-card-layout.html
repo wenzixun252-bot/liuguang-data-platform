@@ -1,0 +1,117 @@
+<h2>提取规则卡片 — 在数据导入页面的位置</h2>
+<p class="subtitle">规则配置作为醒目的独立卡片，放在数据导入页面中</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>顶部横幅式</h3>
+      <p>提取规则卡片横跨整个页面顶部，位于"数据导入"标题下方、本地导入和飞书同步之上。最醒目，用户第一眼就能看到。</p>
+      <div class="mockup" style="margin-top:12px">
+        <div class="mockup-header">数据导入页布局</div>
+        <div class="mockup-body" style="font-size:13px;line-height:1.6">
+          <div style="padding:8px;font-weight:bold;font-size:16px">数据导入</div>
+          <div style="padding:12px;background:linear-gradient(135deg,#eef2ff,#f0e6ff);border-radius:12px;border:2px solid #818cf8;margin:8px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <div>
+                <strong style="color:#4f46e5">⚙ 提取规则</strong>
+                <span style="color:#6b7280;margin-left:8px">定义从文档/会议中自动提取的关键信息字段</span>
+              </div>
+              <div style="display:flex;gap:6px">
+                <span style="background:#818cf8;color:white;padding:2px 8px;border-radius:6px;font-size:12px">能源项目 · 6字段</span>
+                <span style="background:#8b5cf6;color:white;padding:2px 8px;border-radius:6px;font-size:12px">城乡规划 · 5字段</span>
+                <span style="background:#6366f1;color:white;padding:2px 8px;border-radius:6px;font-size:12px">+ 新建规则</span>
+              </div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin:8px">
+            <div style="flex:1;padding:12px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb">
+              <strong>本地导入</strong>
+              <div style="color:#9ca3af;font-size:12px">沟通资产 | 文档资产 | 表格资产</div>
+            </div>
+            <div style="flex:2;padding:12px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb">
+              <strong>飞书同步</strong>
+              <div style="color:#9ca3af;font-size:12px">沟通资产 | 表格资产 | 文档资产</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>左侧独立卡片</h3>
+      <p>提取规则作为左侧的一个独立卡片，和"本地导入"并列。规则管理独占一块区域，空间更充裕。</p>
+      <div class="mockup" style="margin-top:12px">
+        <div class="mockup-header">数据导入页布局</div>
+        <div class="mockup-body" style="font-size:13px;line-height:1.6">
+          <div style="padding:8px;font-weight:bold;font-size:16px">数据导入</div>
+          <div style="display:flex;gap:8px;margin:8px">
+            <div style="flex:1;display:flex;flex-direction:column;gap:8px">
+              <div style="padding:16px;background:linear-gradient(135deg,#eef2ff,#f0e6ff);border-radius:12px;border:2px solid #818cf8">
+                <strong style="color:#4f46e5">⚙ 提取规则</strong>
+                <div style="margin-top:8px">
+                  <div style="padding:6px 10px;background:white;border-radius:8px;margin-bottom:4px;display:flex;justify-content:space-between;font-size:12px">
+                    <span>能源项目</span><span style="color:#818cf8">6字段</span>
+                  </div>
+                  <div style="padding:6px 10px;background:white;border-radius:8px;margin-bottom:4px;display:flex;justify-content:space-between;font-size:12px">
+                    <span>城乡规划</span><span style="color:#8b5cf6">5字段</span>
+                  </div>
+                  <div style="padding:6px 10px;background:white;border-radius:8px;text-align:center;color:#6366f1;font-size:12px;cursor:pointer">
+                    + 新建规则
+                  </div>
+                </div>
+              </div>
+              <div style="padding:16px;background:#f9fafb;border-radius:12px;border:1px solid #e5e7eb">
+                <strong>本地导入</strong>
+                <div style="color:#9ca3af;font-size:12px;margin-top:4px">沟通 | 文档 | 表格</div>
+              </div>
+            </div>
+            <div style="flex:2;padding:16px;background:#f9fafb;border-radius:12px;border:1px solid #e5e7eb">
+              <strong>飞书同步</strong>
+              <div style="color:#9ca3af;font-size:12px;margin-top:4px">沟通资产 | 表格资产 | 文档资产</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>右侧浮动面板</h3>
+      <p>提取规则作为页面右侧的浮动面板，始终可见。不占用主布局空间，但始终提醒用户配置。</p>
+      <div class="mockup" style="margin-top:12px">
+        <div class="mockup-header">数据导入页布局</div>
+        <div class="mockup-body" style="font-size:13px;line-height:1.6">
+          <div style="padding:8px;font-weight:bold;font-size:16px">数据导入</div>
+          <div style="display:flex;gap:8px;margin:8px">
+            <div style="flex:3">
+              <div style="display:flex;gap:8px">
+                <div style="flex:1;padding:12px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb">
+                  <strong>本地导入</strong>
+                  <div style="color:#9ca3af;font-size:12px">沟通 | 文档 | 表格</div>
+                </div>
+                <div style="flex:2;padding:12px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb">
+                  <strong>飞书同步</strong>
+                  <div style="color:#9ca3af;font-size:12px">沟通 | 表格 | 文档</div>
+                </div>
+              </div>
+            </div>
+            <div style="flex:1;padding:16px;background:linear-gradient(135deg,#eef2ff,#f0e6ff);border-radius:12px;border:2px solid #818cf8;min-width:140px">
+              <strong style="color:#4f46e5;font-size:13px">⚙ 提取规则</strong>
+              <div style="margin-top:8px">
+                <div style="padding:4px 8px;background:white;border-radius:6px;margin-bottom:3px;font-size:11px">能源项目</div>
+                <div style="padding:4px 8px;background:white;border-radius:6px;margin-bottom:3px;font-size:11px">城乡规划</div>
+                <div style="padding:4px 8px;background:white;border-radius:6px;text-align:center;color:#6366f1;font-size:11px">+ 新建</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

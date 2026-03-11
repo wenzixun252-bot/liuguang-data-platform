@@ -429,17 +429,30 @@ class FeishuClient:
     async def batch_get_doc_meta(
         self,
         docs: list[dict],
-        user_access_token: str,
+        user_access_token: str | None = None,
     ) -> dict[str, dict]:
         """批量获取文档元数据（create_time, url, owner_name 等）。
 
         使用 POST /open-apis/drive/v1/metas/batch_query
         docs: [{token, type}] — 每个元素需要 token 和 type 字段
         返回: {token: {url, create_time, owner_name}} 的字典
+
+        优先使用 user_access_token，如果失败则自动回退到 tenant_access_token。
         """
         result: dict[str, dict] = {}
-        # API 每次最多 200 个
         batch_size = 200
+
+        # 准备 token 列表：优先用户 token，兜底 tenant token
+        tokens_to_try = []
+        if user_access_token:
+            tokens_to_try.append(user_access_token)
+        tenant_token = await self.get_tenant_access_token()
+        if tenant_token:
+            tokens_to_try.append(tenant_token)
+        if not tokens_to_try:
+            logger.warning("batch_get_doc_meta: 无可用 token")
+            return result
+
         async with self._client() as client:
             for i in range(0, len(docs), batch_size):
                 batch = docs[i:i + batch_size]
@@ -447,35 +460,41 @@ class FeishuClient:
                 for d in batch:
                     raw_type = d.get("type", "docx")
                     request_docs.append({
-                        "docs_token": d["token"],
-                        "docs_type": raw_type,
+                        "doc_token": d["token"],
+                        "doc_type": raw_type,
                     })
-                resp = await client.post(
-                    f"{FEISHU_BASE_URL}/drive/v1/metas/batch_query",
-                    headers={"Authorization": f"Bearer {user_access_token}"},
-                    json={"request_docs": request_docs},
-                )
-                if resp.status_code != 200:
-                    logger.warning("batch_get_doc_meta HTTP %s", resp.status_code)
-                    continue
-                data = resp.json()
-                if data.get("code") != 0:
-                    logger.warning("batch_get_doc_meta error: %s", data.get("msg"))
-                    continue
 
-                metas = data.get("data", {}).get("metas") or []
-                failed = data.get("data", {}).get("failed_list") or []
-                if failed:
-                    logger.debug("batch_get_doc_meta %d failed", len(failed))
+                # 尝试每个 token，直到成功
+                for access_token in tokens_to_try:
+                    resp = await client.post(
+                        f"{FEISHU_BASE_URL}/drive/v1/metas/batch_query",
+                        headers={"Authorization": f"Bearer {access_token}"},
+                        json={"request_docs": request_docs},
+                    )
+                    if resp.status_code != 200:
+                        logger.warning("batch_get_doc_meta HTTP %s", resp.status_code)
+                        continue
+                    data = resp.json()
+                    if data.get("code") != 0:
+                        logger.warning("batch_get_doc_meta error: code=%s msg=%s", data.get("code"), data.get("msg"))
+                        continue
+                    # 成功，解析结果
+                    metas = data.get("data", {}).get("metas") or []
+                    failed = data.get("data", {}).get("failed_list") or []
+                    if failed:
+                        logger.debug("batch_get_doc_meta %d failed", len(failed))
 
-                for m in metas:
-                    tok = m.get("docs_token", "")
-                    result[tok] = {
-                        "url": m.get("url", ""),
-                        "create_time": m.get("create_time"),
-                        "latest_modify_time": m.get("latest_modify_time"),
-                        "owner_name": m.get("owner_display_name", ""),
-                    }
+                    for m in metas:
+                        tok = m.get("doc_token", "")
+                        result[tok] = {
+                            "url": m.get("url", ""),
+                            "create_time": m.get("create_time"),
+                            "latest_modify_time": m.get("latest_modify_time"),
+                            "owner_id": m.get("owner_id", ""),
+                            "owner_name": m.get("owner_display_name", ""),
+                        }
+                    break  # 成功了就不再尝试下一个 token
+
                 if i + batch_size < len(docs):
                     await asyncio.sleep(0.3)
 

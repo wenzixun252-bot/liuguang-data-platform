@@ -40,6 +40,8 @@ class CommunicationOut(BaseModel):
     sentiment: str | None = None
     quality_score: float | None = None
     duplicate_of: int | None = None
+    key_info: dict | None = None
+    extraction_rule_id: int | None = None
     extra_fields: dict = {}
     feishu_created_at: UTCDatetimeOpt = None
     feishu_updated_at: UTCDatetimeOpt = None
