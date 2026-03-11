@@ -235,32 +235,40 @@ async def get_asset_score(
         recent_count += await _count(model, model.created_at >= thirty_days_ago)
     activity_score = _log_score(recent_count, 100)
 
-    # --- 6. Source Activation (3 types: 会话多维表格, 会议多维表格, 云文件夹) ---
+    # --- 6. Source Activation (3 types: 会话记录, 会议记录, 云文件夹) ---
     source_types_total = 3
     active_types = 0
+    source_labels: list[str] = []
 
-    # 6a. 会话多维表格：是否有启用的 asset_type='communication' 的 ETLDataSource
+    # 6a. 会话记录
     comm_etl_stmt = select(func.count()).select_from(ETLDataSource).where(
         ETLDataSource.is_enabled == True, ETLDataSource.asset_type == "communication"
     )
-    if ((await db.execute(comm_etl_stmt)).scalar() or 0) > 0:
+    has_comm = ((await db.execute(comm_etl_stmt)).scalar() or 0) > 0
+    if has_comm:
         active_types += 1
+    source_labels.append(f"会话记录 {'✓' if has_comm else '✗'}")
 
-    # 6b. 会议多维表格：是否有启用的 asset_type='document' 的 ETLDataSource
+    # 6b. 会议记录
     doc_etl_stmt = select(func.count()).select_from(ETLDataSource).where(
         ETLDataSource.is_enabled == True, ETLDataSource.asset_type == "document"
     )
-    if ((await db.execute(doc_etl_stmt)).scalar() or 0) > 0:
+    has_doc = ((await db.execute(doc_etl_stmt)).scalar() or 0) > 0
+    if has_doc:
         active_types += 1
+    source_labels.append(f"会议记录 {'✓' if has_doc else '✗'}")
 
-    # 6c. 云文件夹：用户是否配置了 CloudFolderSource
+    # 6c. 云文件夹
     folder_stmt = select(func.count()).select_from(CloudFolderSource).where(
         CloudFolderSource.owner_id == current_user.feishu_open_id
     )
-    if ((await db.execute(folder_stmt)).scalar() or 0) > 0:
+    has_folder = ((await db.execute(folder_stmt)).scalar() or 0) > 0
+    if has_folder:
         active_types += 1
+    source_labels.append(f"云文件夹 {'✓' if has_folder else '✗'}")
 
     sources_score = _ratio_score(active_types, source_types_total)
+    sources_detail = " · ".join(source_labels)
 
     # --- 7. Data Rules (是否配置了数据提取规则和清洗规则) ---
     rules_total = 2  # 提取规则 + 清洗规则
@@ -293,7 +301,7 @@ async def get_asset_score(
         ("knowledge", "知识图谱", knowledge_score, f"{entity_count} 个实体, {relation_count} 条关系", "__action:build_kg" if knowledge_score == 0 else None, "构建图谱" if knowledge_score == 0 else None),
         ("tags", "标签覆盖", tags_score, f"{tagged_count}/{total_count} 已标签", "/settings?tab=tags", "去管理标签"),
         ("activity", "活跃度", activity_score, f"近30天新增 {recent_count} 条", "/data-import", "去同步数据"),
-        ("sources", "数据源激活", sources_score, f"已激活 {active_types}/{source_types_total} 类数据源", "/data-import", "去开启同步"),
+        ("sources", "数据源激活", sources_score, sources_detail, "/data-import", "去开启同步"),
         ("rules", "数据治理规则", rules_score, f"提取规则 {'✓' if has_extraction else '✗'} · 清洗规则 {'✓' if has_cleaning else '✗'}", "/data-import?tab=rules", "去配置规则"),
     ]
 

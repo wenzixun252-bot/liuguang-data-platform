@@ -420,3 +420,4 @@
 - **2026-03-11 23:49:54** [数据库迁移] `backend/alembic/versions/l2b3c4d5e6f7_add_unified_content_view.py` — 修改逻辑 (+6/-10行)
 - **2026-03-11 23:50:34** [数据库迁移] `backend/alembic/versions/l2b3c4d5e6f7_add_unified_content_view.py` — 修改逻辑 (+3/-12行)
 - **2026-03-11 23:53:29** [数据库迁移] `backend/alembic/versions/afb981d9d787_add_original_filename_to_documents.py` — 修改逻辑 (+1/-1行)
+- **2026-03-12 00:19:52** [其他] `build-and-deploy.sh` — 新建文件 `build-and-deploy` (90行)
