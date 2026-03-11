@@ -414,3 +414,9 @@
 - **2026-03-11 21:18:18** [其他] `C:/Users/ljadmin/.claude/plans/iridescent-wondering-sunset.md` — 新建文件 `iridescent-wondering-sunset` (85行)
 - **2026-03-11 21:20:54** [项目配置] `.env.example` — 新建文件 `.env` (12行)
 - **2026-03-11 21:21:36** [项目配置] `backend/.env.example` — 新建文件 `.env` (61行)
+- **2026-03-11 23:45:53** [数据库迁移] `backend/alembic/versions/afb981d9d787_add_original_filename_to_documents.py` — 新增 2 行代码
+- **2026-03-11 23:46:05** [数据库迁移] `backend/alembic/versions/afb981d9d787_add_original_filename_to_documents.py` — 新增 12 行代码
+- **2026-03-11 23:49:41** [数据库迁移] `backend/alembic/versions/afb981d9d787_add_original_filename_to_documents.py` — 修改逻辑 (+3/-4行)
+- **2026-03-11 23:49:54** [数据库迁移] `backend/alembic/versions/l2b3c4d5e6f7_add_unified_content_view.py` — 修改逻辑 (+6/-10行)
+- **2026-03-11 23:50:34** [数据库迁移] `backend/alembic/versions/l2b3c4d5e6f7_add_unified_content_view.py` — 修改逻辑 (+3/-12行)
+- **2026-03-11 23:53:29** [数据库迁移] `backend/alembic/versions/afb981d9d787_add_original_filename_to_documents.py` — 修改逻辑 (+1/-1行)

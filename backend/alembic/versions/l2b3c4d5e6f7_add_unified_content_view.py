@@ -16,26 +16,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute("""
-        CREATE OR REPLACE VIEW unified_content AS
-          SELECT id, 'document' AS content_type, owner_id, title,
-                 LEFT(content_text, 500) AS content_text, created_at, updated_at
-          FROM documents
-          UNION ALL
-          SELECT id, 'meeting' AS content_type, owner_id, title,
-                 LEFT(content_text, 500) AS content_text, created_at, updated_at
-          FROM meetings
-          UNION ALL
-          SELECT id, 'chat_message' AS content_type, owner_id, NULL AS title,
-                 LEFT(content_text, 500) AS content_text, created_at, updated_at
-          FROM chat_messages
-          UNION ALL
-          SELECT id, 'structured_table' AS content_type, owner_id, name AS title,
-                 COALESCE(summary, '') AS content_text,
-                 created_at, updated_at
-          FROM structured_tables
-          WHERE summary IS NOT NULL
-    """)
+    # Skipped: unified_content view will be created by later migration
+    # (afb981d9d787) after communications table exists
+    pass
 
 
 def downgrade() -> None:
