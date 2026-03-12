@@ -44,6 +44,9 @@ async def upload_file(
             db=db,
             uploader_name=current_user.name,
         )
+        doc.uploaded_by = current_user.name
+        await db.commit()
+        await db.refresh(doc)
 
         # 如果指定了提取规则，执行关键信息提取
         if extraction_rule_id:
@@ -108,6 +111,9 @@ async def upload_communication(
             uploader_name=current_user.name,
             user_metadata=user_metadata,
         )
+        comm.uploaded_by = current_user.name
+        await db.commit()
+        await db.refresh(comm)
 
         # 如果指定了提取规则，保存并执行关键信息提取
         if extraction_rule_id:

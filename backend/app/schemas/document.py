@@ -23,6 +23,7 @@ class DocumentOut(BaseModel):
     file_size: int | None = None
     source_url: str | None = None
     uploader_name: str | None = None
+    uploaded_by: str | None = None
     keywords: list = []
     sentiment: str | None = None
     quality_score: float | None = None

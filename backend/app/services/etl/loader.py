@@ -78,10 +78,14 @@ class AssetLoader:
         if settings.embedding_api_key and not settings.embedding_api_key.startswith("sk-xxx"):
             try:
                 from app.services.llm import llm_client
-                texts = [
-                    (r.summary or f"{getattr(r, 'title', '') or ''} {r.content_text[:500]}").strip()
-                    for r in records
-                ]
+                texts = []
+                for r in records:
+                    base = (r.summary or f"{getattr(r, 'title', '') or ''} {r.content_text[:500]}").strip()
+                    ki = getattr(r, 'key_info', None)
+                    if ki and isinstance(ki, dict):
+                        ki_text = " ".join(f"{k}: {v}" for k, v in ki.items() if v)
+                        base = f"{base} {ki_text}"
+                    texts.append(base)
                 embeddings = await llm_client.batch_generate_embeddings(texts)
                 logger.info("摘要 Embedding 生成完成: %d 条", len(embeddings))
             except Exception as e:
@@ -212,7 +216,7 @@ class AssetLoader:
                 INSERT INTO documents (
                     owner_id, source_type, source_platform, source_app_token, source_table_id,
                     feishu_record_id, title, content_text, content_vector,
-                    summary, author, doc_category, source_url, uploader_name,
+                    summary, author, doc_category, source_url, uploader_name, uploaded_by,
                     keywords, sentiment,
                     quality_score, content_hash, parse_status, processed_at,
                     extra_fields,
@@ -220,7 +224,7 @@ class AssetLoader:
                 ) VALUES (
                     :owner_id, 'cloud', :source_platform, :source_app_token, :source_table_id,
                     :feishu_record_id, :title, :content_text, :content_vector,
-                    :summary, :author, :doc_category, :source_url, :uploader_name,
+                    :summary, :author, :doc_category, :source_url, :uploader_name, :uploaded_by,
                     CAST(:keywords AS jsonb), :sentiment,
                     :quality_score, :content_hash, 'done', :processed_at,
                     CAST(:extra_fields AS jsonb),
@@ -236,6 +240,7 @@ class AssetLoader:
                     doc_category = EXCLUDED.doc_category,
                     source_url = EXCLUDED.source_url,
                     uploader_name = EXCLUDED.uploader_name,
+                    uploaded_by = EXCLUDED.uploaded_by,
                     keywords = EXCLUDED.keywords,
                     sentiment = EXCLUDED.sentiment,
                     quality_score = EXCLUDED.quality_score,
@@ -261,6 +266,7 @@ class AssetLoader:
                 "doc_category": r.doc_category,
                 "source_url": r.source_url or None,
                 "uploader_name": r.uploader_name or None,
+                "uploaded_by": r.uploaded_by or None,
                 "keywords": _list_to_json(r.keywords),
                 "sentiment": r.sentiment,
                 "quality_score": r.quality_score,
@@ -285,7 +291,7 @@ class AssetLoader:
                     chat_id, chat_type, chat_name,
                     message_type, reply_to,
                     content_text, content_vector,
-                    summary, source_url, uploader_name,
+                    summary, source_url, uploader_name, uploaded_by,
                     keywords, sentiment,
                     quality_score, content_hash, parse_status, processed_at,
                     extra_fields,
@@ -299,7 +305,7 @@ class AssetLoader:
                     :chat_id, :chat_type, :chat_name,
                     :message_type, :reply_to,
                     :content_text, :content_vector,
-                    :summary, :source_url, :uploader_name,
+                    :summary, :source_url, :uploader_name, :uploaded_by,
                     CAST(:keywords AS jsonb), :sentiment,
                     :quality_score, :content_hash, 'done', :processed_at,
                     CAST(:extra_fields AS jsonb),
@@ -329,6 +335,7 @@ class AssetLoader:
                     summary = EXCLUDED.summary,
                     source_url = EXCLUDED.source_url,
                     uploader_name = EXCLUDED.uploader_name,
+                    uploaded_by = EXCLUDED.uploaded_by,
                     keywords = EXCLUDED.keywords,
                     sentiment = EXCLUDED.sentiment,
                     quality_score = EXCLUDED.quality_score,
@@ -368,6 +375,7 @@ class AssetLoader:
                 "summary": r.summary,
                 "source_url": r.source_url or None,
                 "uploader_name": r.uploader_name or None,
+                "uploaded_by": r.uploaded_by or None,
                 "keywords": _list_to_json(r.keywords),
                 "sentiment": r.sentiment,
                 "quality_score": r.quality_score,

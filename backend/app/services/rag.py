@@ -232,7 +232,7 @@ class BM25Searcher:
             all_params.update(tag_params)
             all_params.update(time_params)
 
-            ts_content = "coalesce(title, '') || ' ' || content_text"
+            ts_content = "coalesce(title, '') || ' ' || content_text || ' ' || coalesce(key_info::text, '')"
             unions.append(
                 f"SELECT id, '{table_key}' as source_table, title, content_text, owner_id, "
                 f"feishu_record_id, key_info, "

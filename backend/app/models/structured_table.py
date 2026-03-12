@@ -79,6 +79,7 @@ class StructuredTable(Base):
     content_hash: Mapped[str | None] = mapped_column(String(64))
     # -- 清洗规则字段 --
     cleaning_rule_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    uploaded_by: Mapped[str | None] = mapped_column(String(256))
     # -- 通用字段 --
     extra_fields: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
     parse_status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="done")

@@ -58,6 +58,7 @@ class TransformedDocument:
     source_url: str | None = None
     source_platform: str | None = None
     uploader_name: str | None = None
+    uploaded_by: str | None = None
     extra_fields: dict = field(default_factory=dict)
     attachments: list = field(default_factory=list)
     feishu_created_at: datetime | None = None
@@ -103,6 +104,7 @@ class TransformedCommunication:
     source_url: str | None = None
     source_platform: str | None = None
     uploader_name: str | None = None
+    uploaded_by: str | None = None
     extra_fields: dict = field(default_factory=dict)
     attachments: list = field(default_factory=list)
     feishu_created_at: datetime | None = None

@@ -10,6 +10,8 @@ import { TagChips, BatchTagBar, useContentTags, InlineTagEditor, TagFilter } fro
 import { ColumnFilter } from '../components/ColumnFilter'
 import { DateRangeFilter } from '../components/DateRangeFilter'
 import { HighlightText } from '../components/HighlightText'
+import ExtractionRuleSlicer from '../components/ExtractionRuleSlicer'
+import ExtractionFieldView from '../components/ExtractionFieldView'
 
 // ─── 类型切换选项 ───────────────────────────────────────────
 type CommTypeFilter = 'meeting' | 'chat'
@@ -26,6 +28,8 @@ const MEETING_COLUMNS: ColumnDef[] = [
   { key: 'comm_time', label: '会议时间' },
   { key: 'initiator', label: '组织者' },
   { key: 'participants', label: '参与人' },
+  { key: 'uploader_name', label: '资产所有人', defaultVisible: false },
+  { key: 'uploaded_by', label: '上传人', defaultVisible: false },
   { key: 'key_info', label: '自定义提取内容' },
   { key: 'content', label: '内容预览' },
   { key: 'source_url', label: '会议纪要', defaultVisible: false },
@@ -39,6 +43,8 @@ const CHAT_COLUMNS: ColumnDef[] = [
   { key: 'comm_time', label: '发送时间' },
   { key: 'initiator', label: '发送者' },
   { key: 'chat_name', label: '群组名称' },
+  { key: 'uploader_name', label: '资产所有人', defaultVisible: false },
+  { key: 'uploaded_by', label: '上传人', defaultVisible: false },
   { key: 'key_info', label: '自定义提取内容' },
   { key: 'content', label: '发送内容' },
   { key: 'attachments', label: '附件' },
@@ -91,6 +97,7 @@ interface CommunicationItem {
   summary: string | null
   source_url: string | null
   uploader_name: string | null
+  uploaded_by: string | null
   keywords: string[]
   sentiment: string | null
   quality_score: number | null
@@ -161,6 +168,8 @@ export default function Communications() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [refreshKey, setRefreshKey] = useState(0)
   const [tagRefreshKey, setTagRefreshKey] = useState(0)
+  const [extractionRuleId, setExtractionRuleId] = useState<number | null>(null)
+  const [fieldViewRuleId, setFieldViewRuleId] = useState<number | null>(null)
 
   // 提取规则名称映射
   const { data: rulesList } = useQuery({ queryKey: ['extraction-rules'], queryFn: getExtractionRules })
@@ -184,6 +193,7 @@ export default function Communications() {
     if (search) params.search = search
     params.comm_type = commTypeFilter
     if (tagIds.length > 0) params.tag_ids = tagIds
+    if (extractionRuleId) params.extraction_rule_id = extractionRuleId
     for (const [key, vals] of Object.entries(columnFilters)) {
       if (vals.length > 0 && backendFilterKeys.includes(key)) params[key] = vals.join(',')
     }
@@ -195,12 +205,12 @@ export default function Communications() {
       .then((res) => setData(res.data))
       .catch(() => toast.error('加载沟通记录失败'))
       .finally(() => setLoading(false))
-  }, [page, search, commTypeFilter, columnFilters, dateFilters, tagIds, refreshKey])
+  }, [page, search, commTypeFilter, columnFilters, dateFilters, tagIds, extractionRuleId, refreshKey])
 
   // 切换筛选条件时清空选择
   useEffect(() => {
     setSelectedIds(new Set())
-  }, [page, search, commTypeFilter, columnFilters, dateFilters, tagIds])
+  }, [page, search, commTypeFilter, columnFilters, dateFilters, tagIds, extractionRuleId])
 
   // 从搜索结果跳转过来时自动打开详情
   useEffect(() => {
@@ -343,7 +353,7 @@ export default function Communications() {
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               type="text"
-              placeholder="搜索主题、内容、摘要、组织者..."
+              placeholder="搜索主题、内容、摘要、组织者、自定义提取..."
               className="pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm w-full sm:w-72 focus:outline-none focus:ring-2 focus:ring-indigo-200"
               value={search}
               onChange={(e) => { setSearch(e.target.value); setPage(1) }}
@@ -374,6 +384,13 @@ export default function Communications() {
       <TagFilter
         selectedTagIds={tagIds}
         onChange={(ids) => { setTagIds(ids); setPage(1) }}
+      />
+
+      {/* 提取规则切片器 */}
+      <ExtractionRuleSlicer
+        selectedRuleId={extractionRuleId}
+        onSelect={(id) => { setExtractionRuleId(id); setPage(1) }}
+        onViewFields={(id) => setFieldViewRuleId(id)}
       />
 
       {/* 批量操作栏 */}
@@ -490,14 +507,24 @@ export default function Communications() {
                           <HighlightText text={item.chat_name || '个人聊天'} keyword={search} />
                         </td>
                       )}
+                      {isVisible('uploader_name') && (
+                        <td className={`py-3 px-4 text-indigo-700 font-medium ${search && item.matched_fields?.includes('uploader_name') ? 'bg-amber-50' : 'bg-indigo-50/30'}`}>
+                          <HighlightText text={item.uploader_name || '-'} keyword={search} />
+                        </td>
+                      )}
+                      {isVisible('uploaded_by') && (
+                        <td className="py-3 px-4 text-gray-600">
+                          {item.uploaded_by || '-'}
+                        </td>
+                      )}
                       {isVisible('key_info') && (
-                        <td className="py-3 px-4 max-w-[280px] bg-violet-50/30">
+                        <td className={`py-3 px-4 max-w-[280px] ${search && item.matched_fields?.includes('key_info') ? 'bg-amber-50' : 'bg-violet-50/30'}`}>
                           {item.key_info && Object.keys(item.key_info).length > 0 ? (
                             <div className="flex flex-wrap gap-1">
                               {Object.entries(item.key_info).slice(0, 3).map(([k, v]) => (
                                 <span key={k} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-violet-100 text-violet-800 border border-violet-200" title={`${k}: ${v}`}>
                                   <span className="text-violet-500 mr-0.5">{k}:</span>
-                                  <span className="truncate max-w-[90px]">{String(v)}</span>
+                                  <span className="truncate max-w-[90px]"><HighlightText text={String(v)} keyword={search} /></span>
                                 </span>
                               ))}
                               {Object.keys(item.key_info).length > 3 && (
@@ -624,6 +651,14 @@ export default function Communications() {
               toast.error('删除失败')
             }
           }}
+        />
+      )}
+
+      {/* 提取规则字段汇总视图 */}
+      {fieldViewRuleId && (
+        <ExtractionFieldView
+          ruleId={fieldViewRuleId}
+          onClose={() => setFieldViewRuleId(null)}
         />
       )}
     </div>

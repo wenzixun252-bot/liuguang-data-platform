@@ -34,6 +34,7 @@ async def list_communications(
     start_date: datetime | None = Query(None),
     end_date: datetime | None = Query(None),
     initiator: str | None = Query(None),
+    extraction_rule_id: int | None = Query(None, description="按提取规则ID筛选"),
     tag_ids: list[int] = Query(default=[]),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -70,6 +71,7 @@ async def list_communications(
             | Communication.uploader_name.ilike(like)
             | cast(Communication.keywords, String).ilike(like)
             | cast(Communication.participants, String).ilike(like)
+            | cast(Communication.key_info, String).ilike(like)
         )
         base = base.where(f)
         count_stmt = count_stmt.where(f)
@@ -86,6 +88,14 @@ async def list_communications(
         like = f"%{initiator}%"
         base = base.where(Communication.initiator.ilike(like))
         count_stmt = count_stmt.where(Communication.initiator.ilike(like))
+
+    if extraction_rule_id is not None:
+        if extraction_rule_id == -1:
+            base = base.where(Communication.extraction_rule_id.is_(None))
+            count_stmt = count_stmt.where(Communication.extraction_rule_id.is_(None))
+        else:
+            base = base.where(Communication.extraction_rule_id == extraction_rule_id)
+            count_stmt = count_stmt.where(Communication.extraction_rule_id == extraction_rule_id)
 
     if tag_ids:
         subq = select(ContentTag.content_id).where(
@@ -123,6 +133,7 @@ async def list_communications(
                 "participants": " ".join(
                     p.get("name", "") for p in (r.participants or []) if isinstance(p, dict)
                 ),
+                "key_info": " ".join(f"{k} {v}" for k, v in (r.key_info or {}).items() if v is not None),
             }
             for fname, val in fields_to_check.items():
                 if val and search_lower in str(val).lower():

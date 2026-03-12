@@ -11,6 +11,8 @@ import { TagChips, BatchTagBar, useContentTags, InlineTagEditor, TagFilter } fro
 import { ColumnFilter } from '../components/ColumnFilter'
 import { DateRangeFilter } from '../components/DateRangeFilter'
 import { HighlightText } from '../components/HighlightText'
+import ExtractionRuleSlicer from '../components/ExtractionRuleSlicer'
+import ExtractionFieldView from '../components/ExtractionFieldView'
 
 const DOC_COLUMNS: ColumnDef[] = [
   { key: 'title', label: '标题' },
@@ -20,6 +22,7 @@ const DOC_COLUMNS: ColumnDef[] = [
   { key: 'key_info', label: '关键信息' },
   { key: 'source_type', label: '来源' },
   { key: 'uploader_name', label: '资产所有人' },
+  { key: 'uploaded_by', label: '上传人', defaultVisible: false },
   { key: 'file_type', label: '类型', defaultVisible: false },
   { key: 'doc_created_time', label: '创建时间' },
   { key: 'doc_modified_time', label: '修改时间' },
@@ -57,6 +60,7 @@ interface DocumentItem {
   tags: Record<string, unknown>
   source_url: string | null
   uploader_name: string | null
+  uploaded_by: string | null
   extra_fields?: { _attachments?: AttachmentMeta[]; _links?: LinkMeta[]; [key: string]: unknown }
   feishu_record_id: string | null
   bitable_url: string | null
@@ -111,6 +115,8 @@ export default function Documents() {
   const [refreshKey, setRefreshKey] = useState(0)
   const { isVisible, toggle, columns: colDefs } = useColumnSettings('documents', DOC_COLUMNS)
   const [tagRefreshKey, setTagRefreshKey] = useState(0)
+  const [extractionRuleId, setExtractionRuleId] = useState<number | null>(null)
+  const [fieldViewRuleId, setFieldViewRuleId] = useState<number | null>(null)
 
   // 提取规则名称映射
   const { data: rulesList } = useQuery({ queryKey: ['extraction-rules'], queryFn: getExtractionRules })
@@ -126,6 +132,7 @@ export default function Documents() {
     const params: Record<string, unknown> = { page, page_size: pageSize }
     if (search) params.search = search
     if (tagIds.length > 0) params.tag_ids = tagIds
+    if (extractionRuleId) params.extraction_rule_id = extractionRuleId
     for (const [key, vals] of Object.entries(columnFilters)) {
       if (vals.length > 0) params[key] = vals.join(',')
     }
@@ -144,12 +151,12 @@ export default function Documents() {
       .then((res) => setData(res.data))
       .catch(() => toast.error('加载文档列表失败'))
       .finally(() => setLoading(false))
-  }, [page, search, columnFilters, dateFilters, tagIds, refreshKey])
+  }, [page, search, columnFilters, dateFilters, tagIds, extractionRuleId, refreshKey])
 
   // 翻页/筛选变化时清空选择
   useEffect(() => {
     setSelectedIds(new Set())
-  }, [page, search, columnFilters, dateFilters, tagIds])
+  }, [page, search, columnFilters, dateFilters, tagIds, extractionRuleId])
 
   // 从搜索结果跳转过来时自动打开详情
   useEffect(() => {
@@ -276,7 +283,7 @@ export default function Documents() {
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               type="text"
-              placeholder="搜索标题、内容、摘要、关键词..."
+              placeholder="搜索标题、内容、摘要、关键词、自定义提取..."
               className="pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm w-full sm:w-72 focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400"
               value={search}
               onChange={(e) => { setSearch(e.target.value); setPage(1) }}
@@ -290,6 +297,13 @@ export default function Documents() {
       <TagFilter
         selectedTagIds={tagIds}
         onChange={(ids) => { setTagIds(ids); setPage(1) }}
+      />
+
+      {/* 提取规则切片器 */}
+      <ExtractionRuleSlicer
+        selectedRuleId={extractionRuleId}
+        onSelect={(id) => { setExtractionRuleId(id); setPage(1) }}
+        onViewFields={(id) => setFieldViewRuleId(id)}
       />
 
       {/* Batch action bar */}
@@ -351,6 +365,13 @@ export default function Documents() {
                       <th className="text-left py-3 px-4 text-indigo-700 font-semibold bg-indigo-50/50">
                         <span className="inline-flex items-center gap-1">资产所有人
                           <ColumnFilter options={uniqueValues('uploader_name')} selected={columnFilters.uploader_name || []} onChange={(v) => updateColumnFilter('uploader_name', v)} />
+                        </span>
+                      </th>
+                    )}
+                    {isVisible('uploaded_by') && (
+                      <th className="text-left py-3 px-4 text-indigo-700 font-semibold bg-indigo-50/50">
+                        <span className="inline-flex items-center gap-1">上传人
+                          <ColumnFilter options={uniqueValues('uploaded_by')} selected={columnFilters.uploaded_by || []} onChange={(v) => updateColumnFilter('uploaded_by', v)} />
                         </span>
                       </th>
                     )}
@@ -466,13 +487,13 @@ export default function Documents() {
                         </td>
                       )}
                       {isVisible('key_info') && (
-                        <td className="py-3 px-4 max-w-[280px] bg-violet-50/30">
+                        <td className={`py-3 px-4 max-w-[280px] ${search && item.matched_fields?.includes('key_info') ? 'bg-amber-50' : 'bg-violet-50/30'}`}>
                           {item.key_info && Object.keys(item.key_info).length > 0 ? (
                             <div className="flex flex-wrap gap-1">
                               {Object.entries(item.key_info).slice(0, 3).map(([k, v]) => (
                                 <span key={k} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-violet-100 text-violet-800 border border-violet-200" title={`${k}: ${v}`}>
                                   <span className="text-violet-500 mr-0.5">{k}:</span>
-                                  <span className="truncate max-w-[90px]">{String(v)}</span>
+                                  <span className="truncate max-w-[90px]"><HighlightText text={String(v)} keyword={search} /></span>
                                 </span>
                               ))}
                               {Object.keys(item.key_info).length > 3 && (
@@ -494,6 +515,11 @@ export default function Documents() {
                       {isVisible('uploader_name') && (
                         <td className={`py-3 px-4 text-indigo-700 font-medium ${search && item.matched_fields?.includes('uploader_name') ? 'bg-amber-50' : 'bg-indigo-50/30'}`}>
                           <HighlightText text={item.uploader_name || '-'} keyword={search} />
+                        </td>
+                      )}
+                      {isVisible('uploaded_by') && (
+                        <td className="py-3 px-4 text-gray-600">
+                          {item.uploaded_by || '-'}
                         </td>
                       )}
                       {isVisible('file_type') && <td className="py-3 px-4 text-gray-500">{item.file_type ? item.file_type.toUpperCase() : '-'}</td>}
@@ -581,6 +607,14 @@ export default function Documents() {
           setRefreshKey((k) => k + 1)
         } catch { toast.error('删除失败') }
       }} />}
+
+      {/* 提取规则字段汇总视图 */}
+      {fieldViewRuleId && (
+        <ExtractionFieldView
+          ruleId={fieldViewRuleId}
+          onClose={() => setFieldViewRuleId(null)}
+        />
+      )}
     </div>
   )
 }

@@ -29,6 +29,7 @@ interface StructuredTableItem {
   cleaning_rule_id?: number | null
   cleaning_rule_name?: string | null
   uploader_name: string | null
+  uploaded_by: string | null
   synced_at: string | null
   created_at: string
   updated_at: string
@@ -449,6 +450,11 @@ export default function StructuredTables() {
                         <ColumnFilter options={uniqueValues('uploader_name')} selected={columnFilters.uploader_name || []} onChange={(v) => updateColumnFilter('uploader_name', v)} />
                       </span>
                     </th>
+                    <th className="text-left py-3 px-4 text-gray-500 font-medium">
+                      <span className="inline-flex items-center gap-1">上传人
+                        <ColumnFilter options={uniqueValues('uploaded_by')} selected={columnFilters.uploaded_by || []} onChange={(v) => updateColumnFilter('uploaded_by', v)} />
+                      </span>
+                    </th>
                     <th className="text-left py-3 px-4 text-gray-500 font-medium">记录数</th>
                     <th className="text-left py-3 px-4 text-gray-500 font-medium">字段数</th>
                     <th className="text-left py-3 px-4 text-gray-500 font-medium">摘要</th>
@@ -517,6 +523,7 @@ export default function StructuredTables() {
                         </span>
                       </td>
                       <td className="py-3 px-4 text-indigo-700 font-medium bg-indigo-50/30">{item.uploader_name || '-'}</td>
+                      <td className="py-3 px-4 text-gray-600">{item.uploaded_by || '-'}</td>
                       <td className="py-3 px-4 text-gray-500">{item.row_count}</td>
                       <td className="py-3 px-4 text-gray-500">{item.column_count}</td>
                       <td className="py-3 px-4 text-gray-500 max-w-[200px] truncate">{item.summary || '-'}</td>

@@ -323,7 +323,8 @@ export function TagFilter({
 
   return (
     <div className="flex flex-wrap gap-1 items-center">
-      <Tag size={12} className="text-gray-500" />
+      <Tag size={12} className="text-gray-400 shrink-0" />
+      <span className="text-[11px] text-gray-400 shrink-0 mr-0.5">按标签筛选</span>
       {allTags.map(t => (
         <button
           key={t.id}

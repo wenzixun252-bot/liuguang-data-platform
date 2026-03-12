@@ -63,6 +63,7 @@ class Document(Base):
     file_path: Mapped[str | None] = mapped_column(String(1024))
     source_url: Mapped[str | None] = mapped_column(String(1024))
     uploader_name: Mapped[str | None] = mapped_column(String(256))
+    uploaded_by: Mapped[str | None] = mapped_column(String(256))
     content_vector = mapped_column(Vector(settings.embedding_dimension), nullable=True)
     # -- LLM 提取的统一字段 --
     keywords: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="[]")

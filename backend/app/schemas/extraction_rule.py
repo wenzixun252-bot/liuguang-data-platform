@@ -39,3 +39,18 @@ class ExtractionRuleOut(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ExtractionDataItem(BaseModel):
+    source_type: str
+    source_id: int
+    source_title: str
+    key_info: dict
+
+
+class ExtractionDataResponse(BaseModel):
+    rule: ExtractionRuleOut
+    items: list[ExtractionDataItem]
+    total: int
+    page: int
+    page_size: int

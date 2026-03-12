@@ -132,7 +132,7 @@ async def _mark_failed(app_token: str, table_id: str, error: str) -> None:
             await db.commit()
 
 
-async def etl_sync_job() -> None:
+async def etl_sync_job(triggered_by: str | None = None) -> None:
     """定时任务入口：遍历注册中心 → 逐表增量抽取 → Transform → Load。"""
     logger.info("ETL 同步任务开始")
 
@@ -282,6 +282,9 @@ async def etl_sync_job() -> None:
                     continue
 
                 # 3. Load — 附件下载提取 + Embedding + Upsert（按 target_table 路由）
+                _uploaded_by = triggered_by or "系统自动同步"
+                for _rec in transform_result.records:
+                    _rec.uploaded_by = _uploaded_by
                 loaded = await asset_loader.load(transform_result, db, user_access_token=user_token)
                 total_loaded += loaded
 
@@ -296,7 +299,7 @@ async def etl_sync_job() -> None:
     )
 
 
-async def etl_sync_single_source(app_token: str, table_id: str, owner_id: str | None, asset_type: str = "document") -> None:
+async def etl_sync_single_source(app_token: str, table_id: str, owner_id: str | None, asset_type: str = "document", triggered_by: str | None = None) -> None:
     """同步单个数据源。"""
     logger.info("单源同步开始: %s/%s", app_token, table_id)
 
@@ -321,7 +324,7 @@ async def etl_sync_single_source(app_token: str, table_id: str, owner_id: str | 
         await db.commit()
 
     try:
-        await asyncio.wait_for(_do_single_source_sync(app_token, table_id, owner_id, asset_type), timeout=600)
+        await asyncio.wait_for(_do_single_source_sync(app_token, table_id, owner_id, asset_type, triggered_by=triggered_by), timeout=600)
     except asyncio.TimeoutError:
         logger.error("单源同步 %s/%s 超时 (10分钟)", app_token, table_id)
         await _mark_failed(app_token, table_id, "同步超时 (10分钟)")
@@ -330,7 +333,7 @@ async def etl_sync_single_source(app_token: str, table_id: str, owner_id: str | 
         await _mark_failed(app_token, table_id, str(e))
 
 
-async def _do_single_source_sync(app_token: str, table_id: str, owner_id: str | None, asset_type: str) -> None:
+async def _do_single_source_sync(app_token: str, table_id: str, owner_id: str | None, asset_type: str, triggered_by: str | None = None) -> None:
     """单源同步的实际执行逻辑（手动触发，全量拉取 + upsert 去重）。"""
     try:
         async with async_session() as db:
@@ -405,6 +408,9 @@ async def _do_single_source_sync(app_token: str, table_id: str, owner_id: str | 
             )
 
             if transform_result.records:
+                _uploaded_by = triggered_by or "系统自动同步"
+                for _rec in transform_result.records:
+                    _rec.uploaded_by = _uploaded_by
                 await asset_loader.load(transform_result, db, user_access_token=user_token)
             else:
                 # 转换后无有效记录，也要将状态标记为 success

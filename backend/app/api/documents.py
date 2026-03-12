@@ -45,6 +45,7 @@ async def list_documents(
     sentiment: str | None = Query(None),
     uploader_name: str | None = Query(None),
     file_type: str | None = Query(None),
+    extraction_rule_id: int | None = Query(None, description="按提取规则ID筛选"),
     tag_ids: list[int] = Query(default=[]),
     date_field: str | None = Query(None, description="时间筛选字段: created_at, feishu_created_at, feishu_updated_at, synced_at"),
     date_from: datetime | None = Query(None, description="时间范围开始"),
@@ -69,6 +70,7 @@ async def list_documents(
             | cast(Document.keywords, String).ilike(like)
             | Document.file_type.ilike(like)
             | Document.author.ilike(like)
+            | cast(Document.key_info, String).ilike(like)
         )
         base = base.where(f)
         count_stmt = count_stmt.where(f)
@@ -93,6 +95,14 @@ async def list_documents(
     if file_type:
         base = base.where(Document.file_type == file_type)
         count_stmt = count_stmt.where(Document.file_type == file_type)
+
+    if extraction_rule_id is not None:
+        if extraction_rule_id == -1:
+            base = base.where(Document.extraction_rule_id.is_(None))
+            count_stmt = count_stmt.where(Document.extraction_rule_id.is_(None))
+        else:
+            base = base.where(Document.extraction_rule_id == extraction_rule_id)
+            count_stmt = count_stmt.where(Document.extraction_rule_id == extraction_rule_id)
 
     if tag_ids:
         subq = select(ContentTag.content_id).where(
@@ -180,6 +190,7 @@ async def list_documents(
                 "original_filename": r.original_filename,
                 "uploader_name": r.uploader_name,
                 "keywords": " ".join(r.keywords or []),
+                "key_info": " ".join(f"{k} {v}" for k, v in (r.key_info or {}).items() if v is not None),
             }
             for fname, val in fields_to_check.items():
                 if val and search_lower in str(val).lower():

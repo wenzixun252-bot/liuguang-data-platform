@@ -48,6 +48,8 @@ export const createExtractionRule = (data: any) => api.post('/extraction-rules',
 export const updateExtractionRule = (id: number, data: any) => api.put(`/extraction-rules/${id}`, data).then(r => r.data)
 export const deleteExtractionRule = (id: number) => api.delete(`/extraction-rules/${id}`).then(r => r.data)
 export const getExtractionTemplates = () => api.get('/extraction-rules/templates').then(r => r.data)
+export const getExtractionRuleData = (ruleId: number, params?: { search?: string; page?: number; page_size?: number }) =>
+  api.get(`/extraction-rules/${ruleId}/data`, { params }).then(r => r.data)
 
 // ── 清洗规则 API ──
 export const getCleaningRules = () => api.get('/cleaning-rules').then(r => r.data)

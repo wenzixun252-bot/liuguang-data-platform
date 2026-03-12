@@ -180,7 +180,7 @@ async def trigger_my_sync(
         state.last_sync_time = datetime.utcnow()
     await db.commit()
 
-    asyncio.create_task(etl_sync_job())
+    asyncio.create_task(etl_sync_job(triggered_by=current_user.name))
     return {"message": "同步任务已触发", "sources_count": len(sources)}
 
 
@@ -202,7 +202,7 @@ async def trigger_single_sync(
         asyncio.create_task(_sync_structured_source(ds, current_user.feishu_access_token))
     else:
         from app.worker.tasks import etl_sync_single_source
-        asyncio.create_task(etl_sync_single_source(ds.app_token, ds.table_id, ds.owner_id, ds.asset_type))
+        asyncio.create_task(etl_sync_single_source(ds.app_token, ds.table_id, ds.owner_id, ds.asset_type, triggered_by=current_user.name))
     return {"message": "同步任务已触发", "source_id": source_id}
 
 
@@ -1839,7 +1839,7 @@ async def trigger_auto_sync(
         try:
             # 1. ETL 同步
             try:
-                await etl_sync_job()
+                await etl_sync_job(triggered_by=current_user.name)
                 logger.info("自动同步 [ETL] 完成 (user=%s)", owner_id)
             except Exception as e:
                 logger.error("自动同步 [ETL] 失败: %s", e)

@@ -69,6 +69,9 @@ async def import_bitable(
             body.table_id,
             user_access_token=current_user.feishu_access_token,
         )
+        table.uploaded_by = current_user.name
+        await db.commit()
+        await db.refresh(table)
         # 如果指定了清洗规则，导入完成后自动应用
         if body.cleaning_rule_id:
             await _apply_cleaning_after_import(db, table.id, body.cleaning_rule_id)
@@ -95,6 +98,9 @@ async def import_spreadsheet(
             body.sheet_id,
             user_access_token=current_user.feishu_access_token,
         )
+        table.uploaded_by = current_user.name
+        await db.commit()
+        await db.refresh(table)
         # 如果指定了清洗规则，导入完成后自动应用
         if body.cleaning_rule_id:
             await _apply_cleaning_after_import(db, table.id, body.cleaning_rule_id)
@@ -128,6 +134,9 @@ async def import_upload(
             file.filename,
             content,
         )
+        table.uploaded_by = current_user.name
+        await db.commit()
+        await db.refresh(table)
         # 如果指定了清洗规则，导入完成后自动应用
         if cleaning_rule_id:
             await _apply_cleaning_after_import(db, table.id, cleaning_rule_id)
@@ -323,6 +332,9 @@ async def import_from_url(
                 parsed["token"], table_id,
                 user_access_token=user_token,
             )
+            table.uploaded_by = current_user.name
+            await db.commit()
+            await db.refresh(table)
             if body.cleaning_rule_id:
                 await _apply_cleaning_after_import(db, table.id, body.cleaning_rule_id)
                 await db.refresh(table)
@@ -342,6 +354,9 @@ async def import_from_url(
                 parsed["token"], sheet_id,
                 user_access_token=user_token,
             )
+            table.uploaded_by = current_user.name
+            await db.commit()
+            await db.refresh(table)
             if body.cleaning_rule_id:
                 await _apply_cleaning_after_import(db, table.id, body.cleaning_rule_id)
                 await db.refresh(table)

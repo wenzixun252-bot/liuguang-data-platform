@@ -478,3 +478,20 @@
 - **2026-03-12 14:42:39** [前端页面] `frontend/src/pages/Reports.tsx` — 修改逻辑 (+5/-1行)
 - **2026-03-12 14:51:02** [其他] `.mcp.json` — 新建文件 `.mcp` (18行)
 - **2026-03-12 15:33:52** [其他] `frontend/index.html` — 修改逻辑 (+1/-1行)
+- **2026-03-12 17:36:16** [前端工具库] `frontend/src/lib/api.ts` — 新增 getExtractionRuleData
+- **2026-03-12 17:36:54** [前端组件] `frontend/src/components/ExtractionRuleSlicer.tsx` — 新建文件 `ExtractionRuleSlicer`，包含 ExtractionRuleSlicer, active
+- **2026-03-12 17:37:45** [前端组件] `frontend/src/components/ExtractionFieldView.tsx` — 新建文件 `ExtractionFieldView`，包含 ExtractionFieldView, navigate, pageSize, totalPages, fields
+- **2026-03-12 17:46:52** [前端组件] `frontend/src/components/ExtractionFieldView.tsx` — 添加依赖引用
+- **2026-03-12 17:47:04** [前端组件] `frontend/src/components/ExtractionFieldView.tsx` — 新增 resp, params, handleExport, a
+- **2026-03-12 17:47:12** [前端组件] `frontend/src/components/ExtractionFieldView.tsx` — 调整UI组件
+- **2026-03-12 17:51:43** [前端组件] `frontend/src/components/ExtractionRuleSlicer.tsx` — 调整UI组件
+- **2026-03-12 17:56:19** [前端组件] `frontend/src/components/ExtractionRuleSlicer.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-12 18:05:14** [其他] `SS/PRD.md` — 新建文件 `PRD` (375行)
+- **2026-03-12 18:06:21** [其他] `CLAUDE.md` — 修改逻辑 (+1/-1行)
+- **2026-03-12 18:06:22** [其他] `CLAUDE.md` — 修改逻辑 (+3/-3行)
+- **2026-03-12 18:06:23** [其他] `CLAUDE.md` — 修改逻辑 (+1/-1行)
+- **2026-03-12 18:06:24** [其他] `CLAUDE.md` — 修改逻辑 (+1/-1行)
+- **2026-03-12 18:06:25** [其他] `CLAUDE.md` — 修改逻辑 (+1/-1行)
+- **2026-03-12 18:06:26** [其他] `CLAUDE.md` — 修改逻辑 (+1/-1行)
+- **2026-03-12 18:06:27** [其他] `CLAUDE.md` — 修改逻辑 (+1/-1行)
+- **2026-03-12 18:06:28** [其他] `CLAUDE.md` — 修改逻辑 (+1/-1行)

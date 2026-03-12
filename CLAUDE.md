@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-流光 (Liuguang) — Intelligent Data Asset Platform. An enterprise full-stack application that syncs data from Feishu (Lark) Bitable via an LLM-powered ETL pipeline into PostgreSQL with pgvector, then exposes a RAG-based Q&A assistant ("Flow Light").
+流光数据中台 (Liuguang Data Platform). An enterprise intelligent data platform that collects multi-source data from Feishu (Lark) ecosystem (Bitable, cloud docs, meetings, chats), processes it through an LLM-powered ETL pipeline with extraction/cleaning rule engines, and stores standardized assets in PostgreSQL with pgvector. Core strengths: 7-step ETL pipeline, 4 industry extraction templates, 7 cleaning options, LLM Schema mapping with MD5 cache. Also provides knowledge graph construction and hybrid RAG search (exploring: AI Q&A, report generation, calendar assistant, smart todos).
 
 ## Commands
 
@@ -46,12 +46,12 @@ cd frontend && npm run build
 ### Backend (backend/app/)
 
 ```
-main.py       -> FastAPI app entry (23 routers, CORS, lifespan scheduler)
+main.py       -> FastAPI app entry (24 routers, CORS, lifespan scheduler)
 config.py     -> Pydantic Settings from .env (DB, Feishu, LLM, embedding configs)
 database.py   -> AsyncEngine + AsyncSession (pool_size=10, max_overflow=20)
-api/          -> FastAPI route handlers (23 routers + deps.py)
+api/          -> FastAPI route handlers (24 routers + deps.py)
   deps.py     -> Dependency injection: get_db, get_current_user, get_visible_owner_ids, require_role
-models/       -> SQLAlchemy 2.0 async ORM (21 model files)
+models/       -> SQLAlchemy 2.0 async ORM (22 model files)
 schemas/      -> Pydantic request/response models
 services/     -> Business logic (feishu.py, llm.py, rag.py, kg_builder.py, graph_rag.py, todo_extractor.py, kg_analyzer.py, leadership_analyzer.py, report_generator.py...)
   etl/        -> ETL pipeline: preprocessor -> extractor -> transformer -> enricher -> postprocessor -> loader (+ recording_matcher, hardcoded_comm)
@@ -75,7 +75,7 @@ hooks/        -> Custom hooks (useAuth, useWidgetConfig, useColumnSettings, useT
 - **Async-first**: All DB access uses SQLAlchemy async + asyncpg. All external HTTP calls use httpx async.
 - **Config via Pydantic Settings**: `app/config.py` loads from `.env` file. Copy `.env.example` to `.env` for local dev.
 - **Row-Level Security**: Every query filters by `get_visible_owner_ids()` which computes: own data + direct shares (UserVisibilityOverride) + department shares (UserDeptSharing). Admins see all.
-- **Three Core Content Tables**: Document, Meeting, ChatMessage — each with 1024-dim vector embeddings (BAAI/bge-m3) for RAG.
+- **Three Core Content Tables**: Document, Communication (unified meetings/chats/recordings via comm_type), StructuredTable — each with 1024-dim vector embeddings (BAAI/bge-m3) for RAG.
 - **Hybrid RAG**: Vector cosine similarity + BM25 keyword search + Reciprocal Rank Fusion. Permission-aware. Streams via SSE.
 - **Knowledge Graph**: KGEntity + KGRelation extracted from content, used to enhance RAG context via graph_rag.py.
 - **Tag System**: TagDefinition (project|priority|topic|custom) linked to content via ContentTag. ETL auto-tags via default_tag_ids.
@@ -137,7 +137,7 @@ Three-service stack in `docker-compose.yml`:
 - **frontend** (Nginx) — port 80, serves React SPA with `/api` proxy to backend
 
 Deployment script: `build-and-deploy.sh` for automated build and deploy.
-45 Alembic migrations as of latest.
+47 Alembic migrations as of latest.
 
 ---
 
@@ -215,7 +215,7 @@ The platform's core value is connecting data across content types. Every page an
 - Person names -> `/chat?tab=graph&entity=person:{name}` (KG person profile)
 - Project names -> `/chat?tab=graph&entity=project:{name}` (KG project view)
 - Document titles -> `/documents?highlight={id}` (scroll to & highlight)
-- Meeting titles -> `/meetings?highlight={id}`
+- Communication titles -> `/communications?highlight={id}`
 - Tags -> `/search?tag_ids={id}` (filter by tag across all content)
 
 **2. URL-based state for deep linking:**
@@ -225,7 +225,7 @@ The platform's core value is connecting data across content types. Every page an
 - Entity focus: `?entity={type}:{name}` for knowledge graph navigation
 
 **3. Global Search (Ctrl+K) as hub:**
-- Searches across: documents, meetings, messages, structured tables, KG entities
+- Searches across: documents, communications, structured tables, KG entities
 - Each result links to its source page with `?highlight={id}`
 - Results grouped by content type with clear type badges
 
@@ -234,7 +234,7 @@ The platform's core value is connecting data across content types. Every page an
 - Knowledge graph nodes are clickable — navigate to filtered search or detail view
 - Dashboard widgets link to their data source pages
 - Tag chips are always clickable — navigate to `/search?tag_ids={id}`
-- Meeting participants link to person profiles in KG
+- Communication participants link to person profiles in KG
 - Document authors link to person profiles in KG
 
 ### When Adding New Features
@@ -261,7 +261,7 @@ The platform's core value is connecting data across content types. Every page an
 ### Backend Data Flow (for context)
 
 ```
-Feishu Sources -> ETL Pipeline -> Document/Meeting/ChatMessage (with embeddings)
+Feishu Sources -> ETL Pipeline -> Document/Communication/StructuredTable (with embeddings)
                                        |
                               Tag System (ContentTag)
                                        |
