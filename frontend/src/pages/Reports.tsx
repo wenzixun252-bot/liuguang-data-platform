@@ -15,6 +15,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import api from '../lib/api'
+import { DateRangeFilter } from '../components/DateRangeFilter'
 import toast from 'react-hot-toast'
 
 interface ReportTemplate {
@@ -57,6 +58,7 @@ export default function Reports() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [dateFilters, setDateFilters] = useState<Record<string, { from: string; to: string }>>({})
 
   const pageSize = 20
   const totalPages = Math.ceil(total / pageSize)
@@ -66,6 +68,16 @@ export default function Reports() {
     const params: Record<string, unknown> = { page, page_size: pageSize }
     if (search) params.search = search
     if (statusFilter) params.status = statusFilter
+
+    // 时间筛选
+    for (const [field, range] of Object.entries(dateFilters)) {
+      if (range.from || range.to) {
+        params.date_field = field
+        if (range.from) params.date_from = range.from + 'T00:00:00'
+        if (range.to) params.date_to = range.to + 'T23:59:59'
+        break
+      }
+    }
 
     api
       .get('/reports', { params })
@@ -79,11 +91,11 @@ export default function Reports() {
 
   useEffect(() => {
     fetchReports()
-  }, [page, search, statusFilter])
+  }, [page, search, statusFilter, dateFilters])
 
   useEffect(() => {
     setSelectedIds(new Set())
-  }, [page, search, statusFilter])
+  }, [page, search, statusFilter, dateFilters])
 
   const currentIds = reports.map((r) => r.id)
   const allSelected = currentIds.length > 0 && currentIds.every((id) => selectedIds.has(id))
@@ -98,6 +110,16 @@ export default function Reports() {
     if (next.has(id)) next.delete(id)
     else next.add(id)
     setSelectedIds(next)
+  }
+
+  const updateDateFilter = (field: string, from: string, to: string) => {
+    setDateFilters((prev) => {
+      const next = { ...prev }
+      if (!from && !to) delete next[field]
+      else next[field] = { from, to }
+      return next
+    })
+    setPage(1)
   }
 
   const handleBatchDelete = async () => {
@@ -173,8 +195,6 @@ export default function Reports() {
       <div className="bg-white rounded-xl shadow-sm overflow-hidden">
         {loading ? (
           <div className="p-8 text-center text-gray-400">加载中...</div>
-        ) : reports.length === 0 ? (
-          <div className="p-12 text-center text-gray-400">暂无报告，点击上方按钮创建</div>
         ) : (
           <>
             <div className="overflow-x-auto">
@@ -186,13 +206,21 @@ export default function Reports() {
                     </th>
                     <th className="text-left py-3 px-4 text-gray-500 font-medium">标题</th>
                     <th className="text-left py-3 px-4 text-gray-500 font-medium">状态</th>
-                    <th className="text-left py-3 px-4 text-gray-500 font-medium">时间范围</th>
-                    <th className="text-left py-3 px-4 text-gray-500 font-medium">创建时间</th>
+                    <th className="text-left py-3 px-4 text-gray-500 font-medium">
+                      <span className="inline-flex items-center gap-1">时间范围
+                        <DateRangeFilter from={dateFilters.time_range_start?.from || ''} to={dateFilters.time_range_start?.to || ''} onChange={(f, t) => updateDateFilter('time_range_start', f, t)} />
+                      </span>
+                    </th>
+                    <th className="text-left py-3 px-4 text-gray-500 font-medium">
+                      <span className="inline-flex items-center gap-1">创建时间
+                        <DateRangeFilter from={dateFilters.created_at?.from || ''} to={dateFilters.created_at?.to || ''} onChange={(f, t) => updateDateFilter('created_at', f, t)} />
+                      </span>
+                    </th>
                     <th className="text-left py-3 px-4 text-gray-500 font-medium">操作</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {reports.map((report) => {
+                  {reports.length > 0 ? reports.map((report) => {
                     const sc = STATUS_CONFIG[report.status] || STATUS_CONFIG.draft
                     return (
                       <tr
@@ -237,7 +265,11 @@ export default function Reports() {
                         </td>
                       </tr>
                     )
-                  })}
+                  }) : (
+                    <tr>
+                      <td colSpan={99} className="py-12 text-center text-gray-400">暂无报告，点击上方按钮创建</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -280,6 +312,7 @@ function CreateReportModal({
   onClose: () => void
   onCreated: (id: number) => void
 }) {
+  const navigate = useNavigate()
   const [templates, setTemplates] = useState<ReportTemplate[]>([])
   const [templateId, setTemplateId] = useState<number | null>(null)
   const [title, setTitle] = useState('')

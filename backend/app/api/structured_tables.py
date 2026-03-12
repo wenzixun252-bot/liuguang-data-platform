@@ -1,6 +1,7 @@
 """结构化数据表 API — 导入、列表、预览、穿透搜索。"""
 
 import logging
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
@@ -433,7 +434,11 @@ async def list_tables(
     search: str = Query("", max_length=200),
     source_type: str = Query("", max_length=32),
     table_category: str | None = Query(None),
+    uploader_name: str | None = Query(None),
     tag_ids: list[int] = Query(default=[]),
+    date_field: str | None = Query(None, description="时间筛选字段: synced_at, created_at, updated_at"),
+    date_from: datetime | None = Query(None, description="时间范围开始"),
+    date_to: datetime | None = Query(None, description="时间范围结束"),
     current_user: Annotated[User, Depends(get_current_user)] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ):
@@ -453,9 +458,30 @@ async def list_tables(
         )
         conditions.append(StructuredTable.id.in_(subq))
 
+    # 时间范围筛选
+    _date_field_map = {
+        "synced_at": StructuredTable.synced_at,
+        "created_at": StructuredTable.created_at,
+        "updated_at": StructuredTable.updated_at,
+    }
+    if date_field and date_field in _date_field_map:
+        col = _date_field_map[date_field]
+        if date_from:
+            conditions.append(col >= date_from)
+        if date_to:
+            conditions.append(col <= date_to)
+
     # 总数
     count_q = select(func.count()).select_from(StructuredTable).where(and_(*conditions))
     total = (await db.execute(count_q)).scalar() or 0
+
+    # uploader_name 过滤需要 join User 表
+    if uploader_name:
+        user_subq = select(User.feishu_open_id).where(User.name.ilike(f"%{uploader_name}%"))
+        conditions.append(StructuredTable.owner_id.in_(user_subq))
+        # 重新计算总数
+        count_q = select(func.count()).select_from(StructuredTable).where(and_(*conditions))
+        total = (await db.execute(count_q)).scalar() or 0
 
     # 分页（LEFT JOIN User 获取 uploader_name）
     q = (

@@ -225,6 +225,9 @@ async def list_reports(
     page_size: int = Query(20, ge=1, le=100),
     search: str | None = Query(None),
     status: str | None = Query(None),
+    date_field: str | None = Query(None, description="时间筛选字段: created_at, time_range_start, time_range_end"),
+    date_from: datetime | None = Query(None, description="时间范围开始"),
+    date_to: datetime | None = Query(None, description="时间范围结束"),
 ):
     """获取用户的报告列表。"""
     # 自动清理卡住的报告：超过 10 分钟还在 generating 的标记为 failed
@@ -248,6 +251,19 @@ async def list_reports(
 
     if status:
         conditions.append(Report.status == status)
+
+    # 时间范围筛选
+    _date_field_map = {
+        "created_at": Report.created_at,
+        "time_range_start": Report.time_range_start,
+        "time_range_end": Report.time_range_end,
+    }
+    if date_field and date_field in _date_field_map:
+        col = _date_field_map[date_field]
+        if date_from:
+            conditions.append(col >= date_from)
+        if date_to:
+            conditions.append(col <= date_to)
 
     count_result = await db.execute(
         select(func.count()).select_from(Report).where(and_(*conditions))

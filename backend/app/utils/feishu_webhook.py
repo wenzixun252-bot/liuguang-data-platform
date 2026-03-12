@@ -62,7 +62,7 @@ async def send_alert(
     }
 
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(verify=False) as client:
             resp = await client.post(settings.feishu_webhook_url, json=card)
             resp.raise_for_status()
             data = resp.json()

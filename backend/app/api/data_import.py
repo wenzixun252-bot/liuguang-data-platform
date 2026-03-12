@@ -20,11 +20,14 @@ from app.models.user import User
 from app.schemas.etl import DataSourceOut, DataSourceWithSyncOut
 from app.services.feishu import FeishuAPIError, feishu_client
 from app.services.cloud_doc_import import cloud_doc_import_service
-from app.worker.tasks import etl_sync_job
+from app.worker.tasks import etl_sync_job, todo_sync_status_job, structured_table_sync_job
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/import", tags=["数据导入"])
+
+# ── 自动同步防重复（进程内存） ──
+_auto_syncing_users: set[str] = set()
 
 
 class BitableTableInfo(BaseModel):
@@ -1808,3 +1811,79 @@ async def delete_import_task(
     await db.delete(task)
     await db.commit()
     return {"message": "任务记录已删除"}
+
+
+# ── 合并自动同步 ─────────────────────────────────────────
+
+
+@router.post("/auto-sync", summary="触发当前用户的全量自动同步")
+async def trigger_auto_sync(
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """前端定时调用，触发当前用户的所有数据同步（ETL + 云文件夹 + 待办提取 + 待办状态 + 结构化表）。
+
+    立即返回，后台异步执行。同一用户不会重复触发。
+    """
+    owner_id = current_user.feishu_open_id
+    if owner_id in _auto_syncing_users:
+        return {"status": "already_running", "message": "同步任务仍在执行中"}
+
+    _auto_syncing_users.add(owner_id)
+
+    async def _run_auto_sync():
+        from app.database import async_session as get_session
+        from app.api.todos import _extract_tasks
+        from app.services.todo_extractor import extract_and_save
+
+        try:
+            # 1. ETL 同步
+            try:
+                await etl_sync_job()
+                logger.info("自动同步 [ETL] 完成 (user=%s)", owner_id)
+            except Exception as e:
+                logger.error("自动同步 [ETL] 失败: %s", e)
+
+            # 2. 云文件夹同步
+            try:
+                from app.worker.tasks import cloud_folder_sync_job
+                await cloud_folder_sync_job()
+                logger.info("自动同步 [云文件夹] 完成 (user=%s)", owner_id)
+            except Exception as e:
+                logger.error("自动同步 [云文件夹] 失败: %s", e)
+
+            # 3. 待办提取（同步状态到 _extract_tasks 供前端轮询）
+            try:
+                _extract_tasks[owner_id] = {"status": "running", "message": "正在提取待办..."}
+                async with get_session() as session:
+                    items = await extract_and_save(session, owner_id, current_user.name, 2)
+                    _extract_tasks[owner_id] = {
+                        "status": "done",
+                        "message": f"提取完成，共 {len(items)} 条",
+                        "count": len(items),
+                    }
+                logger.info("自动同步 [待办提取] 完成 (user=%s)", owner_id)
+            except Exception as e:
+                logger.error("自动同步 [待办提取] 失败: %s", e)
+                _extract_tasks[owner_id] = {"status": "error", "message": f"提取失败: {e}"}
+
+            # 4. 飞书任务状态同步
+            try:
+                await todo_sync_status_job()
+                logger.info("自动同步 [飞书任务状态] 完成 (user=%s)", owner_id)
+            except Exception as e:
+                logger.error("自动同步 [飞书任务状态] 失败: %s", e)
+
+            # 5. 结构化数据表同步
+            try:
+                await structured_table_sync_job()
+                logger.info("自动同步 [结构化表] 完成 (user=%s)", owner_id)
+            except Exception as e:
+                logger.error("自动同步 [结构化表] 失败: %s", e)
+
+            logger.info("用户 %s 自动同步全部完成", owner_id)
+        finally:
+            _auto_syncing_users.discard(owner_id)
+
+    asyncio.create_task(_run_auto_sync())
+    return {"status": "started", "message": "自动同步已触发"}

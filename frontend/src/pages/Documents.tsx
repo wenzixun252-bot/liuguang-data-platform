@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
-import { Search, ChevronLeft, ChevronRight, X, Paperclip, ExternalLink, Download, Image, User, Trash2, Table2 } from 'lucide-react'
+import { Search, ChevronLeft, ChevronRight, X, Paperclip, ExternalLink, Download, Image, User, Trash2, Table2, Upload } from 'lucide-react'
 import api, { getExtractionRules } from '../lib/api'
 import toast from 'react-hot-toast'
 import { useQuery } from '@tanstack/react-query'
 import { ColumnSettingsButton, useColumnSettings, type ColumnDef } from '../components/ColumnSettings'
 import { getUser } from '../lib/auth'
 
-import { TagChips, TagFilter, BatchTagBar, useContentTags, InlineTagEditor } from '../components/TagManager'
+import { TagChips, BatchTagBar, useContentTags, InlineTagEditor, TagFilter } from '../components/TagManager'
+import { ColumnFilter } from '../components/ColumnFilter'
+import { DateRangeFilter } from '../components/DateRangeFilter'
+import { HighlightText } from '../components/HighlightText'
 
 const DOC_COLUMNS: ColumnDef[] = [
   { key: 'title', label: '标题' },
@@ -58,6 +61,7 @@ interface DocumentItem {
   feishu_record_id: string | null
   bitable_url: string | null
   extraction_rule_id?: number | null
+  matched_fields: string[]
   parse_status: string | null
   import_count: number
   synced_at: string | null
@@ -99,13 +103,13 @@ export default function Documents() {
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
-  const [sourceFilter, setSourceFilter] = useState('')
-  const [uploaderFilter, setUploaderFilter] = useState('')
+  const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({})
+  const [dateFilters, setDateFilters] = useState<Record<string, { from: string; to: string }>>({})
+  const [tagIds, setTagIds] = useState<number[]>([])
   const [selected, setSelected] = useState<DocumentItem | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [refreshKey, setRefreshKey] = useState(0)
   const { isVisible, toggle, columns: colDefs } = useColumnSettings('documents', DOC_COLUMNS)
-  const [tagFilter, setTagFilter] = useState<number[]>([])
   const [tagRefreshKey, setTagRefreshKey] = useState(0)
 
   // 提取规则名称映射
@@ -121,20 +125,31 @@ export default function Documents() {
     setLoading(true)
     const params: Record<string, unknown> = { page, page_size: pageSize }
     if (search) params.search = search
-    if (sourceFilter) params.source_type = sourceFilter
-    if (uploaderFilter) params.uploader_name = uploaderFilter
-    if (tagFilter.length > 0) params.tag_ids = tagFilter
+    if (tagIds.length > 0) params.tag_ids = tagIds
+    for (const [key, vals] of Object.entries(columnFilters)) {
+      if (vals.length > 0) params[key] = vals.join(',')
+    }
+
+    // 时间筛选 - pick the first active date filter
+    for (const [field, range] of Object.entries(dateFilters)) {
+      if (range.from || range.to) {
+        params.date_field = field
+        if (range.from) params.date_from = range.from + 'T00:00:00'
+        if (range.to) params.date_to = range.to + 'T23:59:59'
+        break
+      }
+    }
 
     api.get('/documents/list', { params })
       .then((res) => setData(res.data))
       .catch(() => toast.error('加载文档列表失败'))
       .finally(() => setLoading(false))
-  }, [page, search, sourceFilter, uploaderFilter, tagFilter, refreshKey])
+  }, [page, search, columnFilters, dateFilters, tagIds, refreshKey])
 
   // 翻页/筛选变化时清空选择
   useEffect(() => {
     setSelectedIds(new Set())
-  }, [page, search, sourceFilter, uploaderFilter, tagFilter])
+  }, [page, search, columnFilters, dateFilters, tagIds])
 
   // 从搜索结果跳转过来时自动打开详情
   useEffect(() => {
@@ -147,6 +162,37 @@ export default function Documents() {
       }
     }
   }, [data, searchParams, setSearchParams])
+
+  // 从当前页数据提取唯一值用于列筛选
+  const uniqueValues = (key: string) => {
+    if (!data?.items) return []
+    const vals = new Set<string>()
+    for (const item of data.items) {
+      const v = (item as unknown as Record<string, unknown>)[key]
+      if (v != null && v !== '') vals.add(String(v))
+    }
+    return Array.from(vals).sort()
+  }
+  const sourceTypeOptions = ['cloud', 'local']
+  const updateColumnFilter = (key: string, vals: string[]) => {
+    setColumnFilters((prev) => {
+      const next = { ...prev }
+      if (vals.length === 0) delete next[key]
+      else next[key] = vals
+      return next
+    })
+    setPage(1)
+  }
+
+  const updateDateFilter = (field: string, from: string, to: string) => {
+    setDateFilters((prev) => {
+      const next = { ...prev }
+      if (!from && !to) delete next[field]
+      else next[field] = { from, to }
+      return next
+    })
+    setPage(1)
+  }
 
   const totalPages = data ? Math.ceil(data.total / pageSize) : 0
   const currentIds = data?.items.map((i) => i.id) || []
@@ -213,42 +259,38 @@ export default function Documents() {
   return (
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold text-gray-800">文档数据</h1>
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold text-gray-800">文档数据</h1>
+          <button
+            type="button"
+            onClick={() => navigate('/data-import')}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+          >
+            <Upload size={14} />
+            导入数据
+          </button>
+        </div>
 
-        <div className="flex items-center gap-3 w-full sm:w-auto flex-wrap">
+        <div className="flex items-center gap-3 w-full sm:w-auto">
           <div className="relative flex-1 sm:flex-initial">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               type="text"
-              placeholder="搜索文档..."
-              className="pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm w-full sm:w-64 focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400"
+              placeholder="搜索标题、内容、摘要、关键词..."
+              className="pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm w-full sm:w-72 focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400"
               value={search}
               onChange={(e) => { setSearch(e.target.value); setPage(1) }}
             />
           </div>
-
-          <select
-            className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-200"
-            value={sourceFilter}
-            onChange={(e) => { setSourceFilter(e.target.value); setPage(1) }}
-          >
-            <option value="">全部来源</option>
-            <option value="cloud">飞书同步</option>
-            <option value="local">本地上传</option>
-          </select>
-          <input
-            type="text"
-            placeholder="资产所有人筛选"
-            className="px-3 py-2 border border-gray-200 rounded-lg text-sm w-32 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-            value={uploaderFilter}
-            onChange={(e) => { setUploaderFilter(e.target.value); setPage(1) }}
-          />
           <ColumnSettingsButton columns={colDefs} isVisible={isVisible} toggle={toggle} />
         </div>
       </div>
 
-      {/* 标签筛选 */}
-      <TagFilter selectedTagIds={tagFilter} onChange={(ids) => { setTagFilter(ids); setPage(1) }} />
+      {/* 标签切片器 */}
+      <TagFilter
+        selectedTagIds={tagIds}
+        onChange={(ids) => { setTagIds(ids); setPage(1) }}
+      />
 
       {/* Batch action bar */}
       {selectedIds.size > 0 && (
@@ -279,7 +321,7 @@ export default function Documents() {
       <div className="bg-white rounded-xl shadow-sm overflow-hidden">
         {loading ? (
           <div className="p-8 text-center text-gray-400">加载中...</div>
-        ) : data && data.items.length > 0 ? (
+        ) : (
           <>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -298,17 +340,53 @@ export default function Documents() {
                     {isVisible('keywords') && <th className="text-left py-3 px-4 text-gray-500 font-medium">关键词</th>}
                     {isVisible('summary') && <th className="text-left py-3 px-4 text-gray-500 font-medium">摘要</th>}
                     {isVisible('key_info') && <th className="text-left py-3 px-4 text-violet-700 font-semibold bg-violet-50/50">自定义提取内容</th>}
-                    {isVisible('source_type') && <th className="text-left py-3 px-4 text-gray-500 font-medium">来源</th>}
-                    {isVisible('uploader_name') && <th className="text-left py-3 px-4 text-indigo-700 font-semibold bg-indigo-50/50">资产所有人</th>}
-                    {isVisible('file_type') && <th className="text-left py-3 px-4 text-gray-500 font-medium">类型</th>}
-                    {isVisible('doc_created_time') && <th className="text-left py-3 px-4 text-gray-500 font-medium">创建时间</th>}
-                    {isVisible('doc_modified_time') && <th className="text-left py-3 px-4 text-gray-500 font-medium">修改时间</th>}
-                    {isVisible('time') && <th className="text-left py-3 px-4 text-gray-500 font-medium">上传时间</th>}
+                    {isVisible('source_type') && (
+                      <th className="text-left py-3 px-4 text-gray-500 font-medium">
+                        <span className="inline-flex items-center gap-1">来源
+                          <ColumnFilter options={sourceTypeOptions} selected={columnFilters.source_type || []} onChange={(v) => updateColumnFilter('source_type', v)} />
+                        </span>
+                      </th>
+                    )}
+                    {isVisible('uploader_name') && (
+                      <th className="text-left py-3 px-4 text-indigo-700 font-semibold bg-indigo-50/50">
+                        <span className="inline-flex items-center gap-1">资产所有人
+                          <ColumnFilter options={uniqueValues('uploader_name')} selected={columnFilters.uploader_name || []} onChange={(v) => updateColumnFilter('uploader_name', v)} />
+                        </span>
+                      </th>
+                    )}
+                    {isVisible('file_type') && (
+                      <th className="text-left py-3 px-4 text-gray-500 font-medium">
+                        <span className="inline-flex items-center gap-1">类型
+                          <ColumnFilter options={uniqueValues('file_type')} selected={columnFilters.file_type || []} onChange={(v) => updateColumnFilter('file_type', v)} />
+                        </span>
+                      </th>
+                    )}
+                    {isVisible('doc_created_time') && (
+                      <th className="text-left py-3 px-4 text-gray-500 font-medium">
+                        <span className="inline-flex items-center gap-1">创建时间
+                          <DateRangeFilter from={dateFilters.feishu_created_at?.from || ''} to={dateFilters.feishu_created_at?.to || ''} onChange={(f, t) => updateDateFilter('feishu_created_at', f, t)} />
+                        </span>
+                      </th>
+                    )}
+                    {isVisible('doc_modified_time') && (
+                      <th className="text-left py-3 px-4 text-gray-500 font-medium">
+                        <span className="inline-flex items-center gap-1">修改时间
+                          <DateRangeFilter from={dateFilters.feishu_updated_at?.from || ''} to={dateFilters.feishu_updated_at?.to || ''} onChange={(f, t) => updateDateFilter('feishu_updated_at', f, t)} />
+                        </span>
+                      </th>
+                    )}
+                    {isVisible('time') && (
+                      <th className="text-left py-3 px-4 text-gray-500 font-medium">
+                        <span className="inline-flex items-center gap-1">上传时间
+                          <DateRangeFilter from={dateFilters.synced_at?.from || ''} to={dateFilters.synced_at?.to || ''} onChange={(f, t) => updateDateFilter('synced_at', f, t)} />
+                        </span>
+                      </th>
+                    )}
                     <th className="text-left py-3 px-4 text-gray-500 font-medium">操作</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {data.items.map((item) => (
+                  {data && data.items.length > 0 ? data.items.map((item) => (
                     <tr
                       key={item.id}
                       className={`border-t border-gray-50 hover:bg-indigo-50/50 cursor-pointer transition-colors ${selectedIds.has(item.id) ? 'bg-indigo-50/30' : ''}`}
@@ -325,7 +403,9 @@ export default function Documents() {
                       {isVisible('title') && (
                         <td className="py-3 px-4 max-w-[240px]">
                           <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
-                            <span className="text-gray-800 font-medium truncate">{item.original_filename || item.title || '无标题'}</span>
+                            <span className="text-gray-800 font-medium truncate">
+                              <HighlightText text={item.original_filename || item.title || '无标题'} keyword={search} />
+                            </span>
                             {item.parse_status === 'pending' && (
                               <span className="shrink-0 px-1.5 py-0.5 rounded text-xs bg-amber-50 text-amber-600 border border-amber-200">
                                 分析中
@@ -372,7 +452,7 @@ export default function Documents() {
                         <td className="py-3 px-4 max-w-[200px]">
                           <div className="flex flex-wrap gap-1">
                             {(item.keywords || []).slice(0, 3).map((kw, i) => (
-                              <span key={i} className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">{kw}</span>
+                              <span key={i} className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-xs"><HighlightText text={kw} keyword={search} /></span>
                             ))}
                             {(item.keywords || []).length > 3 && (
                               <span className="px-1.5 py-0.5 text-gray-400 text-xs">+{(item.keywords || []).length - 3}</span>
@@ -380,7 +460,11 @@ export default function Documents() {
                           </div>
                         </td>
                       )}
-                      {isVisible('summary') && <td className="py-3 px-4 text-gray-500 max-w-[250px] truncate">{item.summary || item.content_text?.slice(0, 60) || '-'}</td>}
+                      {isVisible('summary') && (
+                        <td className={`py-3 px-4 text-gray-500 max-w-[250px] truncate ${search && item.matched_fields?.includes('summary') ? 'bg-amber-50' : ''}`}>
+                          <HighlightText text={item.summary || item.content_text?.slice(0, 60) || '-'} keyword={search} />
+                        </td>
+                      )}
                       {isVisible('key_info') && (
                         <td className="py-3 px-4 max-w-[280px] bg-violet-50/30">
                           {item.key_info && Object.keys(item.key_info).length > 0 ? (
@@ -407,7 +491,11 @@ export default function Documents() {
                           </span>
                         </td>
                       )}
-                      {isVisible('uploader_name') && <td className="py-3 px-4 text-indigo-700 font-medium bg-indigo-50/30">{item.uploader_name || '-'}</td>}
+                      {isVisible('uploader_name') && (
+                        <td className={`py-3 px-4 text-indigo-700 font-medium ${search && item.matched_fields?.includes('uploader_name') ? 'bg-amber-50' : 'bg-indigo-50/30'}`}>
+                          <HighlightText text={item.uploader_name || '-'} keyword={search} />
+                        </td>
+                      )}
                       {isVisible('file_type') && <td className="py-3 px-4 text-gray-500">{item.file_type ? item.file_type.toUpperCase() : '-'}</td>}
                       {isVisible('doc_created_time') && (
                         <td className="py-3 px-4 text-gray-500 whitespace-nowrap">
@@ -447,14 +535,27 @@ export default function Documents() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                  )) : (
+                    <tr>
+                      <td colSpan={99} className="py-12 text-center text-gray-400">
+                        <p>暂无文档数据</p>
+                        <button
+                          type="button"
+                          onClick={() => navigate('/data-import')}
+                          className="mt-2 text-indigo-600 hover:text-indigo-700 text-sm font-medium"
+                        >
+                          前往数据归档
+                        </button>
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
 
             {totalPages > 1 && (
               <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
-                <span className="text-sm text-gray-500">共 {data.total} 条，第 {page}/{totalPages} 页</span>
+                <span className="text-sm text-gray-500">共 {data?.total ?? 0} 条，第 {page}/{totalPages} 页</span>
                 <div className="flex items-center gap-2">
                   <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1} className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-30">
                     <ChevronLeft size={16} />
@@ -466,17 +567,6 @@ export default function Documents() {
               </div>
             )}
           </>
-        ) : (
-          <div className="p-12 text-center text-gray-400">
-            <p>暂无文档数据</p>
-            <button
-              type="button"
-              onClick={() => navigate('/data-import')}
-              className="mt-2 text-indigo-600 hover:text-indigo-700 text-sm font-medium"
-            >
-              前往数据归档
-            </button>
-          </div>
         )}
       </div>
 

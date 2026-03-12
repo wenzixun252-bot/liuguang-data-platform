@@ -51,6 +51,8 @@ class CommunicationOut(BaseModel):
     created_at: UTCDatetime
     updated_at: UTCDatetime
 
+    matched_fields: list[str] = []
+
     model_config = {"from_attributes": True}
 
     @computed_field

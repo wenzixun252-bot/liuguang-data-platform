@@ -15,6 +15,7 @@ import {
   Loader2,
 } from 'lucide-react'
 import api from '../lib/api'
+import { DateRangeFilter } from '../components/DateRangeFilter'
 import toast from 'react-hot-toast'
 import { useTaskProgress } from '../hooks/useTaskProgress'
 
@@ -83,6 +84,7 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
   const [editTitle, setEditTitle] = useState('')
   const [days, setDays] = useState(2)
   const [search, setSearch] = useState('')
+  const [dateFilters, setDateFilters] = useState<Record<string, { from: string; to: string }>>({})
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
   const [sourceModal, setSourceModal] = useState<{ open: boolean; loading: boolean; data: SourceDetail | null }>({
@@ -97,6 +99,15 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
     setLoading(true)
     const params: Record<string, unknown> = { status: tab, page_size: PAGE_SIZE, page }
     if (search) params.search = search
+    // 时间筛选
+    for (const [field, range] of Object.entries(dateFilters)) {
+      if (range.from || range.to) {
+        params.date_field = field
+        if (range.from) params.date_from = range.from + 'T00:00:00'
+        if (range.to) params.date_to = range.to + 'T23:59:59'
+        break
+      }
+    }
     api
       .get('/todos', { params })
       .then((res) => {
@@ -110,12 +121,12 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
   useEffect(() => {
     setPage(1)
     setSelected(new Set())
-  }, [tab, search])
+  }, [tab, search, dateFilters])
 
   useEffect(() => {
     fetchTodos()
     setSelected(new Set())
-  }, [tab, search, page])
+  }, [tab, search, dateFilters, page])
 
   const handleExtract = async () => {
     setExtracting(true)
@@ -219,6 +230,16 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
     }
   }
 
+  const updateDateFilter = (field: string, from: string, to: string) => {
+    setDateFilters((prev) => {
+      const next = { ...prev }
+      if (!from && !to) delete next[field]
+      else next[field] = { from, to }
+      return next
+    })
+    setPage(1)
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -233,6 +254,14 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
+          </div>
+          <div className="flex items-center gap-1 text-xs text-gray-500">
+            <span>创建时间</span>
+            <DateRangeFilter from={dateFilters.created_at?.from || ''} to={dateFilters.created_at?.to || ''} onChange={(f, t) => updateDateFilter('created_at', f, t)} />
+          </div>
+          <div className="flex items-center gap-1 text-xs text-gray-500">
+            <span>截止日期</span>
+            <DateRangeFilter from={dateFilters.due_date?.from || ''} to={dateFilters.due_date?.to || ''} onChange={(f, t) => updateDateFilter('due_date', f, t)} />
           </div>
           <select
             value={days}

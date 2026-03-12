@@ -2,11 +2,14 @@ import { useEffect, useState, useCallback } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import {
   Search, ChevronLeft, ChevronRight, X, Trash2, RefreshCw,
-  ExternalLink, Table2, Download,
+  ExternalLink, Table2, Download, Upload,
 } from 'lucide-react'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
-import { TagFilter, BatchTagBar, TagChips, useContentTags, InlineTagEditor } from '../components/TagManager'
+import { BatchTagBar, TagChips, useContentTags, InlineTagEditor, TagFilter } from '../components/TagManager'
+import { ColumnFilter } from '../components/ColumnFilter'
+import { DateRangeFilter } from '../components/DateRangeFilter'
+import { HighlightText } from '../components/HighlightText'
 
 /* ── 类型定义 ────────────────────────────────── */
 
@@ -75,14 +78,13 @@ export default function StructuredTables() {
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
-  const [sourceFilter, setSourceFilter] = useState('')
-  const [categoryFilter, setCategoryFilter] = useState('')
-  const [categories, setCategories] = useState<string[]>([])
+  const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({})
+  const [dateFilters, setDateFilters] = useState<Record<string, { from: string; to: string }>>({})
+  const [tagIds, setTagIds] = useState<number[]>([])
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [refreshKey, setRefreshKey] = useState(0)
 
-  // 穿透搜索
-  const [globalSearch, setGlobalSearch] = useState('')
+  // 穿透搜索（与 search 共用关键词）
   const [searchResults, setSearchResults] = useState<SearchResultItem[] | null>(null)
   const [searchTotal, setSearchTotal] = useState(0)
   const [searchPage, setSearchPage] = useState(1)
@@ -96,19 +98,10 @@ export default function StructuredTables() {
   const [detailSearch, setDetailSearch] = useState('')
   const [detailLoading, setDetailLoading] = useState(false)
 
-  const [tagFilter, setTagFilter] = useState<number[]>([])
   const [tagRefreshKey, setTagRefreshKey] = useState(0)
   const navigate = useNavigate()
 
   const pageSize = 20
-
-  /* ── 加载分类列表 ─────────────────────────────── */
-
-  useEffect(() => {
-    api.get('/structured-tables/categories')
-      .then((res) => setCategories(res.data.categories || []))
-      .catch(() => {})
-  }, [refreshKey])
 
   /* ── 加载表格列表 ─────────────────────────────── */
 
@@ -116,9 +109,19 @@ export default function StructuredTables() {
     setLoading(true)
     const params: Record<string, unknown> = { page, page_size: pageSize }
     if (search) params.search = search
-    if (sourceFilter) params.source_type = sourceFilter
-    if (categoryFilter) params.table_category = categoryFilter
-    if (tagFilter.length > 0) params.tag_ids = tagFilter
+    if (tagIds.length > 0) params.tag_ids = tagIds
+    for (const [key, vals] of Object.entries(columnFilters)) {
+      if (vals.length > 0) params[key] = vals.join(',')
+    }
+    // 时间筛选
+    for (const [field, range] of Object.entries(dateFilters)) {
+      if (range.from || range.to) {
+        params.date_field = field
+        if (range.from) params.date_from = range.from + 'T00:00:00'
+        if (range.to) params.date_to = range.to + 'T23:59:59'
+        break
+      }
+    }
 
     api.get('/structured-tables', { params })
       .then((res) => {
@@ -127,9 +130,9 @@ export default function StructuredTables() {
       })
       .catch(() => toast.error('加载表格列表失败'))
       .finally(() => setLoading(false))
-  }, [page, search, sourceFilter, categoryFilter, tagFilter, refreshKey])
+  }, [page, search, columnFilters, dateFilters, tagIds, refreshKey])
 
-  useEffect(() => { setSelectedIds(new Set()) }, [page, search, sourceFilter, categoryFilter, tagFilter])
+  useEffect(() => { setSelectedIds(new Set()) }, [page, search, columnFilters, dateFilters, tagIds])
 
   // 从搜索结果跳转过来时自动打开详情
   useEffect(() => {
@@ -139,6 +142,35 @@ export default function StructuredTables() {
       setSearchParams({}, { replace: true })
     }
   }, [items, searchParams, setSearchParams])
+
+  // 从当前页数据提取唯一值用于列筛选
+  const uniqueValues = (key: string) => {
+    const vals = new Set<string>()
+    for (const item of items) {
+      const v = (item as unknown as Record<string, unknown>)[key]
+      if (v != null && v !== '') vals.add(String(v))
+    }
+    return Array.from(vals).sort()
+  }
+  const sourceTypeOptions = ['bitable', 'spreadsheet', 'local']
+  const updateColumnFilter = (key: string, vals: string[]) => {
+    setColumnFilters((prev) => {
+      const next = { ...prev }
+      if (vals.length === 0) delete next[key]
+      else next[key] = vals
+      return next
+    })
+    setPage(1)
+  }
+  const updateDateFilter = (field: string, from: string, to: string) => {
+    setDateFilters((prev) => {
+      const next = { ...prev }
+      if (!from && !to) delete next[field]
+      else next[field] = { from, to }
+      return next
+    })
+    setPage(1)
+  }
 
   const totalPages = Math.ceil(total / pageSize)
   const currentIds = items.map((i) => i.id)
@@ -165,10 +197,10 @@ export default function StructuredTables() {
   useEffect(() => {
     const timer = setTimeout(() => {
       setSearchPage(1)
-      doGlobalSearch(globalSearch, 1)
+      doGlobalSearch(search, 1)
     }, 400)
     return () => clearTimeout(timer)
-  }, [globalSearch, doGlobalSearch])
+  }, [search, doGlobalSearch])
 
   /* ── 详情加载 ─────────────────────────────────── */
 
@@ -291,19 +323,27 @@ export default function StructuredTables() {
     <div className="space-y-4">
       {/* 标题栏 */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold text-gray-800">表格数据</h1>
-      </div>
-
-      {/* 穿透搜索 */}
-      <div className="relative">
-        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-        <input
-          type="text"
-          placeholder="穿透搜索所有表格内容..."
-          className="w-full pl-9 pr-4 py-2.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400"
-          value={globalSearch}
-          onChange={(e) => setGlobalSearch(e.target.value)}
-        />
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold text-gray-800">表格数据</h1>
+          <button
+            type="button"
+            onClick={() => navigate('/data-import')}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+          >
+            <Upload size={14} />
+            导入数据
+          </button>
+        </div>
+        <div className="relative w-full sm:w-auto">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            placeholder="搜索表名或表内数据..."
+            className="pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm w-full sm:w-72 focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400"
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(1) }}
+          />
+        </div>
       </div>
 
       {/* 穿透搜索结果 */}
@@ -313,7 +353,7 @@ export default function StructuredTables() {
             <span className="text-sm font-medium text-gray-700">
               搜索结果: 共 {searchTotal} 条匹配
             </span>
-            <button onClick={() => { setGlobalSearch(''); setSearchResults(null) }} className="text-gray-400 hover:text-gray-600">
+            <button onClick={() => { setSearch(''); setSearchResults(null) }} className="text-gray-400 hover:text-gray-600">
               <X size={16} />
             </button>
           </div>
@@ -338,7 +378,7 @@ export default function StructuredTables() {
                       <span key={k}>
                         <span className="text-gray-400">{k}: </span>
                         <span className={r.matched_fields.includes(k) ? 'text-indigo-700 font-medium bg-indigo-50 px-1 rounded' : 'text-gray-700'}>
-                          {String(v ?? '')}
+                          <HighlightText text={String(v ?? '')} keyword={search} />
                         </span>
                       </span>
                     ))}
@@ -351,53 +391,19 @@ export default function StructuredTables() {
             <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
               <span className="text-sm text-gray-500">第 {searchPage}/{Math.ceil(searchTotal / pageSize)} 页</span>
               <div className="flex items-center gap-2">
-                <button onClick={() => { const p = Math.max(1, searchPage - 1); setSearchPage(p); doGlobalSearch(globalSearch, p) }} disabled={searchPage <= 1} className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-30"><ChevronLeft size={16} /></button>
-                <button onClick={() => { const p = Math.min(Math.ceil(searchTotal / pageSize), searchPage + 1); setSearchPage(p); doGlobalSearch(globalSearch, p) }} disabled={searchPage >= Math.ceil(searchTotal / pageSize)} className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-30"><ChevronRight size={16} /></button>
+                <button onClick={() => { const p = Math.max(1, searchPage - 1); setSearchPage(p); doGlobalSearch(search, p) }} disabled={searchPage <= 1} className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-30"><ChevronLeft size={16} /></button>
+                <button onClick={() => { const p = Math.min(Math.ceil(searchTotal / pageSize), searchPage + 1); setSearchPage(p); doGlobalSearch(search, p) }} disabled={searchPage >= Math.ceil(searchTotal / pageSize)} className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-30"><ChevronRight size={16} /></button>
               </div>
             </div>
           )}
         </div>
       )}
 
-      {/* 筛选栏 */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="relative flex-1 sm:flex-initial">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input
-            type="text"
-            placeholder="按表名搜索..."
-            className="pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm w-full sm:w-56 focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400"
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1) }}
-          />
-        </div>
-        <select
-          className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-200"
-          value={sourceFilter}
-          onChange={(e) => { setSourceFilter(e.target.value); setPage(1) }}
-        >
-          <option value="">全部来源</option>
-          <option value="bitable">飞书多维表格</option>
-          <option value="spreadsheet">飞书表格</option>
-          <option value="local">本地上传</option>
-        </select>
-        {categories.length > 0 && (
-          <select
-            title="表格分类筛选"
-            className="px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-200"
-            value={categoryFilter}
-            onChange={(e) => { setCategoryFilter(e.target.value); setPage(1) }}
-          >
-            <option value="">全部分类</option>
-            {categories.map((cat) => (
-              <option key={cat} value={cat}>{cat}</option>
-            ))}
-          </select>
-        )}
-      </div>
-
-      {/* 标签筛选 */}
-      <TagFilter selectedTagIds={tagFilter} onChange={(ids) => { setTagFilter(ids); setPage(1) }} />
+      {/* 标签切片器 */}
+      <TagFilter
+        selectedTagIds={tagIds}
+        onChange={(ids) => { setTagIds(ids); setPage(1) }}
+      />
 
       {/* 批量操作栏 */}
       {selectedIds.size > 0 && (
@@ -419,7 +425,7 @@ export default function StructuredTables() {
       <div className="bg-white rounded-xl shadow-sm overflow-hidden">
         {loading ? (
           <div className="p-8 text-center text-gray-400">加载中...</div>
-        ) : items.length > 0 ? (
+        ) : (
           <>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -433,17 +439,29 @@ export default function StructuredTables() {
                     </th>
                     <th className="text-left py-3 px-4 text-gray-500 font-medium">表名</th>
                     <th className="text-left py-3 px-4 text-gray-500 font-medium">标签</th>
-                    <th className="text-left py-3 px-4 text-gray-500 font-medium">来源</th>
-                    <th className="text-left py-3 px-4 text-indigo-700 font-semibold bg-indigo-50/50">资产所有人</th>
+                    <th className="text-left py-3 px-4 text-gray-500 font-medium">
+                      <span className="inline-flex items-center gap-1">来源
+                        <ColumnFilter options={sourceTypeOptions} selected={columnFilters.source_type || []} onChange={(v) => updateColumnFilter('source_type', v)} />
+                      </span>
+                    </th>
+                    <th className="text-left py-3 px-4 text-indigo-700 font-semibold bg-indigo-50/50">
+                      <span className="inline-flex items-center gap-1">资产所有人
+                        <ColumnFilter options={uniqueValues('uploader_name')} selected={columnFilters.uploader_name || []} onChange={(v) => updateColumnFilter('uploader_name', v)} />
+                      </span>
+                    </th>
                     <th className="text-left py-3 px-4 text-gray-500 font-medium">记录数</th>
                     <th className="text-left py-3 px-4 text-gray-500 font-medium">字段数</th>
                     <th className="text-left py-3 px-4 text-gray-500 font-medium">摘要</th>
-                    <th className="text-left py-3 px-4 text-gray-500 font-medium">同步/上传时间</th>
+                    <th className="text-left py-3 px-4 text-gray-500 font-medium">
+                      <span className="inline-flex items-center gap-1">同步/上传时间
+                        <DateRangeFilter from={dateFilters.synced_at?.from || ''} to={dateFilters.synced_at?.to || ''} onChange={(f, t) => updateDateFilter('synced_at', f, t)} />
+                      </span>
+                    </th>
                     <th className="text-left py-3 px-4 text-gray-500 font-medium">操作</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((item) => (
+                  {items.length > 0 ? items.map((item) => (
                     <tr
                       key={item.id}
                       className={`border-t border-gray-50 hover:bg-indigo-50/50 cursor-pointer transition-colors ${selectedIds.has(item.id) ? 'bg-indigo-50/30' : ''}`}
@@ -528,7 +546,20 @@ export default function StructuredTables() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                  )) : (
+                    <tr>
+                      <td colSpan={99} className="py-12 text-center text-gray-400">
+                        <p>暂无表格数据</p>
+                        <button
+                          type="button"
+                          onClick={() => navigate('/data-import')}
+                          className="mt-2 text-indigo-600 hover:text-indigo-700 text-sm font-medium"
+                        >
+                          前往数据归档
+                        </button>
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -542,17 +573,6 @@ export default function StructuredTables() {
               </div>
             )}
           </>
-        ) : (
-          <div className="p-12 text-center text-gray-400">
-            <p>暂无表格数据</p>
-            <button
-              type="button"
-              onClick={() => navigate('/data-import')}
-              className="mt-2 text-indigo-600 hover:text-indigo-700 text-sm font-medium"
-            >
-              前往数据归档
-            </button>
-          </div>
         )}
       </div>
 

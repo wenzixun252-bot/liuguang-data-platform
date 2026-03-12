@@ -17,6 +17,7 @@ import {
   Upload,
   Shield,
   MessageCircleWarning,
+  BookOpen,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
@@ -24,8 +25,10 @@ import { useQuery } from '@tanstack/react-query'
 import { motion, AnimatePresence } from 'framer-motion'
 import HeaderSearch from './HeaderSearch'
 import TaskProgressPanel from './TaskProgressPanel'
+import QuickStartGuide from './QuickStartGuide'
 import PageTransition from './PageTransition'
 import { useTaskProgress } from '../hooks/useTaskProgress'
+import { useAutoSync } from '../hooks/useAutoSync'
 import api from '../lib/api'
 
 // ── 导航类型 ──────────────────────────────────────────
@@ -68,6 +71,7 @@ const NAV_ITEMS: NavEntry[] = [
 
 export default function Layout() {
   const { tasks, addTask, updateTask } = useTaskProgress()
+  useAutoSync()
   const user = getUser()
   const location = useLocation()
   const navigate = useNavigate()
@@ -132,6 +136,18 @@ export default function Layout() {
     refetchInterval: 5000,
     staleTime: 2000,
   })
+  const { data: cloudFoldersData } = useQuery({
+    queryKey: ['cloud-folders-status'],
+    queryFn: async () => { const res = await api.get('/import/cloud-folders'); return res.data },
+    refetchInterval: 5000,
+    staleTime: 2000,
+  })
+  const { data: todoExtractData } = useQuery({
+    queryKey: ['todo-extract-status'],
+    queryFn: async () => { const res = await api.get('/todos/extract-status'); return res.data },
+    refetchInterval: 5000,
+    staleTime: 2000,
+  })
   const { data: kgStatusData } = useQuery({
     queryKey: ['kg-build-status'],
     queryFn: async () => { const res = await api.get('/knowledge-graph/build-status'); return res.data },
@@ -148,11 +164,16 @@ export default function Layout() {
   // 将后端轮询到的运行中任务自动同步到任务中心面板
   const syncSources = (syncStatusData as { id?: number; table_name?: string; asset_type?: string; last_sync_status?: string }[] | undefined) ?? []
   const runningSyncIds = syncSources.filter(s => s.last_sync_status === 'running').map(s => ({ id: s.id, table_name: s.table_name, asset_type: s.asset_type }))
+  const cloudFolders = (cloudFoldersData as { id?: number; folder_name?: string; last_sync_status?: string }[] | undefined) ?? []
+  const runningCloudFolderIds = cloudFolders.filter(f => f.last_sync_status === 'running').map(f => ({ id: f.id, folder_name: f.folder_name }))
   const kgRunning = kgStatusData?.status === 'running'
+  const todoExtractRunning = (todoExtractData as { status?: string } | undefined)?.status === 'running'
 
   // 用 ref 跟踪上一次的后端状态，避免 useEffect 依赖 tasks 导致无限循环
   const prevSyncIdsRef = useRef<string>('')
+  const prevCloudFolderIdsRef = useRef<string>('')
   const prevKgRunningRef = useRef<boolean | undefined>(undefined)
+  const prevTodoExtractRunningRef = useRef<boolean | undefined>(undefined)
   const prevReportIdsRef = useRef<string>('')
 
   const syncIdsKey = runningSyncIds.map(s => s.id).join(',')
@@ -178,6 +199,29 @@ export default function Layout() {
     prevSyncIdsRef.current = syncIdsKey
   }, [syncIdsKey, runningSyncIds, addTask, updateTask])
 
+  // 云文件夹同步状态跟踪
+  const cloudFolderIdsKey = runningCloudFolderIds.map(f => f.id).join(',')
+  useEffect(() => {
+    if (cloudFolderIdsKey === prevCloudFolderIdsRef.current) return
+    const prevIds = new Set(prevCloudFolderIdsRef.current.split(',').filter(Boolean))
+    const curIds = new Set(cloudFolderIdsKey.split(',').filter(Boolean))
+    // 新增的云文件夹同步任务
+    runningCloudFolderIds.forEach(f => {
+      const fid = String(f.id)
+      if (!prevIds.has(fid)) {
+        const label = f.folder_name ? `同步: ${f.folder_name}` : '云文件夹同步'
+        addTask(`cloud-folder-${f.id}`, label, '/documents')
+      }
+    })
+    // 已结束的云文件夹同步任务
+    prevIds.forEach(fid => {
+      if (!curIds.has(fid)) {
+        updateTask(`cloud-folder-${fid}`, { status: 'done', progress: 100, message: '已完成' })
+      }
+    })
+    prevCloudFolderIdsRef.current = cloudFolderIdsKey
+  }, [cloudFolderIdsKey, runningCloudFolderIds, addTask, updateTask])
+
   useEffect(() => {
     if (kgRunning === prevKgRunningRef.current) return
     if (kgRunning) {
@@ -188,6 +232,17 @@ export default function Layout() {
     }
     prevKgRunningRef.current = kgRunning
   }, [kgRunning, addTask, updateTask])
+
+  // 待办提取状态跟踪
+  useEffect(() => {
+    if (todoExtractRunning === prevTodoExtractRunningRef.current) return
+    if (todoExtractRunning) {
+      addTask('todo-extract', '待办提取', '/todos')
+    } else if (prevTodoExtractRunningRef.current === true) {
+      updateTask('todo-extract', { status: 'done', progress: 100, message: '已完成' })
+    }
+    prevTodoExtractRunningRef.current = todoExtractRunning
+  }, [todoExtractRunning, addTask, updateTask])
 
   // 同步报告生成状态到任务中心
   const generatingReports = (generatingReportsData as { items?: { id: number; title: string; status: string }[] } | undefined)?.items ?? []
@@ -405,8 +460,20 @@ export default function Layout() {
             </button>
           </div>
 
-          {/* 右侧功能区：反馈 + 任务中心 + 用户头像 */}
+          {/* 右侧功能区：帮助文档 + 快速开始 + 反馈 + 任务中心 + 用户头像 */}
           <div className="flex items-center gap-1.5 shrink-0">
+          <a
+            href="https://vzyjg03bu3.feishu.cn/docx/SEbmdTy3xoKgfDxkslVcn1XunEe"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="帮助文档"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-sm font-medium hover:bg-black/[0.04] transition-colors apple-btn"
+            style={{ color: 'var(--color-text-secondary)' }}
+          >
+            <BookOpen size={18} />
+            <span className="hidden sm:inline">帮助文档</span>
+          </a>
+          <QuickStartGuide />
           <a
             href="https://vzyjg03bu3.feishu.cn/base/ScGfb5sXFatp5IsHfKAcIBf8npd"
             target="_blank"

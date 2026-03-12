@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy import cast, Date, distinct, func, select
+from sqlalchemy import cast, Date, distinct, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, get_visible_owner_ids
@@ -236,26 +236,32 @@ async def get_asset_score(
     activity_score = _log_score(recent_count, 100)
 
     # --- 6. Source Activation (3 types: 会话记录, 会议记录, 云文件夹) ---
+    # 改为检查 ETLDataSource 数据源配置，而非已同步的数据记录
     source_types_total = 3
     active_types = 0
     source_labels: list[str] = []
 
-    # 6a. 会话记录 — 判断 communications 表中是否有 chat 类型的记录
-    chat_stmt = select(func.count()).select_from(Communication).where(
-        Communication.owner_id.in_(visible_ids),
-        Communication.comm_type == "chat",
+    chat_keywords = ['会话', '群聊', '消息', '聊天', 'chat']
+    meeting_keywords = ['会议', '纪要', 'meeting']
+
+    # 6a. 会话记录 — 是否配置了包含聊天关键词的 communication 数据源
+    chat_source_stmt = select(func.count()).select_from(ETLDataSource).where(
+        ETLDataSource.owner_id == current_user.feishu_open_id,
+        ETLDataSource.asset_type == "communication",
+        or_(*[ETLDataSource.table_name.ilike(f"%{kw}%") for kw in chat_keywords]),
     )
-    has_chat = ((await db.execute(chat_stmt)).scalar() or 0) > 0
+    has_chat = ((await db.execute(chat_source_stmt)).scalar() or 0) > 0
     if has_chat:
         active_types += 1
     source_labels.append(f"会话记录 {'✓' if has_chat else '✗'}")
 
-    # 6b. 会议记录 — 判断 communications 表中是否有 meeting 类型的记录
-    meeting_stmt = select(func.count()).select_from(Communication).where(
-        Communication.owner_id.in_(visible_ids),
-        Communication.comm_type == "meeting",
+    # 6b. 会议记录 — 是否配置了包含会议关键词的 communication 数据源
+    meeting_source_stmt = select(func.count()).select_from(ETLDataSource).where(
+        ETLDataSource.owner_id == current_user.feishu_open_id,
+        ETLDataSource.asset_type == "communication",
+        or_(*[ETLDataSource.table_name.ilike(f"%{kw}%") for kw in meeting_keywords]),
     )
-    has_meeting = ((await db.execute(meeting_stmt)).scalar() or 0) > 0
+    has_meeting = ((await db.execute(meeting_source_stmt)).scalar() or 0) > 0
     if has_meeting:
         active_types += 1
     source_labels.append(f"会议记录 {'✓' if has_meeting else '✗'}")

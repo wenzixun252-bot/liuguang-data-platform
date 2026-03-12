@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
-import { Search, ChevronLeft, ChevronRight, X, Clock, MapPin, Users, Paperclip, ExternalLink, Download, Image, FileText, Trash2, MessageSquare, Video, Mic, Table2 } from 'lucide-react'
+import { Search, ChevronLeft, ChevronRight, X, Clock, MapPin, Users, Paperclip, ExternalLink, Download, Image, FileText, Trash2, MessageSquare, Video, Mic, Table2, Upload } from 'lucide-react'
 import api, { getExtractionRules } from '../lib/api'
 import toast from 'react-hot-toast'
 import { useQuery } from '@tanstack/react-query'
 import { ColumnSettingsButton, useColumnSettings, type ColumnDef } from '../components/ColumnSettings'
 import { getUser } from '../lib/auth'
-import { TagChips, TagFilter, BatchTagBar, useContentTags, InlineTagEditor } from '../components/TagManager'
+import { TagChips, BatchTagBar, useContentTags, InlineTagEditor, TagFilter } from '../components/TagManager'
+import { ColumnFilter } from '../components/ColumnFilter'
+import { DateRangeFilter } from '../components/DateRangeFilter'
+import { HighlightText } from '../components/HighlightText'
 
 // ─── 类型切换选项 ───────────────────────────────────────────
 type CommTypeFilter = 'meeting' | 'chat'
@@ -97,6 +100,7 @@ interface CommunicationItem {
   extra_fields: { _attachments?: AttachmentMeta[]; _links?: LinkMeta[]; [key: string]: unknown }
   feishu_created_at: string | null
   feishu_updated_at: string | null
+  matched_fields: string[]
   parse_status: string
   processed_at: string | null
   synced_at: string | null
@@ -149,14 +153,13 @@ export default function Communications() {
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
-  const [initiatorFilter, setInitiatorFilter] = useState('')
-  const [startDate, setStartDate] = useState('')
-  const [endDate, setEndDate] = useState('')
+  const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({})
+  const [dateFilters, setDateFilters] = useState<Record<string, { from: string; to: string }>>({})
+  const [tagIds, setTagIds] = useState<number[]>([])
   const [commTypeFilter, setCommTypeFilter] = useState<CommTypeFilter>('meeting')
   const [selected, setSelected] = useState<CommunicationItem | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [refreshKey, setRefreshKey] = useState(0)
-  const [tagFilter, setTagFilter] = useState<number[]>([])
   const [tagRefreshKey, setTagRefreshKey] = useState(0)
 
   // 提取规则名称映射
@@ -171,28 +174,33 @@ export default function Communications() {
 
   const pageSize = 20
 
+  // 后端支持的筛选参数
+  const backendFilterKeys = ['initiator']
+
   // 加载数据
   useEffect(() => {
     setLoading(true)
     const params: Record<string, unknown> = { page, page_size: pageSize }
     if (search) params.search = search
-    if (initiatorFilter) params.initiator = initiatorFilter
-    if (startDate) params.start_date = new Date(startDate).toISOString()
-    if (endDate) params.end_date = new Date(endDate + 'T23:59:59').toISOString()
-    if (tagFilter.length > 0) params.tag_ids = tagFilter
-
     params.comm_type = commTypeFilter
+    if (tagIds.length > 0) params.tag_ids = tagIds
+    for (const [key, vals] of Object.entries(columnFilters)) {
+      if (vals.length > 0 && backendFilterKeys.includes(key)) params[key] = vals.join(',')
+    }
+    // 时间筛选
+    if (dateFilters.comm_time?.from) params.start_date = dateFilters.comm_time.from + 'T00:00:00'
+    if (dateFilters.comm_time?.to) params.end_date = dateFilters.comm_time.to + 'T23:59:59'
 
     api.get('/communications/list', { params })
       .then((res) => setData(res.data))
       .catch(() => toast.error('加载沟通记录失败'))
       .finally(() => setLoading(false))
-  }, [page, search, initiatorFilter, startDate, endDate, commTypeFilter, tagFilter, refreshKey])
+  }, [page, search, commTypeFilter, columnFilters, dateFilters, tagIds, refreshKey])
 
   // 切换筛选条件时清空选择
   useEffect(() => {
     setSelectedIds(new Set())
-  }, [page, search, initiatorFilter, startDate, endDate, commTypeFilter, tagFilter])
+  }, [page, search, commTypeFilter, columnFilters, dateFilters, tagIds])
 
   // 从搜索结果跳转过来时自动打开详情
   useEffect(() => {
@@ -206,8 +214,70 @@ export default function Communications() {
     }
   }, [data, searchParams, setSearchParams])
 
+  // 从当前页数据提取唯一值用于列筛选
+  const uniqueValues = (key: string) => {
+    if (!data?.items) return []
+    const vals = new Set<string>()
+    for (const item of data.items) {
+      if (key === 'participants') {
+        for (const p of item.participants || []) {
+          const name = p.name || p.open_id
+          if (name) vals.add(name)
+        }
+      } else if (key === 'chat_name') {
+        vals.add(item.chat_name || '个人聊天')
+      } else {
+        const v = (item as unknown as Record<string, unknown>)[key]
+        if (v != null && v !== '') vals.add(String(v))
+      }
+    }
+    return Array.from(vals).sort()
+  }
+  // 可筛选列（key -> 匹配方式）
+  const filterableColumns = ['initiator', 'chat_name', 'participants', 'location']
+  const updateColumnFilter = (key: string, vals: string[]) => {
+    setColumnFilters((prev) => {
+      const next = { ...prev }
+      if (vals.length === 0) delete next[key]
+      else next[key] = vals
+      return next
+    })
+    setPage(1)
+  }
+  const updateDateFilter = (field: string, from: string, to: string) => {
+    setDateFilters((prev) => {
+      const next = { ...prev }
+      if (!from && !to) delete next[field]
+      else next[field] = { from, to }
+      return next
+    })
+    setPage(1)
+  }
+
+  // 前端本地过滤（对后端不支持的筛选字段）
+  const filteredItems = (() => {
+    if (!data?.items) return []
+    let items = data.items
+    for (const [key, vals] of Object.entries(columnFilters)) {
+      if (vals.length === 0 || backendFilterKeys.includes(key)) continue
+      items = items.filter((item) => {
+        if (key === 'participants') {
+          return (item.participants || []).some((p) => vals.includes(p.name || ''))
+        }
+        if (key === 'chat_name') {
+          return vals.includes(item.chat_name || '个人聊天')
+        }
+        if (key === 'location') {
+          return vals.includes(item.location || '')
+        }
+        return true
+      })
+    }
+    return items
+  })()
+
   const totalPages = data ? Math.ceil(data.total / pageSize) : 0
-  const currentIds = data?.items.map((i) => i.id) || []
+  const currentIds = filteredItems.map((i) => i.id)
   const allSelected = currentIds.length > 0 && currentIds.every((id) => selectedIds.has(id))
   const { tagsMap, reloadTags } = useContentTags('communication', currentIds, tagRefreshKey)
 
@@ -257,39 +327,28 @@ export default function Communications() {
     <div className="space-y-4">
       {/* 页面标题和工具栏 */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold text-gray-800">沟通资产</h1>
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold text-gray-800">沟通资产</h1>
+          <button
+            type="button"
+            onClick={() => navigate('/data-import')}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+          >
+            <Upload size={14} />
+            导入数据
+          </button>
+        </div>
+        <div className="flex items-center gap-3">
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
               type="text"
-              placeholder="搜索沟通记录..."
-              className="pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm w-full sm:w-64 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              placeholder="搜索主题、内容、摘要、组织者..."
+              className="pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm w-full sm:w-72 focus:outline-none focus:ring-2 focus:ring-indigo-200"
               value={search}
               onChange={(e) => { setSearch(e.target.value); setPage(1) }}
             />
           </div>
-          <input
-            type="text"
-            placeholder="组织者/发送者筛选"
-            className="px-3 py-2 border border-gray-200 rounded-lg text-sm w-40 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-            value={initiatorFilter}
-            onChange={(e) => { setInitiatorFilter(e.target.value); setPage(1) }}
-          />
-          <input
-            type="date"
-            className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
-            value={startDate}
-            onChange={(e) => { setStartDate(e.target.value); setPage(1) }}
-            title="开始日期"
-          />
-          <input
-            type="date"
-            className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
-            value={endDate}
-            onChange={(e) => { setEndDate(e.target.value); setPage(1) }}
-            title="结束日期"
-          />
           <ColumnSettingsButton columns={colDefs} isVisible={isVisible} toggle={toggle} />
         </div>
       </div>
@@ -311,8 +370,11 @@ export default function Communications() {
         ))}
       </div>
 
-      {/* 标签筛选 */}
-      <TagFilter selectedTagIds={tagFilter} onChange={(ids) => { setTagFilter(ids); setPage(1) }} />
+      {/* 标签切片器 */}
+      <TagFilter
+        selectedTagIds={tagIds}
+        onChange={(ids) => { setTagIds(ids); setPage(1) }}
+      />
 
       {/* 批量操作栏 */}
       {selectedIds.size > 0 && (
@@ -343,7 +405,7 @@ export default function Communications() {
       <div className="bg-white rounded-xl shadow-sm overflow-hidden">
         {loading ? (
           <div className="p-8 text-center text-gray-400">加载中...</div>
-        ) : data && data.items.length > 0 ? (
+        ) : (
           <>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -354,13 +416,23 @@ export default function Communications() {
                     </th>
                     <th className="text-left py-3 px-4 text-gray-500 font-medium">类型</th>
                     {colDefs.filter(c => isVisible(c.key)).map(c => (
-                      <th key={c.key} className={`text-left py-3 px-4 font-medium ${c.key === 'key_info' ? 'text-violet-700 font-semibold bg-violet-50/50' : 'text-gray-500'}`}>{c.label}</th>
+                      <th key={c.key} className={`text-left py-3 px-4 font-medium ${c.key === 'key_info' ? 'text-violet-700 font-semibold bg-violet-50/50' : 'text-gray-500'}`}>
+                        <span className="inline-flex items-center gap-1">
+                          {c.label}
+                          {filterableColumns.includes(c.key) && (
+                            <ColumnFilter options={uniqueValues(c.key)} selected={columnFilters[c.key] || []} onChange={(v) => updateColumnFilter(c.key, v)} />
+                          )}
+                          {c.key === 'comm_time' && (
+                            <DateRangeFilter from={dateFilters.comm_time?.from || ''} to={dateFilters.comm_time?.to || ''} onChange={(f, t) => updateDateFilter('comm_time', f, t)} />
+                          )}
+                        </span>
+                      </th>
                     ))}
                     <th className="text-left py-3 px-4 text-gray-500 font-medium">操作</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {data.items.map((item) => (
+                  {filteredItems.length > 0 ? filteredItems.map((item) => (
                     <tr
                       key={item.id}
                       className={`border-t border-gray-50 hover:bg-indigo-50/50 cursor-pointer transition-colors ${selectedIds.has(item.id) ? 'bg-indigo-50/30' : ''}`}
@@ -375,7 +447,9 @@ export default function Communications() {
                       {isVisible('title') && (
                         <td className="py-3 px-4">
                           <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
-                            <span className="text-gray-800 font-medium truncate">{item.title || '无标题'}</span>
+                            <span className="text-gray-800 font-medium truncate">
+                              <HighlightText text={item.title || '无标题'} keyword={search} />
+                            </span>
                             {item.extraction_rule_id && rulesMap[item.extraction_rule_id] && (
                               <span className="shrink-0 px-1.5 py-0.5 rounded text-xs bg-violet-50 text-violet-700 border border-violet-200 font-medium">
                                 {rulesMap[item.extraction_rule_id]}
@@ -399,7 +473,11 @@ export default function Communications() {
                           {item.comm_time ? new Date(item.comm_time).toLocaleString('zh-CN') : '-'}
                         </td>
                       )}
-                      {isVisible('initiator') && <td className="py-3 px-4 text-gray-500">{item.initiator || '-'}</td>}
+                      {isVisible('initiator') && (
+                        <td className={`py-3 px-4 text-gray-500 ${search && item.matched_fields?.includes('initiator') ? 'bg-amber-50' : ''}`}>
+                          <HighlightText text={item.initiator || '-'} keyword={search} />
+                        </td>
+                      )}
                       {isVisible('participants') && (
                         <td className="py-3 px-4 text-gray-500">
                           {(item.participants || []).length > 0
@@ -407,7 +485,11 @@ export default function Communications() {
                             : '-'}
                         </td>
                       )}
-                      {isVisible('chat_name') && <td className="py-3 px-4 text-gray-500">{item.chat_name || '个人聊天'}</td>}
+                      {isVisible('chat_name') && (
+                        <td className={`py-3 px-4 text-gray-500 ${search && item.matched_fields?.includes('chat_name') ? 'bg-amber-50' : ''}`}>
+                          <HighlightText text={item.chat_name || '个人聊天'} keyword={search} />
+                        </td>
+                      )}
                       {isVisible('key_info') && (
                         <td className="py-3 px-4 max-w-[280px] bg-violet-50/30">
                           {item.key_info && Object.keys(item.key_info).length > 0 ? (
@@ -428,8 +510,8 @@ export default function Communications() {
                         </td>
                       )}
                       {isVisible('content') && (
-                        <td className="py-3 px-4 text-gray-500 max-w-xs truncate">
-                          {item.summary?.slice(0, 60) || item.content_text?.slice(0, 60) || '-'}
+                        <td className={`py-3 px-4 text-gray-500 max-w-xs truncate ${search && (item.matched_fields?.includes('summary') || item.matched_fields?.includes('content_text')) ? 'bg-amber-50' : ''}`}>
+                          <HighlightText text={item.summary?.slice(0, 60) || item.content_text?.slice(0, 60) || '-'} keyword={search} />
                         </td>
                       )}
                       {isVisible('attachments') && (
@@ -458,12 +540,16 @@ export default function Communications() {
                           {item.duration_minutes ? `${item.duration_minutes} 分钟` : '-'}
                         </td>
                       )}
-                      {isVisible('location') && <td className="py-3 px-4 text-gray-500 truncate max-w-[200px]">{item.location || '-'}</td>}
+                      {isVisible('location') && (
+                        <td className={`py-3 px-4 text-gray-500 truncate max-w-[200px] ${search && item.matched_fields?.includes('location') ? 'bg-amber-50' : ''}`}>
+                          <HighlightText text={item.location || '-'} keyword={search} />
+                        </td>
+                      )}
                       {isVisible('keywords') && (
                         <td className="py-3 px-4 max-w-[200px]">
                           <div className="flex flex-wrap gap-1">
                             {(item.keywords || []).slice(0, 3).map((kw, i) => (
-                              <span key={i} className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">{kw}</span>
+                              <span key={i} className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-xs"><HighlightText text={kw} keyword={search} /></span>
                             ))}
                           </div>
                         </td>
@@ -486,7 +572,20 @@ export default function Communications() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                  )) : (
+                    <tr>
+                      <td colSpan={99} className="py-12 text-center text-gray-400">
+                        <p>暂无沟通记录</p>
+                        <button
+                          type="button"
+                          onClick={() => navigate('/data-import')}
+                          className="mt-2 text-indigo-600 hover:text-indigo-700 text-sm font-medium"
+                        >
+                          前往数据归档
+                        </button>
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -494,7 +593,7 @@ export default function Communications() {
             {/* 分页 */}
             {totalPages > 1 && (
               <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
-                <span className="text-sm text-gray-500">共 {data.total} 条，第 {page}/{totalPages} 页</span>
+                <span className="text-sm text-gray-500">共 {data?.total ?? 0} 条，第 {page}/{totalPages} 页</span>
                 <div className="flex items-center gap-2">
                   <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1} className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-30">
                     <ChevronLeft size={16} />
@@ -506,17 +605,6 @@ export default function Communications() {
               </div>
             )}
           </>
-        ) : (
-          <div className="p-12 text-center text-gray-400">
-            <p>暂无沟通记录</p>
-            <button
-              type="button"
-              onClick={() => navigate('/data-import')}
-              className="mt-2 text-indigo-600 hover:text-indigo-700 text-sm font-medium"
-            >
-              前往数据归档
-            </button>
-          </div>
         )}
       </div>
 

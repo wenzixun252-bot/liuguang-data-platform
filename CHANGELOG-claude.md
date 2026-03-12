@@ -447,3 +447,33 @@
 - **2026-03-12 10:51:08** [前端页面] `frontend/src/pages/Reports.tsx` — 修改逻辑 (+3/-1行)
 - **2026-03-12 11:06:28** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 修改逻辑 (+1/-1行)
 - **2026-03-12 11:06:35** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-12 11:08:10** [前端页面] `frontend/src/pages/Reports.tsx` — 新增 navigate
+- **2026-03-12 11:28:50** [前端组件] `frontend/src/components/DynamicFilter.tsx` — 新建文件 `DynamicFilter`，包含 timer, handleChange, DynamicFilter, menuRef, handler
+- **2026-03-12 11:32:17** [前端] `frontend/src/hooks/useQuickStart.ts` — 新建文件 `useQuickStart`，包含 user, raw, current, useQuickStart, stored
+- **2026-03-12 11:39:28** [前端] `frontend/src/hooks/useQuickStart.ts` — 修改逻辑 (+7/-4行)
+- **2026-03-12 11:39:34** [前端] `frontend/src/hooks/useQuickStart.ts` — 修改逻辑 (+1/-1行)
+- **2026-03-12 11:39:38** [前端] `frontend/src/hooks/useQuickStart.ts` — 修改逻辑 (+1/-1行)
+- **2026-03-12 11:39:43** [前端] `frontend/src/hooks/useQuickStart.ts` — 修改逻辑 (+3/-2行)
+- **2026-03-12 11:39:48** [前端] `frontend/src/hooks/useQuickStart.ts` — 修改逻辑 (+1/-1行)
+- **2026-03-12 11:43:32** [前端组件] `frontend/src/components/DynamicFilter.tsx` — 调整UI组件
+- **2026-03-12 11:55:06** [前端] `frontend/src/hooks/useQuickStart.ts` — 新建文件 `useQuickStart`，包含 user, raw, useQuickStart, dismissed, step1Done
+- **2026-03-12 12:07:28** [其他] `C:/Users/ljadmin/.claude/plans/replicated-purring-liskov.md` — 新建文件 `replicated-purring-liskov`，包含 SYNC_INTERVAL, SYNC_MIN_GAP, LOCK_KEY, useAutoSync
+- **2026-03-12 12:11:19** [前端] `frontend/src/hooks/useAutoSync.ts` — 新建文件 `useAutoSync`，包含 SYNC_INTERVAL, SYNC_MIN_GAP, LOCK_KEY, useAutoSync, intervalRef
+- **2026-03-12 12:12:21** [前端组件] `frontend/src/components/HighlightText.tsx` — 新建文件 `HighlightText`，包含 HighlightText, escaped, parts
+- **2026-03-12 14:13:28** [前端] `frontend/src/hooks/useQuickStart.ts` — 修改逻辑 (+4/-3行)
+- **2026-03-12 14:13:34** [前端] `frontend/src/hooks/useQuickStart.ts` — 修改逻辑 (+1/-1行)
+- **2026-03-12 14:13:39** [前端] `frontend/src/hooks/useQuickStart.ts` — 修改逻辑 (+1/-1行)
+- **2026-03-12 14:13:45** [前端] `frontend/src/hooks/useQuickStart.ts` — 修改逻辑 (+1/-1行)
+- **2026-03-12 14:13:50** [前端] `frontend/src/hooks/useQuickStart.ts` — 修改逻辑 (+1/-1行)
+- **2026-03-12 14:13:56** [前端] `frontend/src/hooks/useQuickStart.ts` — 修改逻辑 (+1/-1行)
+- **2026-03-12 14:15:11** [前端] `frontend/src/hooks/useQuickStart.ts` — 新增 meetingKeywords, hasChat, hasMeeting, hasFolder
+- **2026-03-12 14:28:41** [前端页面] `frontend/src/pages/Reports.tsx` — 添加依赖引用
+- **2026-03-12 14:28:46** [前端页面] `frontend/src/pages/Reports.tsx` — 调整UI组件
+- **2026-03-12 14:28:51** [前端页面] `frontend/src/pages/Reports.tsx` — 新增 8 行代码
+- **2026-03-12 14:28:57** [前端页面] `frontend/src/pages/Reports.tsx` — 修改逻辑 (+2/-2行)
+- **2026-03-12 14:29:02** [前端页面] `frontend/src/pages/Reports.tsx` — 新增 updateDateFilter, next
+- **2026-03-12 14:29:12** [前端页面] `frontend/src/pages/Reports.tsx` — 调整UI组件
+- **2026-03-12 14:41:41** [前端页面] `frontend/src/pages/Reports.tsx` — 修改逻辑 (+1/-3行)
+- **2026-03-12 14:42:07** [前端页面] `frontend/src/pages/Reports.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-12 14:42:39** [前端页面] `frontend/src/pages/Reports.tsx` — 修改逻辑 (+5/-1行)
+- **2026-03-12 14:51:02** [其他] `.mcp.json` — 新建文件 `.mcp` (18行)

@@ -108,6 +108,7 @@ class LiteOpenAIClient:
             self._client = httpx.AsyncClient(
                 timeout=self._timeout,
                 follow_redirects=True,
+                verify=False,
             )
         return self._client
 

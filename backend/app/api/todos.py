@@ -1,5 +1,6 @@
 """待办事项 API 端点。"""
 
+import asyncio
 import logging
 from datetime import datetime
 from typing import Annotated
@@ -10,6 +11,7 @@ from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
+from app.database import async_session
 from app.models.todo_item import TodoItem
 from app.models.user import User
 from app.schemas.todo import (
@@ -25,6 +27,10 @@ from app.services.todo_extractor import extract_and_save
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/todos", tags=["待办事项"])
+
+# ── 待办提取任务状态（进程内存） ──
+# key: owner_id, value: {status, message, count?}
+_extract_tasks: dict[str, dict] = {}
 
 # 允许的状态转换
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
@@ -81,19 +87,46 @@ async def todo_summary(
     }
 
 
-@router.post("/extract", response_model=list[TodoOut], summary="AI提取待办候选")
+async def _run_extract_task(owner_id: str, owner_name: str, days: int) -> None:
+    """后台执行待办提取，使用独立的数据库会话。"""
+    try:
+        _extract_tasks[owner_id] = {"status": "running", "message": "正在提取待办..."}
+        async with async_session() as db:
+            items = await extract_and_save(db, owner_id, owner_name, days)
+            _extract_tasks[owner_id] = {
+                "status": "done",
+                "message": f"提取完成，共 {len(items)} 条",
+                "count": len(items),
+            }
+    except Exception as e:
+        logger.exception("后台待办提取失败: %s", e)
+        _extract_tasks[owner_id] = {"status": "error", "message": f"提取失败: {e}"}
+
+
+@router.post("/extract", summary="AI提取待办候选")
 async def extract_todos(
     body: TodoExtractRequest,
     current_user: Annotated[User, Depends(get_current_user)],
-    db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """从近N天会议/聊天中AI提取待办候选。"""
-    try:
-        items = await extract_and_save(db, current_user.feishu_open_id, current_user.name, body.days)
-        return items
-    except Exception as e:
-        logger.exception("待办提取接口异常: %s", e)
-        raise HTTPException(status_code=500, detail=f"待办提取失败: {e}")
+    """从近N天会议/聊天中AI提取待办候选。立即返回，后台异步执行。"""
+    owner_id = current_user.feishu_open_id
+    existing = _extract_tasks.get(owner_id)
+    if existing and existing.get("status") == "running":
+        return {"status": "running", "message": "待办提取任务已在运行中"}
+
+    asyncio.create_task(_run_extract_task(owner_id, current_user.name, body.days))
+    return {"status": "started", "message": "待办提取已触发"}
+
+
+@router.get("/extract-status", summary="查询待办提取进度")
+async def get_extract_status(
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    """查询当前用户的待办提取任务状态。"""
+    task = _extract_tasks.get(current_user.feishu_open_id)
+    if not task:
+        return {"status": "idle", "message": "无提取任务"}
+    return task
 
 
 @router.get("", response_model=TodoListResponse, summary="待办列表")
@@ -104,6 +137,9 @@ async def list_todos(
     search: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    date_field: str | None = Query(None, description="时间筛选字段: created_at, due_date, pushed_at"),
+    date_from: datetime | None = Query(None, description="时间范围开始"),
+    date_to: datetime | None = Query(None, description="时间范围结束"),
 ):
     """获取待办列表，可按 status 过滤。"""
     conditions = [TodoItem.owner_id == current_user.feishu_open_id]
@@ -112,6 +148,19 @@ async def list_todos(
     if search:
         like = f"%{search}%"
         conditions.append(TodoItem.title.ilike(like) | TodoItem.description.ilike(like))
+
+    # 时间范围筛选
+    _date_field_map = {
+        "created_at": TodoItem.created_at,
+        "due_date": TodoItem.due_date,
+        "pushed_at": TodoItem.pushed_at,
+    }
+    if date_field and date_field in _date_field_map:
+        col = _date_field_map[date_field]
+        if date_from:
+            conditions.append(col >= date_from)
+        if date_to:
+            conditions.append(col <= date_to)
 
     # 总数
     count_result = await db.execute(

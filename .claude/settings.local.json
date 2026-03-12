@@ -74,7 +74,10 @@
       "Bash(find \"d:\\\\CC\\\\liuguang-data-platform\\\\backend\" -name \"*.py\" -type f -exec grep -l \"TIMESTAMP WITHOUT TIME ZONE\\\\|utc_now\\\\|server_default.*func\" {})",
       "Bash(xargs -I {} basename {})",
       "Bash(bash --version)",
-      "Bash(find d:/CC/liuguang-data-platform -name *.conf -o -name nginx*)"
+      "Bash(find d:/CC/liuguang-data-platform -name *.conf -o -name nginx*)",
+      "Read(//c/Users/ljadmin/**)",
+      "Read(//c/Users/ljadmin/.claude/**)",
+      "mcp__feishu-mcp__docx_builtin_import"
     ]
   },
   "hooks": {

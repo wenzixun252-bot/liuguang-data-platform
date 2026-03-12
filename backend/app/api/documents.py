@@ -3,12 +3,14 @@
 import logging
 import mimetypes
 import os
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import String, func, select
+from sqlalchemy.sql.expression import cast
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.tag import ContentTag
@@ -42,7 +44,11 @@ async def list_documents(
     doc_category: str | None = Query(None),
     sentiment: str | None = Query(None),
     uploader_name: str | None = Query(None),
+    file_type: str | None = Query(None),
     tag_ids: list[int] = Query(default=[]),
+    date_field: str | None = Query(None, description="时间筛选字段: created_at, feishu_created_at, feishu_updated_at, synced_at"),
+    date_from: datetime | None = Query(None, description="时间范围开始"),
+    date_to: datetime | None = Query(None, description="时间范围结束"),
 ) -> DocumentListResponse:
     visible_ids = await get_visible_owner_ids(current_user, db, request)
 
@@ -54,7 +60,16 @@ async def list_documents(
 
     if search:
         like = f"%{search}%"
-        f = Document.title.ilike(like) | Document.content_text.ilike(like)
+        f = (
+            Document.title.ilike(like)
+            | Document.content_text.ilike(like)
+            | Document.summary.ilike(like)
+            | Document.original_filename.ilike(like)
+            | Document.uploader_name.ilike(like)
+            | cast(Document.keywords, String).ilike(like)
+            | Document.file_type.ilike(like)
+            | Document.author.ilike(like)
+        )
         base = base.where(f)
         count_stmt = count_stmt.where(f)
 
@@ -75,6 +90,10 @@ async def list_documents(
         base = base.where(Document.uploader_name.ilike(like))
         count_stmt = count_stmt.where(Document.uploader_name.ilike(like))
 
+    if file_type:
+        base = base.where(Document.file_type == file_type)
+        count_stmt = count_stmt.where(Document.file_type == file_type)
+
     if tag_ids:
         subq = select(ContentTag.content_id).where(
             ContentTag.content_type == "document",
@@ -82,6 +101,22 @@ async def list_documents(
         )
         base = base.where(Document.id.in_(subq))
         count_stmt = count_stmt.where(Document.id.in_(subq))
+
+    # 时间范围筛选
+    _date_field_map = {
+        "created_at": Document.created_at,
+        "feishu_created_at": Document.feishu_created_at,
+        "feishu_updated_at": Document.feishu_updated_at,
+        "synced_at": Document.synced_at,
+    }
+    if date_field and date_field in _date_field_map:
+        col = _date_field_map[date_field]
+        if date_from:
+            base = base.where(col >= date_from)
+            count_stmt = count_stmt.where(col >= date_from)
+        if date_to:
+            base = base.where(col <= date_to)
+            count_stmt = count_stmt.where(col <= date_to)
 
     total = (await db.execute(count_stmt)).scalar() or 0
     items_stmt = base.order_by(Document.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
@@ -130,10 +165,26 @@ async def list_documents(
     await translate_key_info_batch(rows, db)
 
     items = []
+    search_lower = search.lower() if search else ""
     for r in rows:
         doc_out = DocumentOut.model_validate(r)
         if r.feishu_record_id and r.feishu_record_id in import_count_map:
             doc_out = doc_out.model_copy(update={"import_count": import_count_map[r.feishu_record_id]})
+        # 计算 matched_fields
+        if search_lower:
+            matched = []
+            fields_to_check = {
+                "title": r.title,
+                "content_text": r.content_text,
+                "summary": r.summary,
+                "original_filename": r.original_filename,
+                "uploader_name": r.uploader_name,
+                "keywords": " ".join(r.keywords or []),
+            }
+            for fname, val in fields_to_check.items():
+                if val and search_lower in str(val).lower():
+                    matched.append(fname)
+            doc_out = doc_out.model_copy(update={"matched_fields": matched})
         items.append(doc_out)
 
     return DocumentListResponse(

@@ -26,7 +26,7 @@ class FeishuClient:
 
     def _client(self) -> httpx.AsyncClient:
         """创建不走系统代理的 httpx 客户端。"""
-        return httpx.AsyncClient(proxy=None, timeout=30.0)
+        return httpx.AsyncClient(proxy=None, timeout=30.0, verify=False)
 
     # ── 凭证获取 ───────────────────────────────────────────
 
@@ -836,7 +836,7 @@ class FeishuClient:
         else:
             token = await self.get_tenant_access_token()
 
-        async with httpx.AsyncClient(proxy=None, timeout=60.0) as client:
+        async with httpx.AsyncClient(proxy=None, timeout=60.0, verify=False) as client:
             resp = await client.get(
                 f"{FEISHU_BASE_URL}/drive/v1/medias/{file_token}/download",
                 headers={"Authorization": f"Bearer {token}"},
@@ -862,7 +862,7 @@ class FeishuClient:
         else:
             token = await self.get_tenant_access_token()
 
-        async with httpx.AsyncClient(proxy=None, timeout=120.0) as client:
+        async with httpx.AsyncClient(proxy=None, timeout=120.0, verify=False) as client:
             resp = await client.get(
                 f"{FEISHU_BASE_URL}/drive/v1/files/{file_token}/download",
                 headers={"Authorization": f"Bearer {token}"},

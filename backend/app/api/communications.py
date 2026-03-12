@@ -5,7 +5,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import String, func, select
+from sqlalchemy.sql.expression import cast
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, get_visible_owner_ids
@@ -62,6 +63,13 @@ async def list_communications(
             | Communication.content_text.ilike(like)
             | Communication.summary.ilike(like)
             | Communication.initiator.ilike(like)
+            | Communication.conclusions.ilike(like)
+            | Communication.transcript.ilike(like)
+            | Communication.location.ilike(like)
+            | Communication.chat_name.ilike(like)
+            | Communication.uploader_name.ilike(like)
+            | cast(Communication.keywords, String).ilike(like)
+            | cast(Communication.participants, String).ilike(like)
         )
         base = base.where(f)
         count_stmt = count_stmt.where(f)
@@ -95,8 +103,35 @@ async def list_communications(
     from app.services.etl.enricher import translate_key_info_batch
     await translate_key_info_batch(rows, db)
 
+    items = []
+    search_lower = search.lower() if search else ""
+    for r in rows:
+        comm_out = CommunicationOut.model_validate(r)
+        if search_lower:
+            matched = []
+            fields_to_check = {
+                "title": r.title,
+                "content_text": r.content_text,
+                "summary": r.summary,
+                "initiator": r.initiator,
+                "conclusions": r.conclusions,
+                "transcript": r.transcript,
+                "location": r.location,
+                "chat_name": r.chat_name,
+                "uploader_name": r.uploader_name,
+                "keywords": " ".join(r.keywords or []),
+                "participants": " ".join(
+                    p.get("name", "") for p in (r.participants or []) if isinstance(p, dict)
+                ),
+            }
+            for fname, val in fields_to_check.items():
+                if val and search_lower in str(val).lower():
+                    matched.append(fname)
+            comm_out = comm_out.model_copy(update={"matched_fields": matched})
+        items.append(comm_out)
+
     return CommunicationListResponse(
-        items=[CommunicationOut.model_validate(r) for r in rows],
+        items=items,
         total=total,
         page=page,
         page_size=page_size,
