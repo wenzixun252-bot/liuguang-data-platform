@@ -16,7 +16,7 @@ class TodoItem(Base):
             name="ck_todo_priority",
         ),
         CheckConstraint(
-            "source_type IN ('communication',)",
+            "source_type IN ('communication')",
             name="ck_todo_source_type",
         ),
         CheckConstraint(

@@ -9,6 +9,7 @@ import { getToken } from '../lib/auth'
 import toast from 'react-hot-toast'
 import ReactMarkdown from 'react-markdown'
 import PersonProfileWidget from '../components/insights/PersonProfileWidget'
+import { useTaskProgress } from '../hooks/useTaskProgress'
 
 // ── 类型定义 ──────────────────────────────────────────────
 
@@ -33,6 +34,28 @@ interface CalendarEvent {
 interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
+}
+
+// ── 简报缓存工具（sessionStorage，按 event_id） ──────────
+
+const BRIEF_CACHE_KEY = 'calendar_brief_cache'
+
+function loadBriefCache(): Record<string, { content: string; chatMessages: ChatMessage[] }> {
+  try {
+    const raw = sessionStorage.getItem(BRIEF_CACHE_KEY)
+    return raw ? JSON.parse(raw) : {}
+  } catch { return {} }
+}
+
+function saveBriefToCache(eventId: string, content: string, chatMessages: ChatMessage[]) {
+  const cache = loadBriefCache()
+  cache[eventId] = { content, chatMessages }
+  sessionStorage.setItem(BRIEF_CACHE_KEY, JSON.stringify(cache))
+}
+
+function getBriefFromCache(eventId: string): { content: string; chatMessages: ChatMessage[] } | null {
+  const cache = loadBriefCache()
+  return cache[eventId] || null
 }
 
 // ── 工具函数 ──────────────────────────────────────────────
@@ -128,6 +151,11 @@ export default function CalendarAssistant() {
   // 参会人画像
   const [profilePerson, setProfilePerson] = useState<string | null>(null)
 
+  // 后台任务轮询
+  const { addTask, updateTask } = useTaskProgress()
+  const briefTaskId = 'calendar-brief'
+  const pollingRef = useRef(false)
+
   const briefPanelRef = useRef<HTMLDivElement>(null)
   const chatEndRef = useRef<HTMLDivElement>(null)
 
@@ -174,13 +202,79 @@ export default function CalendarAssistant() {
     }
   }
 
-  // ── 选中事件（查看详情，不自动生成简报）──────────────────
+  // ── 选中事件（查看详情，从缓存恢复简报）──────────────────
   const selectEvent = (event: CalendarEvent) => {
+    // 切换前：把当前会议的简报和对话缓存起来
+    if (selectedEvent && briefContent) {
+      saveBriefToCache(selectedEvent.event_id, briefContent, chatMessages)
+    }
     setSelectedEvent(event)
     setProfilePerson(null)
+    // 从缓存恢复新选中会议的简报
+    const cached = getBriefFromCache(event.event_id)
+    if (cached) {
+      setBriefContent(cached.content)
+      setChatMessages(cached.chatMessages)
+    } else {
+      setBriefContent('')
+      setChatMessages([])
+    }
+    setChatInput('')
   }
 
-  // ── 生成会前简报 (SSE) ──────────────────────────────────
+  // ── 轮询简报进度 ──────────────────────────────────────────
+  const pollBriefProgress = useCallback(async (eventId: string) => {
+    if (pollingRef.current) return
+    pollingRef.current = true
+    setBriefStreaming(true)
+    addTask(briefTaskId, '会前简报生成', '/chat?tab=calendar')
+    updateTask(briefTaskId, { message: '正在生成...' })
+
+    try {
+      let done = false
+      while (!done) {
+        const res = await api.get('/calendar/brief/status')
+        const { status, progress, message, content, event_id } = res.data
+
+        // 实时更新简报内容（即使在其他页面也能通过 task 看到进度）
+        if (content && event_id === eventId) {
+          setBriefContent(content)
+        }
+        updateTask(briefTaskId, { progress: progress || 0, message: message || '生成中...' })
+
+        if (status === 'done') {
+          if (content) {
+            setBriefContent(content)
+            saveBriefToCache(eventId, content, [])
+          }
+          toast.success('会前简报已生成')
+          updateTask(briefTaskId, { status: 'done', progress: 100, message: '已完成' })
+          done = true
+        } else if (status === 'error') {
+          toast.error(`简报生成失败: ${message}`)
+          updateTask(briefTaskId, { status: 'error', progress: 100, message: message || '失败' })
+          done = true
+        } else if (status === 'cancelled') {
+          toast('简报生成已取消', { icon: '🛑' })
+          updateTask(briefTaskId, { status: 'error', message: '已取消' })
+          done = true
+        } else if (status !== 'running') {
+          done = true
+        } else {
+          await new Promise(r => setTimeout(r, 1500))
+        }
+      }
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail || err?.message || '未知错误'
+      toast.error(`查询简报进度失败: ${detail}`)
+      updateTask(briefTaskId, { status: 'error', progress: 100, message: '查询失败' })
+    } finally {
+      setBriefStreaming(false)
+      pollingRef.current = false
+    }
+  }, [addTask, updateTask])
+
+  // ── 生成会前简报（后台任务） ──────────────────────────────
   const generateBrief = async (event: CalendarEvent) => {
     setSelectedEvent(event)
     setBriefContent('')
@@ -189,60 +283,35 @@ export default function CalendarAssistant() {
     setProfilePerson(null)
 
     try {
-      const res = await fetch('/api/calendar/brief', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${getToken()}`,
-        },
-        body: JSON.stringify({
-          event_id: event.event_id,
-          summary: event.summary,
-          description: event.description,
-          start_time: event.start_time,
-          attendees: event.attendees,
-        }),
+      await api.post('/calendar/brief', {
+        event_id: event.event_id,
+        summary: event.summary,
+        description: event.description,
+        start_time: event.start_time,
+        attendees: event.attendees,
       })
-
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-
-      const reader = res.body?.getReader()
-      if (!reader) throw new Error('No reader')
-
-      const decoder = new TextDecoder()
-      let content = ''
-      let buffer = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          const raw = line.slice(6).trim()
-          if (raw === '[DONE]') continue
-
-          try {
-            const parsed = JSON.parse(raw)
-            if (parsed.type === 'content') {
-              content += parsed.content
-              setBriefContent(content)
-            } else if (parsed.type === 'error') {
-              toast.error(parsed.content)
-            }
-          } catch { /* 忽略解析错误 */ }
-        }
-      }
+      // 开始轮询
+      await pollBriefProgress(event.event_id)
     } catch (err: any) {
-      toast.error(`生成简报失败: ${err.message}`)
+      toast.error(`生成简报失败: ${err?.response?.data?.detail || err.message}`)
+      setBriefStreaming(false)
     }
-
-    setBriefStreaming(false)
   }
+
+  // ── 页面加载时检查是否有正在运行的简报任务 ──────────────
+  useEffect(() => {
+    let cancelled = false
+    api.get('/calendar/brief/status').then(res => {
+      if (!cancelled && res.data.status === 'running') {
+        // 恢复正在生成的事件上下文
+        if (res.data.content) {
+          setBriefContent(res.data.content)
+        }
+        pollBriefProgress(res.data.event_id)
+      }
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [pollBriefProgress])
 
   // ── 简报追问 (SSE) ─────────────────────────────────────
   const handleChatSend = async () => {
@@ -309,6 +378,14 @@ export default function CalendarAssistant() {
     }
 
     setChatStreaming(false)
+    // 追问完成后保存缓存（需要拿到最新的 chatMessages）
+    if (selectedEvent && briefContent) {
+      // 用函数式获取最新 chatMessages
+      setChatMessages(prev => {
+        saveBriefToCache(selectedEvent.event_id, briefContent, prev)
+        return prev
+      })
+    }
   }
 
   // 自动滚动

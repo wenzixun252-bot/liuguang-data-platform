@@ -128,9 +128,10 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
       toast.success(`提取到 ${res.data.length} 条待办`)
       setTab('pending_review')
       fetchTodos()
-    } catch {
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail || err?.message || '未知错误'
       updateTask(taskId, { status: 'error', progress: 100, message: '提取失败' })
-      toast.error('提取待办失败')
+      toast.error(`提取待办失败: ${detail}`)
     } finally {
       setExtracting(false)
     }

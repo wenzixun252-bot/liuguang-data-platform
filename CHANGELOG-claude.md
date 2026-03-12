@@ -427,3 +427,17 @@
 - **2026-03-12 00:56:46** [其他] `CLAUDE.md` — 修改逻辑 (+9/-2行)
 - **2026-03-12 00:56:54** [其他] `CLAUDE.md` — 新增 1 行代码
 - **2026-03-12 00:57:03** [其他] `CLAUDE.md` — 新增 3 行代码
+- **2026-03-12 01:29:49** [其他] `C:/Users/ljadmin/.claude/plans/reactive-riding-forest.md` — 新建文件 `reactive-riding-forest` (19行)
+- **2026-03-12 09:15:19** [其他] `C:/Users/ljadmin/.claude/plans/reactive-riding-forest.md` — 修改逻辑 (+21/-15行)
+- **2026-03-12 09:16:35** [前端页面] `frontend/src/pages/Chat.tsx` — 修改逻辑 (+2/-2行)
+- **2026-03-12 09:16:43** [前端页面] `frontend/src/pages/Chat.tsx` — 修改逻辑 (+3/-1行)
+- **2026-03-12 09:20:16** [数据库迁移] `backend/alembic/versions/a7q8r9s0t1u2_fix_todo_source_type_constraint.py` — 新建文件 `a7q8r9s0t1u2_fix_todo_source_type_constraint`，包含 upgrade, downgrade
+- **2026-03-12 09:21:06** [数据库迁移] `backend/alembic/versions/a7q8r9s0t1u2_fix_todo_source_type_constraint.py` — 修改逻辑 (+1/-1行)
+- **2026-03-12 09:39:10** [数据库迁移] `backend/alembic/versions/a7q8r9s0t1u2_fix_todo_source_type_constraint.py` — 修改逻辑 (+1/-1行)
+- **2026-03-12 09:50:27** [前端页面] `frontend/src/pages/CalendarAssistant.tsx` — 添加依赖引用
+- **2026-03-12 09:50:38** [前端页面] `frontend/src/pages/CalendarAssistant.tsx` — 新增 saveBriefToCache, BRIEF_CACHE_KEY, getBriefFromCache, raw
+- **2026-03-12 09:50:50** [前端页面] `frontend/src/pages/CalendarAssistant.tsx` — 新增 pollingRef, briefTaskId
+- **2026-03-12 09:50:59** [前端页面] `frontend/src/pages/CalendarAssistant.tsx` — 新增 cached
+- **2026-03-12 09:51:25** [前端页面] `frontend/src/pages/CalendarAssistant.tsx` — 新增 detail, pollBriefProgress；移除 raw, parsed, decoder, lines
+- **2026-03-12 09:51:33** [前端页面] `frontend/src/pages/CalendarAssistant.tsx` — 修改逻辑 (+16/-1行)
+- **2026-03-12 09:51:50** [前端页面] `frontend/src/pages/CalendarAssistant.tsx` — 新增 6 行代码

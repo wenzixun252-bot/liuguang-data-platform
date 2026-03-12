@@ -1,5 +1,6 @@
 """待办事项提取服务 — 从会议和聊天消息中AI提取待办。"""
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -14,6 +15,9 @@ from app.models.todo_item import TodoItem
 from app.services.llm import llm_client
 
 logger = logging.getLogger(__name__)
+
+# LLM 并发控制：最多同时 5 个请求，避免打爆 API
+_LLM_SEMAPHORE = asyncio.Semaphore(5)
 
 EXTRACT_TODO_PROMPT = """你是一个待办事项提取专家。当前用户姓名为「{user_name}」。
 请从以下文本中**仅提取明确分配给「{user_name}」的待办事项**。
@@ -80,6 +84,9 @@ async def extract_todos_from_communications(
     todos = []
     skipped_processed = 0
     skipped_no_content = 0
+
+    # 第一步：从 action_items 直接提取（无需 LLM，很快）
+    llm_tasks = []  # 收集需要 LLM 处理的记录
     for comm in comms:
         if comm.id in processed_source_ids:
             skipped_processed += 1
@@ -107,9 +114,31 @@ async def extract_todos_from_communications(
                         "source_text": task_text,
                     })
 
-        # LLM 补充提取（注入用户姓名）
+        # 收集需要 LLM 提取的记录（稍后并发处理）
         if comm.content_text and len(comm.content_text) > 50:
-            llm_todos = await _llm_extract(comm.content_text[:4000], user_name)
+            llm_tasks.append(comm)
+
+    # 第二步：并发调用 LLM 提取（限制并发数，避免打爆 API）
+    # 最多处理 20 条最新记录，避免总耗时超过 nginx 代理超时
+    if len(llm_tasks) > 20:
+        logger.info("待办提取: LLM 任务 %d 条，截取最新 20 条处理", len(llm_tasks))
+        llm_tasks = llm_tasks[:20]
+    if llm_tasks:
+        logger.info("待办提取: 需要 LLM 处理 %d 条记录，并发提取中...", len(llm_tasks))
+
+        async def _extract_one(comm):
+            async with _LLM_SEMAPHORE:
+                return comm, await _llm_extract(comm.content_text[:4000], user_name)
+
+        results = await asyncio.gather(
+            *[_extract_one(c) for c in llm_tasks],
+            return_exceptions=True,
+        )
+        for r in results:
+            if isinstance(r, Exception):
+                logger.warning("待办提取单条异常: %s", r)
+                continue
+            comm, llm_todos = r
             for t in llm_todos:
                 if not isinstance(t, dict) or not t.get("title"):
                     continue

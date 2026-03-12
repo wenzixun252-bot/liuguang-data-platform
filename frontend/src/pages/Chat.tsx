@@ -85,8 +85,8 @@ export default function Chat() {
     try {
       const res = await api.get('/reports', { params: { page: 1, page_size: 50 } })
       setReports(res.data.items || [])
-    } catch {
-      // 静默
+    } catch (err) {
+      console.error('fetchReports 失败:', err)
     }
     setReportsLoading(false)
   }, [])
@@ -122,7 +122,9 @@ export default function Chat() {
   }
 
   const handleReportCreated = () => {
-    fetchReports() // 刷新列表
+    // 立即刷新 + 延迟 1 秒再刷新，确保 DB 提交完成
+    fetchReports()
+    setTimeout(() => fetchReports(), 1000)
   }
 
   // ── 加载会话列表 ──────────────────────────────────────

@@ -33,6 +33,8 @@ from app.schemas.knowledge_graph import (
 )
 from app.services.kg_builder import build_knowledge_graph
 from app.services.kg_analyzer import run_full_analysis
+from app.services.leadership_analyzer import get_leadership_candidates, generate_insight
+from app.models.leadership_insight import LeadershipInsight
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +111,7 @@ async def _run_build_task(owner_id: str):
             )
 
             # 运行分析
-            _build_tasks[owner_id].update(progress=85, message="正在运行图谱分析...")
+            _build_tasks[owner_id].update(progress=80, message="正在运行图谱分析...")
             analysis_result = await run_full_analysis(db, owner_id, profile=profile)
             logger.info(
                 "图谱分析完成: %d communities, %d insights, %d risks",
@@ -119,11 +121,43 @@ async def _run_build_task(owner_id: str):
             )
             await _save_analysis(db, owner_id, analysis_result)
 
+            # 自动生成人物画像（为尚无画像的候选人生成）
+            _build_tasks[owner_id].update(progress=90, message="正在生成人物画像...")
+            personas_generated = 0
+            try:
+                candidates = await get_leadership_candidates(db, owner_id)
+                existing_result = await db.execute(
+                    select(LeadershipInsight.target_user_name).where(
+                        LeadershipInsight.analyst_user_id == owner_id,
+                    )
+                )
+                existing_names = {row[0] for row in existing_result.all()}
+
+                for c in candidates[:10]:  # 最多处理 10 个候选人
+                    if c["name"] not in existing_names:
+                        try:
+                            await generate_insight(
+                                db=db,
+                                analyst_user_id=owner_id,
+                                target_user_id=c.get("user_id", ""),
+                                target_user_name=c["name"],
+                            )
+                            personas_generated += 1
+                        except Exception as e:
+                            logger.warning("人物画像生成失败 (%s): %s", c["name"], e)
+                logger.info("人物画像生成完成: 新增 %d 个", personas_generated)
+            except Exception as e:
+                logger.warning("人物画像批量生成异常: %s", e)
+
             _build_tasks[owner_id] = {
                 "status": "done",
                 "progress": 100,
                 "message": "知识图谱生成完成",
-                "result": {"build": build_result, "analysis": analysis_result},
+                "result": {
+                    "build": build_result,
+                    "analysis": analysis_result,
+                    "personas_generated": personas_generated,
+                },
             }
 
     except asyncio.CancelledError:

@@ -1,5 +1,6 @@
 """日程管家 API — 日历事件获取、会前简报生成、提醒偏好管理。"""
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timedelta
@@ -214,55 +215,71 @@ async def get_calendar_events(
     return events
 
 
-# ── 2. 生成会前简报 (SSE) ─────────────────────────────────
+# ── 2. 生成会前简报（后台任务） ──────────────────────────────
 
-@router.post("/brief", summary="生成会前简报 (SSE)")
-async def generate_brief(
-    request: Request,
+# 内存中的简报任务字典：owner_id -> task state
+_brief_tasks: dict[str, dict] = {}
+
+
+async def _run_brief_task(
+    owner_id: str,
     body: BriefRequest,
-    current_user: Annotated[User, Depends(get_current_user)],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    visible_ids: list[str],
 ):
-    """根据日历事件生成 AI 会前准备简报，通过 SSE 流式返回。"""
-    owner_id = current_user.feishu_open_id
-    visible_ids = await get_visible_owner_ids(current_user, db, request)
+    """后台协程：收集上下文 + LLM 生成简报，结果写入 _brief_tasks。"""
+    task = _brief_tasks[owner_id]
+    try:
+        # 需要独立的 DB session（后台任务不能复用请求级 session）
+        from app.database import async_session
 
-    attendee_names = [a.name for a in body.attendees if a.name]
+        async with async_session() as db:
+            attendee_names = [a.name for a in body.attendees if a.name]
 
-    # 从会议主题中匹配标签
-    tag_query = body.summary + (" " + body.description if body.description else "")
-    matched_tags = await match_tags_from_query(tag_query, owner_id, db)
-    boost_tag_ids = [t.id for t in matched_tags] if matched_tags else None
+            task["message"] = "正在匹配标签..."
+            tag_query = body.summary + (" " + body.description if body.description else "")
+            matched_tags = await match_tags_from_query(tag_query, owner_id, db)
+            boost_tag_ids = [t.id for t in matched_tags] if matched_tags else None
 
-    # 收集上下文
-    context = await gather_meeting_context(
-        db=db,
-        owner_id=owner_id,
-        visible_ids=visible_ids,
-        event_summary=body.summary,
-        event_description=body.description,
-        attendee_names=attendee_names,
-        boost_tag_ids=boost_tag_ids,
-    )
+            task["message"] = "正在收集会议上下文..."
+            task["progress"] = 20
+            try:
+                context = await gather_meeting_context(
+                    db=db,
+                    owner_id=owner_id,
+                    visible_ids=visible_ids,
+                    event_summary=body.summary,
+                    event_description=body.description,
+                    attendee_names=attendee_names,
+                    boost_tag_ids=boost_tag_ids,
+                )
+            except Exception as e:
+                logger.error("收集会议上下文失败: %s", e, exc_info=True)
+                context = {
+                    "participant_profiles": "上下文收集失败",
+                    "historical_meetings": "上下文收集失败",
+                    "related_documents": "上下文收集失败",
+                    "pending_todos": "上下文收集失败",
+                    "related_chats": "上下文收集失败",
+                }
 
-    # 构建 prompt
-    system_prompt = build_brief_prompt(
-        event_summary=body.summary,
-        event_description=body.description,
-        start_time=body.start_time,
-        attendee_names=attendee_names,
-        context=context,
-    )
+            task["message"] = "正在生成简报..."
+            task["progress"] = 40
 
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": f"请为我的会议「{body.summary}」生成会前准备简报。"},
-    ]
+            system_prompt = build_brief_prompt(
+                event_summary=body.summary,
+                event_description=body.description,
+                start_time=body.start_time,
+                attendee_names=attendee_names,
+                context=context,
+            )
 
-    async def _event_generator():
-        client = _get_agent_client()
-        full_content = ""
-        try:
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"请为我的会议「{body.summary}」生成会前准备简报。"},
+            ]
+
+            client = _get_agent_client()
+            full_content = ""
             stream = await client.chat.completions.create(
                 model=settings.agent_llm_model,
                 messages=messages,
@@ -272,51 +289,85 @@ async def generate_brief(
                 if not chunk.choices:
                     continue
                 delta = chunk.choices[0].delta
-                if not delta:
+                if not delta or not delta.content:
                     continue
-                if delta.content:
-                    full_content += delta.content
-                    data = json.dumps({"type": "content", "content": delta.content}, ensure_ascii=False)
-                    yield f"data: {data}\n\n"
+                full_content += delta.content
+                # 实时更新 content 以便前端轮询时能看到进度
+                task["content"] = full_content
+                # 根据内容长度粗略更新进度 40->95
+                progress = min(40 + len(full_content) // 20, 95)
+                task["progress"] = progress
+                task["message"] = "正在生成简报..."
 
-            yield "data: [DONE]\n\n"
+            task["status"] = "done"
+            task["progress"] = 100
+            task["message"] = "简报已生成"
+            task["content"] = full_content
 
-            # 保存到会话（如果指定了 conversation_id）
-            if body.conversation_id and full_content:
-                try:
-                    result = await db.execute(
-                        select(Conversation).where(
-                            Conversation.id == body.conversation_id,
-                            Conversation.owner_id == owner_id,
-                        )
-                    )
-                    conv = result.scalar_one_or_none()
-                    if conv:
-                        db.add(ConversationMessage(
-                            conversation_id=body.conversation_id,
-                            role="user",
-                            content=f"为会议「{body.summary}」生成会前简报",
-                        ))
-                        db.add(ConversationMessage(
-                            conversation_id=body.conversation_id,
-                            role="assistant",
-                            content=full_content,
-                        ))
-                        await db.commit()
-                except Exception as e:
-                    logger.warning("保存简报到会话失败: %s", e)
+    except asyncio.CancelledError:
+        task["status"] = "cancelled"
+        task["message"] = "已取消"
+    except Exception as e:
+        logger.error("生成会前简报异常: %s", e, exc_info=True)
+        task["status"] = "error"
+        task["progress"] = 100
+        task["message"] = f"生成失败: {e}"
 
-        except Exception as e:
-            logger.error("生成会前简报异常: %s", e, exc_info=True)
-            data = json.dumps({"type": "error", "content": "生成简报时出错，请稍后重试"}, ensure_ascii=False)
-            yield f"data: {data}\n\n"
-            yield "data: [DONE]\n\n"
 
-    return StreamingResponse(
-        _event_generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+@router.post("/brief", summary="启动会前简报生成（后台任务）")
+async def generate_brief(
+    request: Request,
+    body: BriefRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """启动后台任务生成会前简报，立即返回。前端通过 /brief/status 轮询进度。"""
+    owner_id = current_user.feishu_open_id
+    visible_ids = await get_visible_owner_ids(current_user, db, request)
+
+    # 如果已有正在运行的任务，取消旧的
+    existing = _brief_tasks.get(owner_id)
+    if existing and existing.get("status") == "running" and existing.get("_asyncio_task"):
+        existing["_asyncio_task"].cancel()
+
+    # 初始化任务状态
+    _brief_tasks[owner_id] = {
+        "status": "running",
+        "progress": 0,
+        "message": "准备中...",
+        "content": "",
+        "event_id": body.event_id,
+        "event_summary": body.summary,
+    }
+
+    # 启动后台协程
+    asyncio_task = asyncio.create_task(
+        _run_brief_task(owner_id, body, visible_ids)
     )
+    _brief_tasks[owner_id]["_asyncio_task"] = asyncio_task
+
+    return {"status": "running", "message": "简报生成已启动"}
+
+
+@router.get("/brief/status", summary="查询简报生成进度")
+async def get_brief_status(
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    """轮询简报生成任务的进度和内容。"""
+    owner_id = current_user.feishu_open_id
+    task = _brief_tasks.get(owner_id)
+
+    if not task:
+        return {"status": "idle", "progress": 0, "message": "", "content": ""}
+
+    return {
+        "status": task["status"],
+        "progress": task["progress"],
+        "message": task["message"],
+        "content": task.get("content", ""),
+        "event_id": task.get("event_id", ""),
+        "event_summary": task.get("event_summary", ""),
+    }
 
 
 # ── 3. 简报追问 (SSE) ────────────────────────────────────

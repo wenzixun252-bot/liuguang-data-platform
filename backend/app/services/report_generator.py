@@ -14,7 +14,7 @@ from app.models.communication import Communication
 from app.models.document import Document
 from app.models.report import Report, ReportTemplate
 from app.models.user import User
-from app.services.llm import llm_client
+from app.services.llm import create_openai_client, llm_client
 
 logger = logging.getLogger(__name__)
 
@@ -469,7 +469,12 @@ async def generate_report(
     await db.refresh(report)
 
     try:
-        response = await llm_client.chat_client.chat.completions.create(
+        agent_client = create_openai_client(
+            api_key=settings.agent_llm_api_key,
+            base_url=settings.agent_llm_base_url,
+            timeout=120.0,
+        )
+        response = await agent_client.chat.completions.create(
             model=settings.agent_llm_model,
             messages=[
                 {"role": "system", "content": REPORT_SYSTEM_PROMPT},
@@ -529,7 +534,12 @@ async def _background_generate(
             }
             await db.commit()
 
-            response = await llm_client.chat_client.chat.completions.create(
+            agent_client = create_openai_client(
+                api_key=settings.agent_llm_api_key,
+                base_url=settings.agent_llm_base_url,
+                timeout=120.0,
+            )
+            response = await agent_client.chat.completions.create(
                 model=settings.agent_llm_model,
                 messages=[
                     {"role": "system", "content": REPORT_SYSTEM_PROMPT},

@@ -2,12 +2,13 @@
 
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, and_, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
@@ -123,6 +124,8 @@ async def create_report_stream(
     )
 
     # ── 2. generator 只负责 LLM 流式 + 保存结果 ──
+    from app.database import async_session as _async_session
+
     async def _event_generator():
         # 先发送 report_id
         yield f"data: {json.dumps({'type': 'report_id', 'id': report.id}, ensure_ascii=False)}\n\n"
@@ -153,16 +156,30 @@ async def create_report_stream(
                     data = json.dumps({"type": "content", "content": delta.content}, ensure_ascii=False)
                     yield f"data: {data}\n\n"
 
-            report.content_markdown = "".join(full_content)
-            report.status = "completed"
-            await db.commit()
+            # 用独立 session 保存，避免原 session 在长时间流式后过期
+            async with _async_session() as save_db:
+                from sqlalchemy import update as sa_update
+                await save_db.execute(
+                    sa_update(Report).where(Report.id == report.id).values(
+                        content_markdown="".join(full_content),
+                        status="completed",
+                    )
+                )
+                await save_db.commit()
 
             yield f"data: {json.dumps({'type': 'done', 'report_id': report.id}, ensure_ascii=False)}\n\n"
         except Exception as e:
             logger.error("流式报告生成失败: %s", e, exc_info=True)
-            report.status = "failed"
             try:
-                await db.commit()
+                async with _async_session() as save_db:
+                    from sqlalchemy import update as sa_update
+                    await save_db.execute(
+                        sa_update(Report).where(Report.id == report.id).values(
+                            status="failed",
+                            content_markdown=f"生成失败: {e}",
+                        )
+                    )
+                    await save_db.commit()
             except Exception:
                 logger.warning("保存报告失败状态时 DB 异常")
             err = json.dumps({"type": "error", "content": str(e)}, ensure_ascii=False)
@@ -210,6 +227,20 @@ async def list_reports(
     status: str | None = Query(None),
 ):
     """获取用户的报告列表。"""
+    # 自动清理卡住的报告：超过 10 分钟还在 generating 的标记为 failed
+    # 数据库 created_at 是 TIMESTAMP WITHOUT TIME ZONE（naive UTC），必须用 naive datetime 比较
+    stale_cutoff = datetime.utcnow() - timedelta(minutes=10)
+    await db.execute(
+        update(Report)
+        .where(
+            Report.owner_id == current_user.feishu_open_id,
+            Report.status == "generating",
+            Report.created_at < stale_cutoff,
+        )
+        .values(status="failed", content_markdown="生成超时，请重试")
+    )
+    await db.commit()
+
     conditions = [Report.owner_id == current_user.feishu_open_id]
 
     if search:
