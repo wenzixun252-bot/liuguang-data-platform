@@ -550,7 +550,7 @@ export default function StructuredTables() {
               onClick={() => navigate('/data-import')}
               className="mt-2 text-indigo-600 hover:text-indigo-700 text-sm font-medium"
             >
-              前往数据导入
+              前往数据归档
             </button>
           </div>
         )}

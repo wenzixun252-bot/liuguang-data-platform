@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Sparkles,
   Loader2,
@@ -54,6 +55,7 @@ const DIMENSION_LABELS: Record<string, string> = {
 }
 
 export default function LeadershipInsight() {
+  const navigate = useNavigate()
   const [candidates, setCandidates] = useState<Candidate[]>([])
   const [insights, setInsights] = useState<InsightItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -232,7 +234,14 @@ export default function LeadershipInsight() {
         <h2 className="text-lg font-semibold text-gray-700 mb-3">选择分析对象</h2>
         {candidates.length === 0 ? (
           <div className="bg-white rounded-xl shadow-sm p-8 text-center text-gray-400">
-            暂无可分析的对象，请先导入数据
+            <p>暂无可分析的对象</p>
+            <button
+              type="button"
+              onClick={() => navigate('/data-import')}
+              className="mt-2 text-indigo-600 hover:text-indigo-700 text-sm font-medium"
+            >
+              前往数据归档
+            </button>
           </div>
         ) : (
           <>

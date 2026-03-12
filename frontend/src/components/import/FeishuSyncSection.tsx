@@ -74,7 +74,7 @@ function SyncStatusBadge({ status, syncing }: { status: string | null; syncing: 
 const RECIPE_CONFIGS = {
   meeting: {
     title: '会议纪要导入配置',
-    recipeUrl: 'https://recipes.feishu.cn/recipe?template_id=32',
+    recipeUrl: 'https://recipes.feishu.cn/recipe?template_id=36&ref=share',
     assetType: 'communication' as const,
     recipeKeywords: ['会议纪要', '会议记录', 'Meeting', '会议摘要', '会议'] as string[],
     discoverKeywords: ['会议'] as string[],
@@ -91,7 +91,7 @@ const RECIPE_CONFIGS = {
   },
   chat: {
     title: '群聊摘要导入配置',
-    recipeUrl: 'https://recipes.feishu.cn/recipe?template_id=36&ref=share',
+    recipeUrl: 'https://recipes.feishu.cn/recipe?template_id=32',
     assetType: 'communication' as const,
     recipeKeywords: ['群聊摘要', '消息汇总', 'Chat', '聊天记录', '群消息', '会话'] as string[],
     discoverKeywords: ['会话', '群聊', '消息'] as string[],

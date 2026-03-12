@@ -444,7 +444,9 @@ function CreateReportModal({
             {/* 可选列表 */}
             <div className="border border-gray-200 rounded-lg max-h-40 overflow-y-auto">
               {readerOptions.length === 0 ? (
-                <div className="p-3 text-xs text-gray-400 text-center">暂无候选人，请先导入数据</div>
+                <div className="p-3 text-xs text-gray-400 text-center">
+                  暂无候选人，<button type="button" onClick={() => navigate('/data-import')} className="text-indigo-600 hover:text-indigo-700 font-medium">前往数据归档</button>
+                </div>
               ) : (
                 readerOptions.map((r) => {
                   const isSelected = selectedReaders.includes(r.name)

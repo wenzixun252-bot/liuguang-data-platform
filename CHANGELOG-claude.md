@@ -441,3 +441,9 @@
 - **2026-03-12 09:51:25** [前端页面] `frontend/src/pages/CalendarAssistant.tsx` — 新增 detail, pollBriefProgress；移除 raw, parsed, decoder, lines
 - **2026-03-12 09:51:33** [前端页面] `frontend/src/pages/CalendarAssistant.tsx` — 修改逻辑 (+16/-1行)
 - **2026-03-12 09:51:50** [前端页面] `frontend/src/pages/CalendarAssistant.tsx` — 新增 6 行代码
+- **2026-03-12 10:50:40** [前端页面] `frontend/src/pages/LeadershipInsight.tsx` — 添加依赖引用
+- **2026-03-12 10:50:56** [前端页面] `frontend/src/pages/LeadershipInsight.tsx` — 新增 navigate
+- **2026-03-12 10:50:57** [前端页面] `frontend/src/pages/LeadershipInsight.tsx` — 修改逻辑 (+8/-1行)
+- **2026-03-12 10:51:08** [前端页面] `frontend/src/pages/Reports.tsx` — 修改逻辑 (+3/-1行)
+- **2026-03-12 11:06:28** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-12 11:06:35** [前端组件] `frontend/src/components/import/FeishuSyncSection.tsx` — 修改逻辑 (+1/-1行)

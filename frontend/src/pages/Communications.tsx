@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { Search, ChevronLeft, ChevronRight, X, Clock, MapPin, Users, Paperclip, ExternalLink, Download, Image, FileText, Trash2, MessageSquare, Video, Mic, Table2 } from 'lucide-react'
 import api, { getExtractionRules } from '../lib/api'
 import toast from 'react-hot-toast'
@@ -143,6 +143,7 @@ function CommTypeBadge({ type }: { type: string }) {
 
 // ─── 主组件 ────────────────────────────────────────────────
 export default function Communications() {
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const [data, setData] = useState<CommunicationListResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -506,7 +507,16 @@ export default function Communications() {
             )}
           </>
         ) : (
-          <div className="p-12 text-center text-gray-400">暂无沟通记录</div>
+          <div className="p-12 text-center text-gray-400">
+            <p>暂无沟通记录</p>
+            <button
+              type="button"
+              onClick={() => navigate('/data-import')}
+              className="mt-2 text-indigo-600 hover:text-indigo-700 text-sm font-medium"
+            >
+              前往数据归档
+            </button>
+          </div>
         )}
       </div>
 

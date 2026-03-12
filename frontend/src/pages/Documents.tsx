@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import { Search, ChevronLeft, ChevronRight, X, Paperclip, ExternalLink, Download, Image, User, Trash2, Table2 } from 'lucide-react'
 import api, { getExtractionRules } from '../lib/api'
 import toast from 'react-hot-toast'
@@ -93,6 +93,7 @@ function getSourceLabel(item: { source_type: string; source_platform: string | n
 }
 
 export default function Documents() {
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const [data, setData] = useState<DocumentListResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -466,7 +467,16 @@ export default function Documents() {
             )}
           </>
         ) : (
-          <div className="p-12 text-center text-gray-400">暂无文档数据，点击上方按钮导入</div>
+          <div className="p-12 text-center text-gray-400">
+            <p>暂无文档数据</p>
+            <button
+              type="button"
+              onClick={() => navigate('/data-import')}
+              className="mt-2 text-indigo-600 hover:text-indigo-700 text-sm font-medium"
+            >
+              前往数据归档
+            </button>
+          </div>
         )}
       </div>
 
