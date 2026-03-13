@@ -35,8 +35,8 @@ class CommunicationOut(BaseModel):
     content_text: str
     summary: str | None = None
     source_url: str | None = None
+    asset_owner_name: str | None = None
     uploader_name: str | None = None
-    uploaded_by: str | None = None
     keywords: list = []
     sentiment: str | None = None
     quality_score: float | None = None

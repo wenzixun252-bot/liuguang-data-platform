@@ -4,6 +4,8 @@ import asyncio
 import io
 import json
 import logging
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
@@ -52,32 +54,49 @@ SOURCE_TABLE_LABELS = {
 }
 
 
-QUERY_REWRITE_PROMPT = """请将用户的口语化问题改写为更适合搜索的关键词查询。
+QUERY_REWRITE_PROMPT = """请将用户的口语化问题改写为更适合搜索的关键词查询，并识别时间范围。
 今天是 {today}（{weekday}）。
+
 要求：
 1. 提取核心意图和关键词
 2. 去掉口语化表达（如"那个"、"来着"、"啥"）
 3. 补充可能的同义词
-4. 如果用户提到时间相关词（如"最近"、"本周"、"上周"），请换算成具体日期范围
-5. 只输出改写后的查询文本，不要解释
+4. 如果用户提到时间相关词（如"最近"、"本周"、"上周"、"这个月"），请换算成具体日期范围
+5. "本周"指本周一到本周日，"上周"指上周一到上周日，"最近"默认为最近7天，"这个月"指本月1日到月末
+6. 严格输出以下 JSON 格式，不要输出其他任何内容：
 
-用户问题：{question}
-改写查询："""
+{{"query": "改写后的搜索关键词", "time_start": "YYYY-MM-DD 或 null", "time_end": "YYYY-MM-DD 或 null"}}
+
+示例：
+- 用户问"总结我本周的工作" -> {{"query": "工作总结 会议 文档", "time_start": "2026-03-09", "time_end": "2026-03-15"}}
+- 用户问"RAG怎么实现的" -> {{"query": "RAG 实现 检索增强生成", "time_start": null, "time_end": null}}
+
+用户问题：{question}"""
 
 
-async def _rewrite_query(question: str) -> str:
-    """用 LLM 将口语化问题改写为精准搜索查询。"""
+@dataclass
+class RewriteResult:
+    """查询改写结果：包含改写后的查询文本和可选的时间范围。"""
+    query: str
+    time_start: datetime | None = None
+    time_end: datetime | None = None
+
+
+async def _rewrite_query(question: str) -> RewriteResult:
+    """用 LLM 将口语化问题改写为精准搜索查询，同时提取时间范围。"""
+    import json as _json
+
     # 如果问题已经很简短明确（少于 10 个字且无口语词和时间词），直接返回
     casual_markers = ["吗", "呢", "啥", "来着", "那个", "怎么", "什么时候", "有没有"]
-    time_markers = ["最近", "本周", "上周", "这周", "这个月", "上个月", "今天", "昨天", "前天"]
+    time_markers = ["最近", "本周", "上周", "这周", "这个月", "上个月", "今天", "昨天", "前天",
+                    "本月", "上月", "近期", "这段时间", "过去", "之前", "以来"]
     if len(question) < 10 and not any(m in question for m in casual_markers) and not any(m in question for m in time_markers):
-        return question
+        return RewriteResult(query=question)
 
     try:
         from datetime import date
         today = date.today()
         weekday = _WEEKDAY_CN[today.weekday()]
-        # 查询改写用快模型，不需要强模型
         from app.services.llm import llm_client
         response = await llm_client.chat_client.chat.completions.create(
             model=settings.llm_model,
@@ -85,16 +104,38 @@ async def _rewrite_query(question: str) -> str:
                 question=question, today=today.isoformat(), weekday=weekday,
             )}],
             temperature=0.0,
-            max_tokens=100,
+            max_tokens=200,
         )
-        rewritten = response.choices[0].message.content.strip()
-        if rewritten:
-            logger.info("查询改写: '%s' -> '%s'", question, rewritten)
-            return rewritten
+        raw = response.choices[0].message.content.strip()
+        # 尝试从返回中提取 JSON（兼容 LLM 可能添加 ```json 包裹的情况）
+        json_str = raw
+        if "```" in raw:
+            import re
+            m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL)
+            if m:
+                json_str = m.group(1)
+        parsed = _json.loads(json_str)
+
+        query = parsed.get("query") or question
+        time_start = None
+        time_end = None
+        if parsed.get("time_start"):
+            time_start = datetime.strptime(parsed["time_start"], "%Y-%m-%d")
+        if parsed.get("time_end"):
+            # 将 time_end 设为当天的 23:59:59，确保包含整天
+            time_end = datetime.strptime(parsed["time_end"], "%Y-%m-%d").replace(
+                hour=23, minute=59, second=59,
+            )
+
+        logger.info(
+            "查询改写: '%s' -> query='%s', time_start=%s, time_end=%s",
+            question, query, time_start, time_end,
+        )
+        return RewriteResult(query=query, time_start=time_start, time_end=time_end)
     except Exception as e:
         logger.warning("查询改写失败，使用原始问题: %s", e)
 
-    return question
+    return RewriteResult(query=question)
 
 
 def _build_context(
@@ -132,7 +173,15 @@ def _build_context(
         if r.matched_tags:
             tag_marker = f" ★ 关联标签: {', '.join(r.matched_tags)}"
         key_info_text = format_key_info(r.key_info)
-        parts.append(f"[{i}] 类型: {label}{tag_marker}\n标题: {title}\nID: {r.source_table}:{r.id}\n内容: {r.content_text[:1500]}{key_info_text}")
+        # 时间信息
+        time_str = ""
+        if r.effective_time:
+            time_str = f"\n时间: {r.effective_time.strftime('%Y-%m-%d %H:%M')}"
+        # 资产所有者（仅文档）
+        owner_str = ""
+        if r.asset_owner_name:
+            owner_str = f"\n资产所有者: {r.asset_owner_name}"
+        parts.append(f"[{i}] 类型: {label}{tag_marker}\n标题: {title}{time_str}{owner_str}\nID: {r.source_table}:{r.id}\n内容: {r.content_text[:1500]}{key_info_text}")
     if attachment_context:
         parts.append(f"\n## 用户上传附件内容\n{attachment_context[:2000]}")
     return "\n\n".join(parts) if parts else "（未检索到相关数据）"
@@ -229,13 +278,14 @@ async def chat_stream(
     tag_task = asyncio.create_task(
         match_tags_from_query(body.question, current_user.feishu_open_id, db)
     )
-    search_query, graph_result, matched_tags = await asyncio.gather(
+    rewrite_result, graph_result, matched_tags = await asyncio.gather(
         search_query_task, graph_task, tag_task,
     )
     graph_source_ids, domain_labels = graph_result
     _timing_lines.append(
         f"[TIMING] rewrite+graph_rag+tag_match: {_time.time() - _t1:.1f}s "
-        f"(query='{search_query[:50]}', tags={[t.name for t in matched_tags]}, domains={domain_labels})"
+        f"(query='{rewrite_result.query[:50]}', time={rewrite_result.time_start}~{rewrite_result.time_end}, "
+        f"tags={[t.name for t in matched_tags]}, domains={domain_labels})"
     )
 
     # 合并 Graph-RAG 结果到 source_ids
@@ -248,12 +298,15 @@ async def chat_stream(
 
     _t2 = _time.time()
     results = await hybrid_searcher.search(
-        query_text=search_query,
+        query_text=rewrite_result.query,
         visible_ids=visible_ids,
         db=db,
         source_tables=body.source_tables,
         source_ids=merged_source_ids if merged_source_ids else None,
         boost_tag_ids=boost_tag_ids,
+        time_start=rewrite_result.time_start,
+        time_end=rewrite_result.time_end,
+        current_user_name=current_user.name,
     )
     _timing_lines.append(f"[TIMING] hybrid_search: {_time.time() - _t2:.1f}s ({len(results)} results)")
 
@@ -337,7 +390,7 @@ async def chat_ask(
     visible_ids = await get_visible_owner_ids(current_user, db, request)
 
     # 查询改写 + Graph-RAG + 标签匹配 并行
-    search_query, graph_result, matched_tags = await asyncio.gather(
+    rewrite_result, graph_result, matched_tags = await asyncio.gather(
         _rewrite_query(body.question),
         graph_rag_enhancer.enhance_search(body.question, current_user.feishu_open_id, db),
         match_tags_from_query(body.question, current_user.feishu_open_id, db),
@@ -350,12 +403,15 @@ async def chat_ask(
     boost_tag_ids = [t.id for t in matched_tags] if matched_tags else None
 
     results = await hybrid_searcher.search(
-        query_text=search_query,
+        query_text=rewrite_result.query,
         visible_ids=visible_ids,
         db=db,
         source_tables=body.source_tables,
         source_ids=merged_source_ids if merged_source_ids else None,
         boost_tag_ids=boost_tag_ids,
+        time_start=rewrite_result.time_start,
+        time_end=rewrite_result.time_end,
+        current_user_name=current_user.name,
     )
 
     context = _build_context(results, body.attachment_context, matched_tags, domain_labels)

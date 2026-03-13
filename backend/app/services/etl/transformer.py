@@ -57,8 +57,7 @@ class TransformedDocument:
     author: str | None = None
     source_url: str | None = None
     source_platform: str | None = None
-    uploader_name: str | None = None
-    uploaded_by: str | None = None
+    asset_owner_name: str | None = None  # 飞书资产所有人名字
     extra_fields: dict = field(default_factory=dict)
     attachments: list = field(default_factory=list)
     feishu_created_at: datetime | None = None
@@ -103,8 +102,7 @@ class TransformedCommunication:
     summary: str | None = None
     source_url: str | None = None
     source_platform: str | None = None
-    uploader_name: str | None = None
-    uploaded_by: str | None = None
+    asset_owner_name: str | None = None  # 飞书资产所有人名字
     extra_fields: dict = field(default_factory=dict)
     attachments: list = field(default_factory=list)
     feishu_created_at: datetime | None = None
@@ -276,6 +274,17 @@ class DataTransformer:
                 record.summary = record.summary or record.content_text[:100]
                 record.keywords = record.keywords or []
                 # sentiment 保留已有值（会话表源数据已有）
+
+                # 标题像文件名时，用 LLM 从内容生成有意义的标题
+                from app.services.llm import looks_like_filename
+                if hasattr(record, "title") and looks_like_filename(record.title):
+                    try:
+                        from app.services.llm import llm_client as _llm
+                        generated = await _llm.generate_title_from_content(record.content_text)
+                        if generated:
+                            record.title = generated
+                    except Exception as e_title:
+                        logger.warning("LLM 生成标题失败 (record=%s): %s", record.feishu_record_id, e_title)
             else:
                 enrich_result = await content_enricher.enrich(
                     record.content_text,
@@ -287,6 +296,17 @@ class DataTransformer:
                 record.sentiment = enrich_result.sentiment
                 if hasattr(record, "doc_category") and enrich_result.doc_category:
                     record.doc_category = enrich_result.doc_category
+
+                # 标题像文件名时，用 LLM 从内容生成有意义的标题
+                from app.services.llm import looks_like_filename
+                if hasattr(record, "title") and looks_like_filename(record.title):
+                    try:
+                        from app.services.llm import llm_client as _llm
+                        generated = await _llm.generate_title_from_content(record.content_text)
+                        if generated:
+                            record.title = generated
+                    except Exception as e_title:
+                        logger.warning("LLM 生成标题失败 (record=%s): %s", getattr(record, "feishu_record_id", "?"), e_title)
 
             # ── Step 3: 程序后处理 ──
             # 硬编码路径已从源表获取 quality_score，保留不覆盖

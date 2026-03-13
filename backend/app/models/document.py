@@ -46,6 +46,7 @@ class Document(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    # owner_id: 实际含义是"导入人/数据归属人"的 feishu_open_id，用于行级权限控制(RLS)，而非资产所有人
     owner_id: Mapped[str] = mapped_column(String(64), nullable=False)
     source_type: Mapped[str] = mapped_column(String(16), nullable=False)
     doc_category: Mapped[str | None] = mapped_column(String(32))
@@ -62,8 +63,7 @@ class Document(Base):
     file_size: Mapped[int | None] = mapped_column(Integer)
     file_path: Mapped[str | None] = mapped_column(String(1024))
     source_url: Mapped[str | None] = mapped_column(String(1024))
-    uploader_name: Mapped[str | None] = mapped_column(String(256))
-    uploaded_by: Mapped[str | None] = mapped_column(String(256))
+    asset_owner_name: Mapped[str | None] = mapped_column(String(256))  # 飞书资产所有人名字（文档/表格的原始创建者）
     content_vector = mapped_column(Vector(settings.embedding_dimension), nullable=True)
     # -- LLM 提取的统一字段 --
     keywords: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="[]")

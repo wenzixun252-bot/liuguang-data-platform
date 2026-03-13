@@ -16,7 +16,7 @@ export function useColumnSettings(storageKey: string, columns: ColumnDef[]) {
 
   const buildVisible = () => {
     const allKeys = new Set(columns.map((c) => c.key))
-    const defaults = new Set(columns.filter((c) => c.defaultVisible !== false).map((c) => c.key))
+    const defaults = new Set(columns.map((c) => c.key))
     try {
       const saved = localStorage.getItem(lsKey)
       if (saved) {

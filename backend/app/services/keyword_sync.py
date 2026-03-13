@@ -27,7 +27,7 @@ async def sync_single_rule(
     rule: KeywordSyncRule,
     db: AsyncSession,
     user_access_token: str,
-    uploader_name: str | None = None,
+    asset_owner_name: str | None = None,
 ) -> KeywordSyncResult:
     """执行单条关键词规则的同步。
 
@@ -61,7 +61,6 @@ async def sync_single_rule(
         owner_id=rule.owner_id,
         db=db,
         user_access_token=user_access_token,
-        uploader_name=uploader_name,
         tag_ids=tag_ids,
     )
 
@@ -84,7 +83,7 @@ async def sync_all_keyword_rules(
     owner_id: str,
     db: AsyncSession,
     user_access_token: str,
-    uploader_name: str | None = None,
+    asset_owner_name: str | None = None,
 ) -> list[KeywordSyncResult]:
     """同步该用户所有启用的关键词规则。"""
     stmt = select(KeywordSyncRule).where(
@@ -100,7 +99,7 @@ async def sync_all_keyword_rules(
 
     results: list[KeywordSyncResult] = []
     for rule in rules:
-        sync_result = await sync_single_rule(rule, db, user_access_token, uploader_name)
+        sync_result = await sync_single_rule(rule, db, user_access_token, asset_owner_name)
         results.append(sync_result)
         logger.info(
             "关键词「%s」: 匹配 %d, 导入 %d, 跳过 %d, 失败 %d",

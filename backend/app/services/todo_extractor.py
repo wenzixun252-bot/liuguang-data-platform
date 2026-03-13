@@ -49,11 +49,15 @@ async def extract_todos_from_communications(
     """从沟通记录（会议 + 会话）中提取待办，只提取分配给当前用户的。"""
     since = datetime.utcnow() - timedelta(days=days)
 
+    # 按会议时间/发送时间过滤，而不是入库时间
+    from sqlalchemy import func
+    eff_time = func.coalesce(Communication.comm_time, Communication.created_at)
+
     result = await db.execute(
         select(Communication).where(
             and_(
                 Communication.owner_id == owner_id,
-                Communication.created_at >= since,
+                eff_time >= since,
             )
         ).order_by(Communication.comm_time.desc().nullslast()).limit(200)
     )
@@ -115,7 +119,8 @@ async def extract_todos_from_communications(
                     })
 
         # 收集需要 LLM 提取的记录（稍后并发处理）
-        if comm.content_text and len(comm.content_text) > 50:
+        # 中文信息密度高，10个中文字符即可表达完整任务指派
+        if comm.content_text and len(comm.content_text) > 10:
             llm_tasks.append(comm)
 
     # 第二步：并发调用 LLM 提取（限制并发数，避免打爆 API）

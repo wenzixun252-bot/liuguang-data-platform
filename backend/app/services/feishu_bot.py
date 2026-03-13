@@ -39,18 +39,14 @@ RE_URL = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 
 # 资产类型的中文标签
 ASSET_TYPE_LABELS = {
-    "document": "文档",
-    "comm_meeting": "沟通记录 - 会议",
-    "comm_chat": "沟通记录 - 聊天",
-    "comm_recording": "沟通记录 - 录音/音频",
-    "structured": "结构化表格",
+    "document": "文档文字",
+    "comm_recording": "会议录音",
+    "structured": "表格",
 }
 
 # 资产类型对应的前端页面
 ASSET_PAGE_MAP = {
     "document": "/documents",
-    "comm_meeting": "/communications",
-    "comm_chat": "/communications",
     "comm_recording": "/communications",
     "structured": "/structured-tables",
 }
@@ -275,7 +271,7 @@ class FeishuBotService:
                 task.llm_reason = llm_reason
                 await db.commit()
 
-                # ── Step 3: 获取 user_access_token（云文档/多维表格需要）──
+                # ── Step 3: 获取 user_access_token（飞书链接需要）──
                 user_token = None
                 if input_type in ("cloud_doc", "bitable"):
                     user_token = await self._get_user_access_token(user, db)
@@ -286,9 +282,17 @@ class FeishuBotService:
                         await self._reply_text(open_id, self._LOGIN_GUIDE)
                         return
 
+                # ── Step 3.5: 查询飞书文档真实所有者名字（用于 asset_owner_name）──
+                asset_owner = user.name  # 默认：发消息的人自己
+                if input_type in ("cloud_doc", "bitable") and user_token:
+                    _, asset_owner = await self._resolve_doc_owner(
+                        raw, input_type, user_token, db, owner_id, user.name,
+                    )
+
                 # ── Step 4: 执行入库 ──
+                # owner_id = 发消息的人（用于RLS权限），asset_owner_name = 飞书资产所有人
                 result_msg, record_id, record_type = await self._do_ingest(
-                    raw, input_type, asset_type, owner_id, db, user.name,
+                    raw, input_type, asset_type, owner_id, db, asset_owner,
                     user_access_token=user_token,
                 )
 
@@ -298,11 +302,39 @@ class FeishuBotService:
                 task.result_message = result_msg
                 await db.commit()
 
+                # ── Step 4.5: 自动打标签（硬性规定：必须至少一个标签）──
+                if record_id and record_type:
+                    try:
+                        from app.services.llm import auto_tag_content, _force_apply_other_tag
+                        # 从数据库读取实际内容（raw 中可能无完整文本）
+                        content_text = await self._get_record_content(db, record_id, record_type)
+                        if not content_text:
+                            content_text = raw.get("text", "") or raw.get("preview", "")
+                        tagged = await auto_tag_content(db, record_id, record_type, content_text[:2000], owner_id)
+                        if tagged:
+                            await db.commit()
+                        else:
+                            # 硬性保底
+                            from sqlalchemy import text as sql_text
+                            check = await db.execute(
+                                sql_text("SELECT COUNT(*) FROM content_tags WHERE content_type = :ct AND content_id = :cid"),
+                                {"ct": record_type, "cid": record_id},
+                            )
+                            if (check.scalar() or 0) == 0:
+                                await _force_apply_other_tag(db, record_id, record_type, owner_id)
+                                await db.commit()
+                                logger.warning("机器人入库硬性保底: %s id=%d 无标签, 已强制打上「其他」", record_type, record_id)
+                    except Exception as e:
+                        logger.warning("自动打标签失败: %s", e)
+
             # ── Step 5: 发送结果卡片 ──
-            # 根据实际入库结果修正显示的 asset_type
+            # 根据实际入库结果修正显示的 asset_type 和 input_type
             actual_asset = asset_type
+            actual_input_type = input_type
             if record_type == "structured_table":
                 actual_asset = "structured"
+                actual_input_type = "bitable"
+                llm_reason = "多维表格链接自动入库为表格"
             elif record_type == "document":
                 actual_asset = "document"
             elif record_type == "communication":
@@ -322,7 +354,7 @@ class FeishuBotService:
 
             card = self._build_result_card(
                 task_id=task_id,
-                input_type=input_type,
+                input_type=actual_input_type,
                 preview=raw.get("preview", ""),
                 asset_type=actual_asset,
                 llm_reason=llm_reason,
@@ -378,7 +410,13 @@ class FeishuBotService:
         elif input_type == "bitable":
             fixed_asset = ("structured", "多维表格链接自动入库为结构化表格")
         elif input_type == "cloud_doc":
-            fixed_asset = ("document", "云文档链接自动入库为文档")
+            # 标题含会议纪要相关关键词时，默认入库为会议录音
+            doc_hint = raw.get("text", "") + " " + raw.get("preview", "")
+            _meeting_kws = ("文字记录", "智能纪要", "会议纪要", "会议记录", "会议录音")
+            if any(kw in doc_hint for kw in _meeting_kws):
+                fixed_asset = ("comm_recording", "文档标题含会议纪要关键词，自动入库为会议录音")
+            else:
+                fixed_asset = ("document", "云文档链接自动入库为文档文字")
         else:
             file_name = raw.get("file_name", "")
             file_ext = file_name.rsplit(".", 1)[-1].lower() if "." in file_name else ""
@@ -436,7 +474,7 @@ class FeishuBotService:
 
     async def _do_ingest(
         self, raw: dict, input_type: str, asset_type: str,
-        owner_id: str, db: AsyncSession, uploader_name: str | None,
+        owner_id: str, db: AsyncSession, asset_owner_name: str | None,
         user_access_token: str | None = None,
     ) -> tuple[str, int | None, str | None]:
         """执行实际入库操作。
@@ -445,32 +483,33 @@ class FeishuBotService:
         """
         if input_type == "text":
             return await self._ingest_text(
-                raw.get("text", ""), owner_id, db, asset_type, uploader_name
+                raw.get("text", ""), owner_id, db, asset_type, asset_owner_name
             )
         elif input_type == "file":
             return await self._ingest_file(
                 raw.get("file_key", ""),
                 raw.get("file_name", "未命名文件"),
-                owner_id, db, asset_type, uploader_name,
+                owner_id, db, asset_type, asset_owner_name,
                 is_image=raw.get("is_image", False),
                 message_id=raw.get("message_id", ""),
             )
         elif input_type == "cloud_doc":
             return await self._ingest_cloud_doc(
-                raw.get("doc_token", ""), owner_id, db, uploader_name,
+                raw.get("doc_token", ""), owner_id, db, asset_owner_name,
                 user_access_token=user_access_token,
                 feishu_doc_type=raw.get("feishu_doc_type", "docx"),
+                asset_type=asset_type,
             )
         elif input_type == "bitable":
             return await self._ingest_bitable(
                 raw.get("app_token", ""),
                 raw.get("table_id", ""),
-                owner_id, db, uploader_name,
+                owner_id, db, asset_owner_name,
                 user_access_token=user_access_token,
             )
         elif input_type == "web_url":
             return await self._ingest_web_url(
-                raw.get("url", ""), owner_id, db, uploader_name,
+                raw.get("url", ""), owner_id, db, asset_owner_name,
             )
         else:
             return f"不支持的输入类型: {input_type}", None, None
@@ -506,6 +545,12 @@ class FeishuBotService:
             if not task:
                 return self._build_status_card("任务不存在", "找不到对应任务。", "carmine")
 
+            # 防止并发：上一次重新入库还没完成时拒绝
+            if task.status == "processing":
+                return self._build_status_card(
+                    "请稍候", "上一次重新入库还在处理中，请等待完成后再试。", "orange",
+                )
+
             user = await self._find_user(db, open_id)
             if not user:
                 return self._build_status_card("用户未找到", "请先登录平台。", "carmine")
@@ -529,12 +574,20 @@ class FeishuBotService:
 
         return self._build_status_card(
             "正在重新入库",
-            f"正在按「{ASSET_TYPE_LABELS.get(new_asset_type, new_asset_type)}」重新入库，请稍候...",
+            f"正在按「{ASSET_TYPE_LABELS.get(new_asset_type, new_asset_type)}」重新入库，请稍候...\n处理中请勿重复点击。",
             "blue",
         )
 
     async def _re_ingest_and_report(self, task_id: str, open_id: str, asset_type: str) -> None:
         """重新入库并发送新的结果卡片。"""
+        # 立即发送文字反馈，缓解等待焦虑
+        asset_label = ASSET_TYPE_LABELS.get(asset_type, asset_type)
+        await self._reply_text(
+            open_id,
+            f"🔄 已收到重新入库请求，正在按「{asset_label}」处理中...\n"
+            f"涉及删除旧数据、LLM 解析、生成摘要等步骤，通常需要 10~30 秒，请稍候。",
+        )
+
         try:
             async with async_session() as db:
                 task = await self._get_task(db, task_id)
@@ -565,6 +618,29 @@ class FeishuBotService:
                 task.result_message = result_msg
                 await db.commit()
 
+                # 自动打标签（硬性规定：必须至少一个标签）
+                if record_id and record_type:
+                    try:
+                        from app.services.llm import auto_tag_content, _force_apply_other_tag
+                        content_text = await self._get_record_content(db, record_id, record_type)
+                        if not content_text:
+                            content_text = raw.get("text", "") or raw.get("preview", "")
+                        tagged = await auto_tag_content(db, record_id, record_type, content_text[:2000], owner_id)
+                        if tagged:
+                            await db.commit()
+                        else:
+                            from sqlalchemy import text as sql_text
+                            check = await db.execute(
+                                sql_text("SELECT COUNT(*) FROM content_tags WHERE content_type = :ct AND content_id = :cid"),
+                                {"ct": record_type, "cid": record_id},
+                            )
+                            if (check.scalar() or 0) == 0:
+                                await _force_apply_other_tag(db, record_id, record_type, owner_id)
+                                await db.commit()
+                                logger.warning("重新入库硬性保底: %s id=%d 无标签, 已强制打上「其他」", record_type, record_id)
+                    except Exception as e:
+                        logger.warning("重新入库自动打标签失败: %s", e)
+
                 extraction_rules = (await db.execute(
                     select(ExtractionRule).where(
                         ExtractionRule.owner_id == owner_id,
@@ -578,6 +654,16 @@ class FeishuBotService:
                         CleaningRule.is_active.is_(True),
                     )
                 )).scalars().all()
+
+            # 先发送文字反馈
+            asset_label = ASSET_TYPE_LABELS.get(asset_type, asset_type)
+            if record_id:
+                await self._reply_text(
+                    open_id,
+                    f"已删除旧数据并重新入库为「{asset_label}」。\n{result_msg}",
+                )
+            else:
+                await self._reply_text(open_id, f"重新入库失败：{result_msg}")
 
             card = self._build_result_card(
                 task_id=task_id,
@@ -593,9 +679,34 @@ class FeishuBotService:
 
         except Exception as e:
             logger.error("重新入库失败 [%s]: %s", task_id, e, exc_info=True)
+            # 重置 task.status 以允许用户重试
+            try:
+                async with async_session() as db:
+                    task = await self._get_task(db, task_id)
+                    if task and task.status == "processing":
+                        task.status = "failed"
+                        task.result_message = f"重新入库失败: {str(e)[:200]}"
+                        await db.commit()
+            except Exception:
+                pass
             await self._reply_text(open_id, f"重新入库失败：{str(e)[:200]}")
 
     # ── 删除记录 ──────────────────────────────────────────────
+
+    async def _get_record_content(self, db: AsyncSession, record_id: int, record_type: str) -> str:
+        """从数据库读取记录的实际内容文本（用于自动打标）。"""
+        try:
+            if record_type == "document":
+                doc = await db.get(Document, record_id)
+                if doc:
+                    return doc.summary or (doc.content_text or "")[:2000]
+            elif record_type == "communication":
+                comm = await db.get(Communication, record_id)
+                if comm:
+                    return comm.summary or (comm.content_text or "")[:2000]
+        except Exception as e:
+            logger.warning("读取记录内容失败 (%s id=%d): %s", record_type, record_id, e)
+        return ""
 
     async def _delete_record(self, db: AsyncSession, record_id: int, record_type: str) -> None:
         """根据类型和 ID 删除入库记录。"""
@@ -612,7 +723,7 @@ class FeishuBotService:
 
     async def _ingest_text(
         self, text: str, owner_id: str, db: AsyncSession,
-        asset_type: str, uploader_name: str | None,
+        asset_type: str, asset_owner_name: str | None,
     ) -> tuple[str, int | None, str | None]:
         """纯文字入库。Returns: (result_msg, record_id, record_type)"""
         if not text.strip():
@@ -654,8 +765,7 @@ class FeishuBotService:
                 summary=parsed.get("summary"),
                 keywords=keywords,
                 sentiment=parsed.get("sentiment"),
-                uploader_name=uploader_name,
-                uploaded_by=uploader_name,
+                asset_owner_name=asset_owner_name,
                 parse_status="done",
                 processed_at=now,
                 synced_at=now,
@@ -679,8 +789,7 @@ class FeishuBotService:
                 author=parsed.get("author"),
                 keywords=keywords,
                 doc_category=parsed.get("category") if parsed.get("category") in valid_categories else None,
-                uploader_name=uploader_name,
-                uploaded_by=uploader_name,
+                asset_owner_name=asset_owner_name,
                 feishu_created_at=now,
                 feishu_updated_at=now,
                 synced_at=now,
@@ -695,7 +804,7 @@ class FeishuBotService:
 
     async def _ingest_file(
         self, file_key: str, file_name: str, owner_id: str,
-        db: AsyncSession, asset_type: str, uploader_name: str | None,
+        db: AsyncSession, asset_type: str, asset_owner_name: str | None,
         is_image: bool = False, message_id: str = "",
     ) -> tuple[str, int | None, str | None]:
         """文件入库。Returns: (result_msg, record_id, record_type)"""
@@ -731,7 +840,7 @@ class FeishuBotService:
                 return f"音频转写失败: {e}", None, None
 
             parsed = {
-                "title": file_name, "comm_type": "recording", "initiator": None,
+                "title": None, "comm_type": "recording", "initiator": None,
                 "participants": [], "summary": None, "conclusions": None,
                 "action_items": [], "keywords": [], "sentiment": "neutral",
             }
@@ -741,6 +850,17 @@ class FeishuBotService:
                     parsed = await llm_client.parse_communication_doc(transcript)
                 except Exception as e:
                     logger.warning("LLM 音频解析失败: %s", e)
+
+            # 标题缺失或像文件名时，用 LLM 从内容生成
+            from app.services.llm import looks_like_filename
+            if looks_like_filename(parsed.get("title")):
+                try:
+                    from app.services.llm import llm_client as _llm
+                    generated = await _llm.generate_title_from_content(transcript)
+                    if generated:
+                        parsed["title"] = generated
+                except Exception as e:
+                    logger.warning("LLM 生成标题失败: %s", e)
 
             embedding = None
             if settings.embedding_api_key and not settings.embedding_api_key.startswith("sk-xxx"):
@@ -763,8 +883,7 @@ class FeishuBotService:
                 summary=parsed.get("summary"),
                 keywords=parsed.get("keywords") or [],
                 sentiment=parsed.get("sentiment"),
-                uploader_name=uploader_name,
-                uploaded_by=uploader_name,
+                asset_owner_name=asset_owner_name,
                 content_hash=hashlib.md5(file_bytes).hexdigest(),
                 extra_fields={"file_path": file_path, "file_type": ext},
                 parse_status="done",
@@ -839,8 +958,7 @@ class FeishuBotService:
                 summary=parsed.get("summary"),
                 keywords=keywords,
                 sentiment=parsed.get("sentiment"),
-                uploader_name=uploader_name,
-                uploaded_by=uploader_name,
+                asset_owner_name=asset_owner_name,
                 content_hash=hashlib.md5(file_bytes).hexdigest(),
                 extra_fields={"file_path": file_path, "file_type": ext},
                 parse_status="done",
@@ -870,8 +988,7 @@ class FeishuBotService:
                 file_type=ext,
                 file_size=len(file_bytes),
                 file_path=file_path,
-                uploader_name=uploader_name,
-                uploaded_by=uploader_name,
+                asset_owner_name=asset_owner_name,
                 feishu_created_at=now,
                 feishu_updated_at=now,
                 synced_at=now,
@@ -886,7 +1003,7 @@ class FeishuBotService:
 
     async def _ingest_web_url(
         self, url: str, owner_id: str, db: AsyncSession,
-        uploader_name: str | None,
+        asset_owner_name: str | None,
     ) -> tuple[str, int | None, str | None]:
         """抓取外网网页内容并入库为文档。"""
         if not url:
@@ -924,7 +1041,7 @@ class FeishuBotService:
                 source_url=url,
                 title=title[:500],
                 content_text=text,
-                uploader_name=uploader_name,
+                asset_owner_name=asset_owner_name,
             )
             db.add(doc)
             await db.flush()
@@ -936,6 +1053,76 @@ class FeishuBotService:
         except Exception as e:
             return f"网页抓取失败: {str(e)[:200]}", None, None
 
+    async def _resolve_doc_owner(
+        self, raw: dict, input_type: str, user_access_token: str,
+        db: AsyncSession, fallback_owner_id: str, fallback_owner_name: str,
+    ) -> tuple[str, str]:
+        """查询飞书文档/多维表格的真实所有者，返回 (owner_id, owner_name)。
+
+        如果所有者在流光平台有账号，返回其 open_id；否则 fallback 到发送者。
+        """
+        try:
+            # 确定 token 和类型
+            if input_type == "bitable":
+                doc_token = raw.get("app_token", "")
+                doc_type = "bitable"
+            else:
+                doc_token = raw.get("doc_token", "")
+                doc_type = raw.get("feishu_doc_type", "docx")
+                # wiki 类型也用 wiki
+                if doc_type == "wiki":
+                    doc_type = "wiki"
+
+            if not doc_token:
+                return fallback_owner_id, fallback_owner_name
+
+            # wiki 类型先解析节点获取实际 token 和类型
+            if doc_type == "wiki":
+                try:
+                    node = await feishu_client.get_wiki_node_info(
+                        doc_token, user_access_token=user_access_token,
+                    )
+                    obj_type = node.get("obj_type", "doc")
+                    obj_token = node.get("obj_token", doc_token)
+                    # 映射 wiki obj_type 到 batch_get_doc_meta 的 doc_type
+                    type_map = {"doc": "docx", "docx": "docx", "bitable": "bitable", "sheet": "sheet"}
+                    doc_type = type_map.get(obj_type, "docx")
+                    doc_token = obj_token
+                    logger.info("resolve_doc_owner: wiki 解析 -> type=%s, token=%s", doc_type, doc_token)
+                except Exception as e:
+                    logger.warning("resolve_doc_owner: wiki 节点解析失败: %s", e)
+
+            logger.info("resolve_doc_owner: 查询 meta token=%s, type=%s", doc_token, doc_type)
+            meta_map = await feishu_client.batch_get_doc_meta(
+                [{"token": doc_token, "type": doc_type}],
+                user_access_token,
+            )
+            meta = meta_map.get(doc_token, {})
+            doc_owner_id = meta.get("owner_id", "")
+            doc_owner_name = meta.get("owner_name", "")
+            logger.info("resolve_doc_owner: owner_id=%s, owner_name=%s", doc_owner_id, doc_owner_name)
+
+            if not doc_owner_id:
+                logger.info("文档 %s 未获取到 owner_id，使用发送者", doc_token)
+                return fallback_owner_id, fallback_owner_name
+
+            # 在流光平台查找文档所有者
+            owner_user = await db.execute(
+                select(User).where(User.feishu_open_id == doc_owner_id)
+            )
+            owner_user = owner_user.scalar_one_or_none()
+
+            if owner_user:
+                logger.info("文档 %s 实际所有者: %s (%s)", doc_token, owner_user.name, doc_owner_id)
+                return doc_owner_id, owner_user.name or doc_owner_name
+            else:
+                logger.info("文档 %s 所有者 %s 不在平台，使用发送者", doc_token, doc_owner_id)
+                return fallback_owner_id, fallback_owner_name
+
+        except Exception as e:
+            logger.warning("查询文档所有者失败: %s，使用发送者", e)
+            return fallback_owner_id, fallback_owner_name
+
     _LOGIN_GUIDE = (
         "需要您先登录流光数据中台完成授权，机器人才能以您的身份访问飞书文档。\n"
         f"请点击登录：{settings.platform_url}/login\n"
@@ -944,10 +1131,12 @@ class FeishuBotService:
 
     async def _ingest_cloud_doc(
         self, doc_token: str, owner_id: str, db: AsyncSession,
-        uploader_name: str | None, user_access_token: str | None = None,
-        feishu_doc_type: str = "docx",
+        asset_owner_name: str | None, user_access_token: str | None = None,
+        feishu_doc_type: str = "docx", asset_type: str = "document",
     ) -> tuple[str, int | None, str | None]:
-        """飞书文档入库（支持云文档、知识库、电子表格等）。"""
+        """飞书文档入库（支持云文档、知识库、电子表格等）。
+        根据 asset_type 决定入库为 document 或 communication。
+        """
         if not doc_token:
             return "文档 token 为空。", None, None
 
@@ -964,7 +1153,7 @@ class FeishuBotService:
                 # wiki 指向多维表格 → 走 bitable 入库
                 if obj_type in ("bitable", "sheet") and obj_type == "bitable":
                     return await self._ingest_bitable(
-                        obj_token, "", owner_id, db, uploader_name,
+                        obj_token, "", owner_id, db, asset_owner_name,
                         user_access_token=user_access_token,
                     )
 
@@ -973,6 +1162,14 @@ class FeishuBotService:
             except Exception as e:
                 logger.warning("Wiki 节点解析失败，尝试直接导入: %s", e)
 
+        # 如果目标类型是 communication（如会议录音），先获取云文档内容再入库为 communication
+        if asset_type.startswith("comm_"):
+            return await self._ingest_cloud_doc_as_comm(
+                doc_token, owner_id, db, asset_owner_name,
+                user_access_token=user_access_token,
+                asset_type=asset_type,
+            )
+
         from app.services.cloud_doc_import import cloud_doc_import_service
         try:
             doc, status = await cloud_doc_import_service.import_cloud_doc(
@@ -980,7 +1177,7 @@ class FeishuBotService:
                 owner_id=owner_id,
                 db=db,
                 user_access_token=user_access_token,
-                uploader_name=uploader_name,
+                asset_owner_name=asset_owner_name,
                 force=False,
                 source_platform="feishu_bot",
             )
@@ -995,9 +1192,123 @@ class FeishuBotService:
             logger.error("云文档导入异常: %s", e, exc_info=True)
             return f"云文档导入失败: {e}", None, None
 
+    async def _ingest_cloud_doc_as_comm(
+        self, doc_token: str, owner_id: str, db: AsyncSession,
+        asset_owner_name: str | None, user_access_token: str | None = None,
+        asset_type: str = "comm_recording",
+    ) -> tuple[str, int | None, str | None]:
+        """将云文档内容提取后入库为 Communication（如会议录音）。"""
+        # 1. 获取云文档内容
+        try:
+            doc_data = await feishu_client.get_document_content(
+                doc_token, user_access_token=user_access_token,
+            )
+            raw_content = doc_data.get("content_text", "")
+            doc_title = doc_data.get("title", "")
+        except Exception as e:
+            logger.error("获取云文档内容失败: %s", e, exc_info=True)
+            return f"获取云文档内容失败: {e}", None, None
+
+        if not raw_content or not raw_content.strip():
+            return "云文档内容为空，无法入库。", None, None
+
+        comm_type = asset_type.replace("comm_", "")
+        now = datetime.utcnow()
+
+        # 2. LLM 解析
+        parsed = {
+            "title": None, "comm_type": comm_type, "summary": None,
+            "keywords": [], "sentiment": "neutral",
+        }
+        if settings.llm_api_key and not settings.llm_api_key.startswith("sk-xxx"):
+            try:
+                from app.services.llm import llm_client
+                parsed = await llm_client.parse_communication_doc(raw_content)
+                parsed.setdefault("comm_type", comm_type)
+            except Exception as e:
+                logger.warning("LLM 云文档解析失败: %s", e)
+
+        # 标题优先使用云文档自带标题，其次 LLM 解析结果
+        if doc_title and not parsed.get("title"):
+            parsed["title"] = doc_title
+
+        from app.services.llm import looks_like_filename
+        if looks_like_filename(parsed.get("title")):
+            try:
+                from app.services.llm import llm_client as _llm
+                generated = await _llm.generate_title_from_content(raw_content)
+                if generated:
+                    parsed["title"] = generated
+            except Exception as e:
+                logger.warning("LLM 生成标题失败: %s", e)
+
+        # 3. Embedding
+        embedding = None
+        if settings.embedding_api_key and not settings.embedding_api_key.startswith("sk-xxx"):
+            try:
+                from app.services.llm import llm_client
+                embedding = await llm_client.generate_embedding(
+                    f"{parsed.get('title', '')} {raw_content}"[:2000]
+                )
+            except Exception:
+                pass
+
+        # 4. 解析 comm_time
+        comm_time = None
+        if parsed.get("comm_time"):
+            try:
+                from dateutil.parser import parse as parse_dt
+                comm_time = parse_dt(parsed["comm_time"])
+            except Exception:
+                pass
+
+        # 5. 入库为 Communication（先清理同 feishu_record_id 的旧记录，防止唯一约束冲突）
+        target_record_id = f"bot_doc_{doc_token}"
+        existing_comm = await db.execute(
+            select(Communication).where(Communication.feishu_record_id == target_record_id)
+        )
+        old_comm = existing_comm.scalar_one_or_none()
+        if old_comm:
+            await db.delete(old_comm)
+            await db.flush()
+            logger.info("已清理旧 communication (feishu_record_id=%s)", target_record_id)
+
+        comm = Communication(
+            owner_id=owner_id,
+            comm_type=comm_type,
+            source_platform="feishu_bot",
+            source_app_token=f"bot_{doc_token}",
+            feishu_record_id=target_record_id,
+            title=parsed.get("title") or raw_content[:50],
+            content_text=raw_content,
+            transcript=raw_content,
+            summary=parsed.get("summary"),
+            conclusions=parsed.get("conclusions"),
+            keywords=parsed.get("keywords") or [],
+            sentiment=parsed.get("sentiment"),
+            initiator=parsed.get("initiator"),
+            participants=parsed.get("participants") or [],
+            action_items=parsed.get("action_items") or [],
+            duration_minutes=parsed.get("duration_minutes"),
+            comm_time=comm_time,
+            asset_owner_name=asset_owner_name,
+            parse_status="done",
+            processed_at=now,
+            synced_at=now,
+        )
+        if embedding:
+            comm.content_vector = embedding
+        db.add(comm)
+        await db.flush()
+        record_id = comm.id
+        await db.commit()
+
+        label = {"meeting": "会议记录", "chat": "聊天记录", "recording": "录音"}.get(comm_type, "沟通记录")
+        return f"云文档已作为{label}入库，标题: {comm.title}", record_id, "communication"
+
     async def _ingest_bitable(
         self, app_token: str, table_id: str, owner_id: str,
-        db: AsyncSession, uploader_name: str | None,
+        db: AsyncSession, asset_owner_name: str | None,
         user_access_token: str | None = None,
     ) -> tuple[str, int | None, str | None]:
         """多维表格入库。"""

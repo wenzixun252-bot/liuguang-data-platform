@@ -34,6 +34,8 @@ class SearchResult:
     import_count: int = 1               # 同一飞书文档被多少人归档（社群热度）
     matched_tags: list[str] = field(default_factory=list)  # 命中的标签名称列表
     key_info: dict | None = None        # 提取规则产出的关键信息
+    effective_time: datetime | None = None   # 有效时间（文档修改时间/会议时间/发送时间）
+    asset_owner_name: str | None = None      # 资产所有者（仅文档）
 
 
 # 所有可搜索的表
@@ -92,17 +94,14 @@ def _build_time_filter(
 ) -> tuple[str, dict]:
     """构建智能时间过滤子句。
 
-    - documents 表（cloud）：COALESCE(feishu_created_at, feishu_updated_at, created_at)
-    - documents 表（local）：created_at
-    - communications 表：COALESCE(comm_time, created_at)
+    - documents 表（cloud）：COALESCE(feishu_updated_at, feishu_created_at, created_at) — 优先按最后修改时间
+    - documents 表（local）：created_at — 按上传时间
+    - communications 表：COALESCE(comm_time, created_at) — 按会议时间/发送时间
     """
     if time_start is None and time_end is None:
         return "TRUE", {}
 
-    if source_table == "document":
-        eff = "CASE WHEN source_type = 'cloud' THEN COALESCE(feishu_created_at, feishu_updated_at, created_at) ELSE created_at END"
-    else:
-        eff = "COALESCE(comm_time, created_at)"
+    eff = _effective_time_expr(source_table)
 
     clauses = []
     params: dict = {}
@@ -114,6 +113,30 @@ def _build_time_filter(
         params["time_end"] = time_end.replace(tzinfo=None) if time_end.tzinfo else time_end
 
     return " AND ".join(clauses), params
+
+
+def _build_asset_owner_filter(
+    source_table: str,
+    current_user_name: str | None,
+) -> tuple[str, dict]:
+    """构建资产所有者过滤子句（仅文档表生效）。
+
+    只返回资产所有者是当前用户的文档，或 asset_owner_name 为空的文档。
+    沟通记录表不做过滤。
+    """
+    if not current_user_name or source_table != "document":
+        return "TRUE", {}
+    return (
+        "(asset_owner_name = :asset_owner_name OR asset_owner_name IS NULL)",
+        {"asset_owner_name": current_user_name},
+    )
+
+
+def _effective_time_expr(source_table: str) -> str:
+    """返回计算有效时间的 SQL 表达式。"""
+    if source_table == "document":
+        return "CASE WHEN source_type = 'cloud' THEN COALESCE(feishu_updated_at, feishu_created_at, created_at) ELSE created_at END"
+    return "COALESCE(comm_time, created_at)"
 
 
 def _get_tables_to_search(
@@ -145,6 +168,7 @@ class VectorSearcher:
         tag_ids: list[int] | None = None,
         time_start: datetime | None = None,
         time_end: datetime | None = None,
+        current_user_name: str | None = None,
     ) -> list[SearchResult]:
         query_embedding = await llm_client.generate_embedding(query_text)
         vector_str = f"[{','.join(str(v) for v in query_embedding)}]"
@@ -160,23 +184,29 @@ class VectorSearcher:
             id_filter, id_params = _build_id_filter(table_key, source_ids)
             tag_filter, tag_params = _build_tag_filter(table_key, tag_ids)
             time_filter, time_params = _build_time_filter(table_key, time_start, time_end)
+            asset_filter, asset_params = _build_asset_owner_filter(table_key, current_user_name)
             all_params.update(id_params)
             all_params.update(tag_params)
             all_params.update(time_params)
+            all_params.update(asset_params)
 
+            eff_expr = _effective_time_expr(table_key)
+            owner_expr = "asset_owner_name" if table_key == "document" else "NULL"
             unions.append(
                 f"SELECT id, '{table_key}' as source_table, title, content_text, owner_id, "
                 f"feishu_record_id, key_info, "
+                f"{eff_expr} AS effective_time, {owner_expr} AS asset_owner_name, "
                 f"content_vector <=> :query_vector AS distance "
                 f"FROM {db_table} "
-                f"WHERE content_vector IS NOT NULL AND {owner_filter} AND {id_filter} AND {tag_filter} AND {time_filter}"
+                f"WHERE content_vector IS NOT NULL AND {owner_filter} AND {id_filter} AND {tag_filter} AND {time_filter} AND {asset_filter}"
             )
 
         if not unions:
             return []
 
         sql = text(
-            f"SELECT id, source_table, title, content_text, owner_id, feishu_record_id, key_info, distance FROM ("
+            f"SELECT id, source_table, title, content_text, owner_id, feishu_record_id, key_info, "
+            f"effective_time, asset_owner_name, distance FROM ("
             f"{' UNION ALL '.join(unions)}"
             f") combined ORDER BY distance ASC LIMIT :top_k"
         )
@@ -194,6 +224,8 @@ class VectorSearcher:
                 score=1.0 / (1.0 + row.distance),
                 feishu_record_id=row.feishu_record_id,
                 key_info=row.key_info,
+                effective_time=row.effective_time,
+                asset_owner_name=row.asset_owner_name,
             )
             for row in rows
         ]
@@ -216,6 +248,7 @@ class BM25Searcher:
         tag_ids: list[int] | None = None,
         time_start: datetime | None = None,
         time_end: datetime | None = None,
+        current_user_name: str | None = None,
     ) -> list[SearchResult]:
         owner_filter, owner_params = _build_owner_filter(visible_ids)
         tables = _get_tables_to_search(source_tables, source_ids)
@@ -228,25 +261,31 @@ class BM25Searcher:
             id_filter, id_params = _build_id_filter(table_key, source_ids)
             tag_filter, tag_params = _build_tag_filter(table_key, tag_ids)
             time_filter, time_params = _build_time_filter(table_key, time_start, time_end)
+            asset_filter, asset_params = _build_asset_owner_filter(table_key, current_user_name)
             all_params.update(id_params)
             all_params.update(tag_params)
             all_params.update(time_params)
+            all_params.update(asset_params)
 
             ts_content = "coalesce(title, '') || ' ' || content_text || ' ' || coalesce(key_info::text, '')"
+            eff_expr = _effective_time_expr(table_key)
+            owner_expr = "asset_owner_name" if table_key == "document" else "NULL"
             unions.append(
                 f"SELECT id, '{table_key}' as source_table, title, content_text, owner_id, "
                 f"feishu_record_id, key_info, "
+                f"{eff_expr} AS effective_time, {owner_expr} AS asset_owner_name, "
                 f"ts_rank_cd(to_tsvector('simple', {ts_content}), plainto_tsquery('simple', :query)) AS rank "
                 f"FROM {db_table} "
                 f"WHERE to_tsvector('simple', {ts_content}) @@ plainto_tsquery('simple', :query) "
-                f"AND {owner_filter} AND {id_filter} AND {tag_filter} AND {time_filter}"
+                f"AND {owner_filter} AND {id_filter} AND {tag_filter} AND {time_filter} AND {asset_filter}"
             )
 
         if not unions:
             return []
 
         sql = text(
-            f"SELECT id, source_table, title, content_text, owner_id, feishu_record_id, key_info, rank FROM ("
+            f"SELECT id, source_table, title, content_text, owner_id, feishu_record_id, key_info, "
+            f"effective_time, asset_owner_name, rank FROM ("
             f"{' UNION ALL '.join(unions)}"
             f") combined ORDER BY rank DESC LIMIT :top_k"
         )
@@ -264,6 +303,8 @@ class BM25Searcher:
                 score=float(row.rank),
                 feishu_record_id=row.feishu_record_id,
                 key_info=row.key_info,
+                effective_time=row.effective_time,
+                asset_owner_name=row.asset_owner_name,
             )
             for row in rows
         ]
@@ -292,16 +333,19 @@ class HybridSearcher:
         boost_tag_ids: list[int] | None = None,
         time_start: datetime | None = None,
         time_end: datetime | None = None,
+        current_user_name: str | None = None,
     ) -> list[SearchResult]:
         vector_results = await self.vector_searcher.search(
             query_text, visible_ids, db, top_k=top_k * 2,
             source_tables=source_tables, source_ids=source_ids, tag_ids=tag_ids,
             time_start=time_start, time_end=time_end,
+            current_user_name=current_user_name,
         )
         bm25_results = await self.bm25_searcher.search(
             query_text, visible_ids, db, top_k=top_k * 2,
             source_tables=source_tables, source_ids=source_ids, tag_ids=tag_ids,
             time_start=time_start, time_end=time_end,
+            current_user_name=current_user_name,
         )
 
         # RRF 融合，key 为 (source_table, id) 元组
@@ -336,7 +380,7 @@ class HybridSearcher:
             placeholders = ", ".join(f":frid_{i}" for i in range(len(doc_frids)))
             frid_params = {f"frid_{i}": frid for i, frid in enumerate(doc_frids)}
             count_sql = text(
-                f"SELECT feishu_record_id, COUNT(DISTINCT owner_id) AS cnt "
+                f"SELECT feishu_record_id, COUNT(DISTINCT COALESCE(asset_owner_name, owner_id)) AS cnt "
                 f"FROM documents WHERE feishu_record_id IN ({placeholders}) "
                 f"GROUP BY feishu_record_id"
             )

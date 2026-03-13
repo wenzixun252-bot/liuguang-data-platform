@@ -58,14 +58,18 @@ def _flatten_bitable_cell(value) -> str:
     return str(value)
 
 
-async def _generate_summary(rows_sample: list[dict], table_name: str) -> str:
-    """用 LLM 生成表级内容总结（取前 20 行数据概述）。"""
+async def _generate_summary_and_name(rows_sample: list[dict], file_name: str) -> tuple[str, str]:
+    """用 LLM 生成表级内容总结和表名（取前 20 行数据概述）。
+
+    Returns:
+        (summary, display_name) — 若 LLM 失败，返回 ("", file_name)
+    """
     try:
         from app.config import settings
         from app.services.llm import create_openai_client
 
         if not settings.llm_api_key:
-            return ""
+            return "", file_name
 
         sample_text = "\n".join(
             " | ".join(f"{k}: {v}" for k, v in row.items() if v)
@@ -82,19 +86,37 @@ async def _generate_summary(rows_sample: list[dict], table_name: str) -> str:
             messages=[
                 {
                     "role": "system",
-                    "content": "你是数据分析助手。请用一段话（50-100字）总结以下表格数据的主要内容和用途。",
+                    "content": (
+                        "你是数据分析助手。请根据以下表格数据：\n"
+                        "1. 给出一个简短的表名（10字以内，描述这张表的核心内容，不要带文件后缀）\n"
+                        "2. 用一段话（50-100字）总结表格数据的主要内容和用途\n\n"
+                        "严格按以下格式回复（各占一行）：\n"
+                        "表名: <表名>\n"
+                        "摘要: <摘要>"
+                    ),
                 },
                 {
                     "role": "user",
-                    "content": f"表格名称: {table_name}\n\n数据样本:\n{sample_text}",
+                    "content": f"原始文件名: {file_name}\n\n数据样本:\n{sample_text}",
                 },
             ],
-            max_tokens=200,
+            max_tokens=300,
         )
-        return resp.choices[0].message.content or ""
+        text = resp.choices[0].message.content or ""
+        # 解析结构化回复
+        display_name = file_name
+        summary = text
+        for line in text.strip().splitlines():
+            if line.startswith("表名:") or line.startswith("表名："):
+                parsed_name = line.split(":", 1)[-1].split("：", 1)[-1].strip()
+                if parsed_name:
+                    display_name = parsed_name
+            elif line.startswith("摘要:") or line.startswith("摘要："):
+                summary = line.split(":", 1)[-1].split("：", 1)[-1].strip()
+        return summary, display_name
     except Exception as e:
         logger.warning("生成表格总结失败: %s", e)
-        return ""
+        return "", file_name
 
 
 async def _get_feishu_doc_owner_info(
@@ -235,8 +257,11 @@ async def import_from_bitable(
             row_text=build_row_text(row_data),
         ))
 
-    # 6. 生成总结
-    table_obj.summary = await _generate_summary(row_dicts, table_name)
+    # 6. 生成总结和智能表名
+    summary, display_name = await _generate_summary_and_name(row_dicts, table_name)
+    table_obj.summary = summary
+    if display_name and display_name != table_name:
+        table_obj.name = display_name
 
     await db.commit()
     await db.refresh(table_obj)
@@ -350,7 +375,10 @@ async def import_from_spreadsheet(
             row_text=build_row_text(row_data),
         ))
 
-    table_obj.summary = await _generate_summary(row_dicts, table_name)
+    summary, display_name = await _generate_summary_and_name(row_dicts, table_name)
+    table_obj.summary = summary
+    if display_name and display_name != table_name:
+        table_obj.name = display_name
 
     await db.commit()
     await db.refresh(table_obj)
@@ -420,7 +448,10 @@ async def import_from_local_file(
             row_text=build_row_text(row_data),
         ))
 
-    table_obj.summary = await _generate_summary(row_dicts, file_name)
+    summary, display_name = await _generate_summary_and_name(row_dicts, file_name)
+    table_obj.summary = summary
+    if display_name != file_name:
+        table_obj.name = display_name
 
     await db.commit()
     await db.refresh(table_obj)

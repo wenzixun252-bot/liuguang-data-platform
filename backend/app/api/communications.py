@@ -68,7 +68,7 @@ async def list_communications(
             | Communication.transcript.ilike(like)
             | Communication.location.ilike(like)
             | Communication.chat_name.ilike(like)
-            | Communication.uploader_name.ilike(like)
+            | Communication.asset_owner_name.ilike(like)
             | cast(Communication.keywords, String).ilike(like)
             | cast(Communication.participants, String).ilike(like)
             | cast(Communication.key_info, String).ilike(like)
@@ -106,8 +106,23 @@ async def list_communications(
         count_stmt = count_stmt.where(Communication.id.in_(subq))
 
     total = (await db.execute(count_stmt)).scalar() or 0
-    items_stmt = base.order_by(Communication.comm_time.desc().nullslast()).offset((page - 1) * page_size).limit(page_size)
-    rows = (await db.execute(items_stmt)).scalars().all()
+
+    # 分页查询，LEFT JOIN User 获取 uploader_name
+    items_stmt = (
+        select(Communication, User.name.label("uploader_name"))
+        .outerjoin(User, Communication.owner_id == User.feishu_open_id)
+        .where(Communication.id.in_(
+            base.with_only_columns(Communication.id)
+            .order_by(Communication.comm_time.desc().nullslast(), Communication.synced_at.desc().nullslast())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        ))
+        .order_by(Communication.comm_time.desc().nullslast(), Communication.synced_at.desc().nullslast())
+    )
+    result_rows = (await db.execute(items_stmt)).all()
+
+    rows = [row.Communication for row in result_rows]
+    uploader_map: dict[int, str | None] = {row.Communication.id: row.uploader_name for row in result_rows}
 
     # 将 key_info 中的 field_xxx key 翻译为中文 label
     from app.services.etl.enricher import translate_key_info_batch
@@ -117,6 +132,9 @@ async def list_communications(
     search_lower = search.lower() if search else ""
     for r in rows:
         comm_out = CommunicationOut.model_validate(r)
+        uname = uploader_map.get(r.id)
+        if uname:
+            comm_out = comm_out.model_copy(update={"uploader_name": uname})
         if search_lower:
             matched = []
             fields_to_check = {
@@ -128,7 +146,7 @@ async def list_communications(
                 "transcript": r.transcript,
                 "location": r.location,
                 "chat_name": r.chat_name,
-                "uploader_name": r.uploader_name,
+                "asset_owner_name": r.asset_owner_name,
                 "keywords": " ".join(r.keywords or []),
                 "participants": " ".join(
                     p.get("name", "") for p in (r.participants or []) if isinstance(p, dict)

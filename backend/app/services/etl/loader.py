@@ -59,7 +59,8 @@ class AssetLoader:
             if hasattr(record, "attachments") and record.attachments:
                 await self._process_attachments(record, user_access_token)
 
-        # 0.5 解析 uploader_name：根据 owner_id 从 users 表查找实际飞书用户名
+        # 0.5 解析 asset_owner_name：根据 owner_id 从 users 表查找用户名（作为资产所有人回退值）
+        # 注意：ETL 数据源的 owner_id 实际是配置人，这里用它做 fallback
         owner_ids = {r.owner_id for r in records if r.owner_id}
         owner_name_map: dict[str, str] = {}
         for oid in owner_ids:
@@ -70,8 +71,8 @@ class AssetLoader:
             if user and user.name:
                 owner_name_map[oid] = user.name
         for record in records:
-            if record.owner_id and record.owner_id in owner_name_map:
-                record.uploader_name = owner_name_map[record.owner_id]
+            if not record.asset_owner_name and record.owner_id and record.owner_id in owner_name_map:
+                record.asset_owner_name = owner_name_map[record.owner_id]
 
         # 1. 批量生成摘要 Embedding（原表 content_vector 用 summary 向量）
         embeddings: list[list[float] | None] = [None] * len(records)
@@ -96,6 +97,7 @@ class AssetLoader:
 
         # 2. 逐条 Upsert + 去重检测 + 分块写入
         loaded_count = 0
+        auto_tag_batch: list[tuple[int, str, str, str]] = []  # (id, content_type, text, owner_id)
         for record, embedding in zip(records, embeddings):
             try:
                 # 用 SAVEPOINT 包裹单条操作，失败时只回滚这一条，不影响整个事务
@@ -179,6 +181,14 @@ class AssetLoader:
                                 "提取规则应用失败 (record_id=%s, rule_id=%d): %s",
                                 record.feishu_record_id, extraction_rule_id, e_extract,
                             )
+
+                    # 收集自动打标信息（commit 后批量处理）
+                    if record_id and record.owner_id:
+                        auto_tag_batch.append((
+                            record_id, content_type,
+                            record.summary or (record.content_text or "")[:2000],
+                            record.owner_id,
+                        ))
             except Exception as e:
                 logger.error(
                     "Upsert 失败 (record_id=%s): %s",
@@ -188,6 +198,32 @@ class AssetLoader:
                 # begin_nested() 的 SAVEPOINT 已自动回滚，事务仍可继续
 
         await db.commit()
+
+        # 2.5 LLM 自动标签推荐（硬性规定：每条记录必须至少一个标签）
+        if auto_tag_batch:
+            try:
+                from app.services.llm import auto_tag_content, _force_apply_other_tag
+                tagged_total = 0
+                for rid, ct, ct_text, oid in auto_tag_batch:
+                    tagged = await auto_tag_content(db, rid, ct, ct_text, oid)
+                    tagged_total += tagged
+                    # 硬性保底：如果 auto_tag_content 返回 0，再检查一次
+                    if tagged == 0:
+                        check = await db.execute(
+                            text("SELECT COUNT(*) FROM content_tags WHERE content_type = :ct AND content_id = :cid"),
+                            {"ct": ct, "cid": rid},
+                        )
+                        if (check.scalar() or 0) == 0:
+                            try:
+                                tagged_total += await _force_apply_other_tag(db, rid, ct, oid)
+                                logger.warning("ETL 硬性保底: %s id=%d 无标签, 已强制打上「其他」", ct, rid)
+                            except Exception as e_fb:
+                                logger.error("ETL 硬性保底失败 (%s id=%d): %s", ct, rid, e_fb)
+                if tagged_total:
+                    await db.commit()
+                    logger.info("LLM 自动标签推荐: 共新增 %d 个标签", tagged_total)
+            except Exception as e_tag:
+                logger.error("LLM 自动标签推荐失败: %s", e_tag, exc_info=True)
 
         # 3. 更新 sync_state
         await self._update_sync_state(
@@ -216,7 +252,7 @@ class AssetLoader:
                 INSERT INTO documents (
                     owner_id, source_type, source_platform, source_app_token, source_table_id,
                     feishu_record_id, title, content_text, content_vector,
-                    summary, author, doc_category, source_url, uploader_name, uploaded_by,
+                    summary, author, doc_category, source_url, asset_owner_name,
                     keywords, sentiment,
                     quality_score, content_hash, parse_status, processed_at,
                     extra_fields,
@@ -224,7 +260,7 @@ class AssetLoader:
                 ) VALUES (
                     :owner_id, 'cloud', :source_platform, :source_app_token, :source_table_id,
                     :feishu_record_id, :title, :content_text, :content_vector,
-                    :summary, :author, :doc_category, :source_url, :uploader_name, :uploaded_by,
+                    :summary, :author, :doc_category, :source_url, :asset_owner_name,
                     CAST(:keywords AS jsonb), :sentiment,
                     :quality_score, :content_hash, 'done', :processed_at,
                     CAST(:extra_fields AS jsonb),
@@ -239,8 +275,7 @@ class AssetLoader:
                     author = EXCLUDED.author,
                     doc_category = EXCLUDED.doc_category,
                     source_url = EXCLUDED.source_url,
-                    uploader_name = EXCLUDED.uploader_name,
-                    uploaded_by = COALESCE(documents.uploaded_by, EXCLUDED.uploaded_by),
+                    asset_owner_name = EXCLUDED.asset_owner_name,
                     keywords = EXCLUDED.keywords,
                     sentiment = EXCLUDED.sentiment,
                     quality_score = EXCLUDED.quality_score,
@@ -265,8 +300,7 @@ class AssetLoader:
                 "author": r.author,
                 "doc_category": r.doc_category,
                 "source_url": r.source_url or None,
-                "uploader_name": r.uploader_name or None,
-                "uploaded_by": r.uploaded_by or None,
+                "asset_owner_name": r.asset_owner_name or None,
                 "keywords": _list_to_json(r.keywords),
                 "sentiment": r.sentiment,
                 "quality_score": r.quality_score,
@@ -291,7 +325,7 @@ class AssetLoader:
                     chat_id, chat_type, chat_name,
                     message_type, reply_to,
                     content_text, content_vector,
-                    summary, source_url, uploader_name, uploaded_by,
+                    summary, source_url, asset_owner_name,
                     keywords, sentiment,
                     quality_score, content_hash, parse_status, processed_at,
                     extra_fields,
@@ -305,7 +339,7 @@ class AssetLoader:
                     :chat_id, :chat_type, :chat_name,
                     :message_type, :reply_to,
                     :content_text, :content_vector,
-                    :summary, :source_url, :uploader_name, :uploaded_by,
+                    :summary, :source_url, :asset_owner_name,
                     CAST(:keywords AS jsonb), :sentiment,
                     :quality_score, :content_hash, 'done', :processed_at,
                     CAST(:extra_fields AS jsonb),
@@ -334,8 +368,7 @@ class AssetLoader:
                     content_vector = EXCLUDED.content_vector,
                     summary = EXCLUDED.summary,
                     source_url = EXCLUDED.source_url,
-                    uploader_name = EXCLUDED.uploader_name,
-                    uploaded_by = COALESCE(communications.uploaded_by, EXCLUDED.uploaded_by),
+                    asset_owner_name = EXCLUDED.asset_owner_name,
                     keywords = EXCLUDED.keywords,
                     sentiment = EXCLUDED.sentiment,
                     quality_score = EXCLUDED.quality_score,
@@ -374,8 +407,7 @@ class AssetLoader:
                 "content_vector": vector_str,
                 "summary": r.summary,
                 "source_url": r.source_url or None,
-                "uploader_name": r.uploader_name or None,
-                "uploaded_by": r.uploaded_by or None,
+                "asset_owner_name": r.asset_owner_name or None,
                 "keywords": _list_to_json(r.keywords),
                 "sentiment": r.sentiment,
                 "quality_score": r.quality_score,

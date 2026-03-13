@@ -22,8 +22,8 @@ class DocumentOut(BaseModel):
     file_type: str | None = None
     file_size: int | None = None
     source_url: str | None = None
+    asset_owner_name: str | None = None
     uploader_name: str | None = None
-    uploaded_by: str | None = None
     keywords: list = []
     sentiment: str | None = None
     quality_score: float | None = None

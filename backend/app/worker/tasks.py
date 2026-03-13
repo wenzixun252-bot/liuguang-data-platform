@@ -282,9 +282,6 @@ async def etl_sync_job(triggered_by: str | None = None) -> None:
                     continue
 
                 # 3. Load — 附件下载提取 + Embedding + Upsert（按 target_table 路由）
-                if triggered_by:
-                    for _rec in transform_result.records:
-                        _rec.uploaded_by = triggered_by
                 loaded = await asset_loader.load(transform_result, db, user_access_token=user_token)
                 total_loaded += loaded
 
@@ -408,9 +405,6 @@ async def _do_single_source_sync(app_token: str, table_id: str, owner_id: str | 
             )
 
             if transform_result.records:
-                if triggered_by:
-                    for _rec in transform_result.records:
-                        _rec.uploaded_by = triggered_by
                 await asset_loader.load(transform_result, db, user_access_token=user_token)
             else:
                 # 转换后无有效记录，也要将状态标记为 success
@@ -472,20 +466,12 @@ async def cloud_folder_sync_job() -> None:
                 if not user_token:
                     raise Exception(f"用户 {folder.owner_id} 无可用 token")
 
-                # 查找 uploader_name
-                user_result = await db.execute(
-                    select(User).where(User.feishu_open_id == folder.owner_id)
-                )
-                user = user_result.scalar_one_or_none()
-                uploader_name = user.name if user else None
-
                 # 执行同步
                 sync_result = await cloud_doc_import_service.sync_folder(
                     folder.folder_token,
                     folder.owner_id,
                     db,
                     user_token,
-                    uploader_name,
                 )
 
                 # 更新成功状态

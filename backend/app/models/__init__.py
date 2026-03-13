@@ -13,6 +13,7 @@ from app.models.tag import TagDefinition, ContentTag
 from app.models.content_entity_link import ContentEntityLink
 from app.models.content_chunk import ContentChunk
 from app.models.calendar_reminder import CalendarReminderPref
+from app.models.calendar_brief import CalendarBrief
 from app.models.notification_pref import UserNotificationPref
 from app.models.keyword_sync_rule import KeywordSyncRule
 from app.models.kg_profile import KGProfile
@@ -43,6 +44,7 @@ __all__ = [
     "Conversation",
     "ConversationMessage",
     "CalendarReminderPref",
+    "CalendarBrief",
     "TagDefinition",
     "ContentTag",
     "ContentEntityLink",

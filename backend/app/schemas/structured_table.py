@@ -28,8 +28,8 @@ class StructuredTableOut(BaseModel):
     parse_status: str = "done"
     processed_at: UTCDatetimeOpt = None
     import_count: int = 1
+    asset_owner_name: str | None = None
     uploader_name: str | None = None
-    uploaded_by: str | None = None
     synced_at: UTCDatetimeOpt = None
     created_at: UTCDatetime
     updated_at: UTCDatetime
@@ -63,7 +63,7 @@ class StructuredTableDetail(BaseModel):
     quality_score: float | None = None
     duplicate_of: int | None = None
     extra_fields: dict = {}
-    uploaded_by: str | None = None
+    asset_owner_name: str | None = None
     parse_status: str = "done"
     processed_at: UTCDatetimeOpt = None
     synced_at: UTCDatetimeOpt = None

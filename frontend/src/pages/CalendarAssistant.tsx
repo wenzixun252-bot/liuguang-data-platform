@@ -36,28 +36,6 @@ interface ChatMessage {
   content: string
 }
 
-// ── 简报缓存工具（sessionStorage，按 event_id） ──────────
-
-const BRIEF_CACHE_KEY = 'calendar_brief_cache'
-
-function loadBriefCache(): Record<string, { content: string; chatMessages: ChatMessage[] }> {
-  try {
-    const raw = sessionStorage.getItem(BRIEF_CACHE_KEY)
-    return raw ? JSON.parse(raw) : {}
-  } catch { return {} }
-}
-
-function saveBriefToCache(eventId: string, content: string, chatMessages: ChatMessage[]) {
-  const cache = loadBriefCache()
-  cache[eventId] = { content, chatMessages }
-  sessionStorage.setItem(BRIEF_CACHE_KEY, JSON.stringify(cache))
-}
-
-function getBriefFromCache(eventId: string): { content: string; chatMessages: ChatMessage[] } | null {
-  const cache = loadBriefCache()
-  return cache[eventId] || null
-}
-
 // ── 工具函数 ──────────────────────────────────────────────
 
 function formatTime(iso: string): string {
@@ -202,24 +180,49 @@ export default function CalendarAssistant() {
     }
   }
 
-  // ── 选中事件（查看详情，从缓存恢复简报）──────────────────
-  const selectEvent = (event: CalendarEvent) => {
-    // 切换前：把当前会议的简报和对话缓存起来
-    if (selectedEvent && briefContent) {
-      saveBriefToCache(selectedEvent.event_id, briefContent, chatMessages)
+  // ── 从后端加载已保存的简报 ─────────────────────────────
+  const loadSavedBrief = async (eventId: string): Promise<{ content: string; chatMessages: ChatMessage[] } | null> => {
+    try {
+      const res = await api.get(`/calendar/brief/saved/${eventId}`)
+      if (res.data.found) {
+        return {
+          content: res.data.content,
+          chatMessages: res.data.chat_messages || [],
+        }
+      }
+    } catch { /* ignore */ }
+    return null
+  }
+
+  // ── 保存追问对话到后端 ──────────────────────────────────
+  const saveChatToBackend = async (eventId: string, messages: ChatMessage[]) => {
+    try {
+      await api.post('/calendar/brief/save-chat', {
+        event_id: eventId,
+        chat_messages: messages,
+      })
+    } catch { /* ignore */ }
+  }
+
+  // ── 选中事件（查看详情，从后端恢复简报）──────────────────
+  const selectEvent = async (event: CalendarEvent) => {
+    // 切换前：把当前会议的追问对话保存到后端
+    if (selectedEvent && briefContent && chatMessages.length > 0) {
+      saveChatToBackend(selectedEvent.event_id, chatMessages)
     }
     setSelectedEvent(event)
     setProfilePerson(null)
-    // 从缓存恢复新选中会议的简报
-    const cached = getBriefFromCache(event.event_id)
-    if (cached) {
-      setBriefContent(cached.content)
-      setChatMessages(cached.chatMessages)
+    setChatInput('')
+
+    // 从后端恢复已保存的简报
+    const saved = await loadSavedBrief(event.event_id)
+    if (saved) {
+      setBriefContent(saved.content)
+      setChatMessages(saved.chatMessages)
     } else {
       setBriefContent('')
       setChatMessages([])
     }
-    setChatInput('')
   }
 
   // ── 轮询简报进度 ──────────────────────────────────────────
@@ -245,7 +248,6 @@ export default function CalendarAssistant() {
         if (status === 'done') {
           if (content) {
             setBriefContent(content)
-            saveBriefToCache(eventId, content, [])
           }
           toast.success('会前简报已生成')
           updateTask(briefTaskId, { status: 'done', progress: 100, message: '已完成' })
@@ -378,11 +380,10 @@ export default function CalendarAssistant() {
     }
 
     setChatStreaming(false)
-    // 追问完成后保存缓存（需要拿到最新的 chatMessages）
+    // 追问完成后保存到后端
     if (selectedEvent && briefContent) {
-      // 用函数式获取最新 chatMessages
       setChatMessages(prev => {
-        saveBriefToCache(selectedEvent.event_id, briefContent, prev)
+        saveChatToBackend(selectedEvent.event_id, prev)
         return prev
       })
     }

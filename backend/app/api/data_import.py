@@ -291,6 +291,17 @@ async def _sync_structured_source(ds: ETLDataSource, user_access_token: str | No
                 except Exception as clean_err:
                     logger.warning("自动清洗失败: %s", clean_err)
 
+            # LLM 自动标签推荐
+            if table_obj:
+                try:
+                    from app.services.llm import auto_tag_content
+                    content = f"{table_obj.name} {table_obj.description or ''} {getattr(table_obj, 'summary', '') or ''}"
+                    tagged = await auto_tag_content(db, table_obj.id, "structured_table", content.strip(), ds.owner_id)
+                    if tagged:
+                        await db.commit()
+                except Exception as e_tag:
+                    logger.warning("自动标签推荐失败 (structured_table_id=%d): %s", table_obj.id, e_tag)
+
             logger.info("结构化数据源同步成功: %s/%s, %d 行", ds.app_token, ds.table_id, table_obj.row_count)
 
         except Exception as e:
@@ -966,7 +977,7 @@ async def import_feishu_docs(
         raise HTTPException(401, "飞书授权已失效，请重新登录")
 
     owner_id = current_user.feishu_open_id
-    uploader_name = current_user.name
+    actual_uploader = current_user.name  # 实际执行导入的人
     items = body.items
     extraction_rule_id = body.extraction_rule_id
 
@@ -1000,7 +1011,6 @@ async def import_feishu_docs(
                     owner_id=owner_id,
                     db=session,
                     user_access_token=user_token,
-                    uploader_name=uploader_name,
                 )
 
                 # 如果指定了提取规则，将 extraction_rule_id 保存到导入的文档上，并执行关键信息提取
@@ -1078,7 +1088,7 @@ async def import_feishu_docs_as_communication(
         raise HTTPException(401, "飞书授权已失效，请重新登录")
 
     owner_id = current_user.feishu_open_id
-    uploader_name = current_user.name
+    actual_uploader = current_user.name  # 实际执行导入的人
     items = body.items
     extraction_rule_id = body.extraction_rule_id
 
@@ -1112,7 +1122,6 @@ async def import_feishu_docs_as_communication(
                     owner_id=owner_id,
                     db=session,
                     user_access_token=user_token,
-                    uploader_name=uploader_name,
                 )
 
                 # 如果指定了提取规则，将 extraction_rule_id 保存到导入的沟通资产上，并执行关键信息提取
@@ -1206,14 +1215,14 @@ async def reimport_feishu_doc(
     if file_type in ("docx", "doc"):
         result_doc, status = await cloud_doc_import_service.import_cloud_doc(
             document_token, current_user.feishu_open_id, db,
-            user_token, current_user.name, force=True,
+            user_token, force=True,
         )
     else:
         # 文件类型需要 name，从现有记录获取
         file_name = doc.title if doc else "unknown"
         result_doc, status = await cloud_doc_import_service.import_cloud_file(
             document_token, file_name, current_user.feishu_open_id, db,
-            user_token, current_user.name, force=True,
+            user_token, force=True,
         )
 
     if status == "failed" or not result_doc:
@@ -1366,7 +1375,6 @@ async def import_feishu_doc_from_url(
                         owner_id=owner_id,
                         db=session,
                         user_access_token=user_token,
-                        uploader_name=current_user.name,
                     )
                     # 保存 extraction_rule_id 到沟通资产，并执行关键信息提取
                     if _from_url_extraction_rule_id:
@@ -1442,7 +1450,6 @@ async def import_feishu_doc_from_url(
                         owner_id=owner_id,
                         db=session,
                         user_access_token=user_token,
-                        uploader_name=current_user.name,
                     )
                     # 保存 extraction_rule_id 到导入的文档，并执行关键信息提取
                     if _from_url_extraction_rule_id_doc and result.documents:
@@ -1644,7 +1651,6 @@ async def trigger_cloud_folder_sync(
                         folder.owner_id,
                         session,
                         user_token,
-                        current_user.name,
                     )
 
                     # 如果文件夹配置了提取规则，对新导入的文档执行关键信息提取

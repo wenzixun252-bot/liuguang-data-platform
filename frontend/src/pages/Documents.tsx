@@ -1,10 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
-import { Search, ChevronLeft, ChevronRight, X, Paperclip, ExternalLink, Download, Image, User, Trash2, Table2, Upload } from 'lucide-react'
+import { Search, X, Paperclip, ExternalLink, Download, Image, User, Trash2, Table2, Upload } from 'lucide-react'
 import api, { getExtractionRules } from '../lib/api'
 import toast from 'react-hot-toast'
 import { useQuery } from '@tanstack/react-query'
-import { ColumnSettingsButton, useColumnSettings, type ColumnDef } from '../components/ColumnSettings'
 import { getUser } from '../lib/auth'
 
 import { TagChips, BatchTagBar, useContentTags, InlineTagEditor, TagFilter } from '../components/TagManager'
@@ -13,21 +12,7 @@ import { DateRangeFilter } from '../components/DateRangeFilter'
 import { HighlightText } from '../components/HighlightText'
 import ExtractionRuleSlicer from '../components/ExtractionRuleSlicer'
 import ExtractionFieldView from '../components/ExtractionFieldView'
-
-const DOC_COLUMNS: ColumnDef[] = [
-  { key: 'title', label: '标题' },
-  { key: 'tags', label: '标签' },
-  { key: 'keywords', label: '关键词', defaultVisible: false },
-  { key: 'summary', label: '摘要' },
-  { key: 'key_info', label: '关键信息' },
-  { key: 'source_type', label: '来源' },
-  { key: 'uploader_name', label: '资产所有人' },
-  { key: 'uploaded_by', label: '上传人', defaultVisible: false },
-  { key: 'file_type', label: '类型', defaultVisible: false },
-  { key: 'doc_created_time', label: '创建时间' },
-  { key: 'doc_modified_time', label: '修改时间' },
-  { key: 'time', label: '上传时间' },
-]
+import { DataTable, type DataTableColumn, getPersistedDisplayCount } from '../components/DataTable'
 
 interface AttachmentMeta {
   file_token: string
@@ -59,8 +44,8 @@ interface DocumentItem {
   key_info?: Record<string, string> | null
   tags: Record<string, unknown>
   source_url: string | null
+  asset_owner_name: string | null
   uploader_name: string | null
-  uploaded_by: string | null
   extra_fields?: { _attachments?: AttachmentMeta[]; _links?: LinkMeta[]; [key: string]: unknown }
   feishu_record_id: string | null
   bitable_url: string | null
@@ -105,15 +90,14 @@ export default function Documents() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [data, setData] = useState<DocumentListResponse | null>(null)
   const [loading, setLoading] = useState(true)
-  const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
+  const [displayCount, setDisplayCount] = useState(() => getPersistedDisplayCount('documents'))
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({})
   const [dateFilters, setDateFilters] = useState<Record<string, { from: string; to: string }>>({})
   const [tagIds, setTagIds] = useState<number[]>([])
   const [selected, setSelected] = useState<DocumentItem | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [refreshKey, setRefreshKey] = useState(0)
-  const { isVisible, toggle, columns: colDefs } = useColumnSettings('documents', DOC_COLUMNS)
   const [tagRefreshKey, setTagRefreshKey] = useState(0)
   const [extractionRuleId, setExtractionRuleId] = useState<number | null>(null)
   const [fieldViewRuleId, setFieldViewRuleId] = useState<number | null>(null)
@@ -125,11 +109,279 @@ export default function Documents() {
     rulesList.forEach((r: any) => { rulesMap[r.id] = r.name })
   }
 
-  const pageSize = 20
+  const currentIds = data?.items.map((i) => i.id) || []
+  const { tagsMap, reloadTags } = useContentTags('document', currentIds, tagRefreshKey)
+  const sourceTypeOptions = ['cloud', 'local']
+
+  const uniqueValues = (key: string) => {
+    if (!data?.items) return []
+    const vals = new Set<string>()
+    for (const item of data.items) {
+      const v = (item as unknown as Record<string, unknown>)[key]
+      if (v != null && v !== '') vals.add(String(v))
+    }
+    return Array.from(vals).sort()
+  }
+
+  const updateColumnFilter = (key: string, vals: string[]) => {
+    setColumnFilters((prev) => {
+      const next = { ...prev }
+      if (vals.length === 0) delete next[key]
+      else next[key] = vals
+      return next
+    })
+  }
+
+  const updateDateFilter = (field: string, from: string, to: string) => {
+    setDateFilters((prev) => {
+      const next = { ...prev }
+      if (!from && !to) delete next[field]
+      else next[field] = { from, to }
+      return next
+    })
+  }
+
+  // 列定义 - 将原来的 <td> 渲染逻辑迁移到 cell 函数中
+  const fileTypeLabel = (ft: string | null | undefined) => {
+    if (!ft) return '-'
+    const map: Record<string, string> = {
+      docx: '文档', doc: '文档', pdf: 'PDF', xlsx: '表格', xls: '表格',
+      pptx: '幻灯片', ppt: '幻灯片', txt: '文本', md: '文本',
+      png: '图片', jpg: '图片', jpeg: '图片', gif: '图片', svg: '图片', webp: '图片',
+      csv: '表格', json: '数据', html: '网页', zip: '压缩包', rar: '压缩包',
+    }
+    return map[ft.toLowerCase()] || ft.toUpperCase()
+  }
+
+  const tableColumns = useMemo<DataTableColumn<DocumentItem>[]>(() => [
+    {
+      key: 'title',
+      label: '标题',
+      width: 260,
+      minWidth: 160,
+      frozen: true,
+      sortable: true,
+      cell: (item) => (
+        <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+          <span className="text-gray-800 font-medium truncate">
+            <HighlightText text={item.title || item.original_filename || '无标题'} keyword={search} />
+          </span>
+          {item.parse_status === 'pending' && (
+            <span className="shrink-0 px-1.5 py-0.5 rounded text-xs bg-amber-50 text-amber-600 border border-amber-200">分析中</span>
+          )}
+          {item.parse_status === 'failed' && (
+            <span className="shrink-0 px-1.5 py-0.5 rounded text-xs bg-red-50 text-red-500 border border-red-200">解析失败</span>
+          )}
+          {(item.import_count ?? 1) > 1 && (
+            <span
+              className={`shrink-0 px-1.5 py-0.5 rounded text-xs border ${
+                item.import_count >= 10
+                  ? 'bg-amber-50 text-amber-700 border-amber-300 font-semibold'
+                  : item.import_count >= 5
+                    ? 'bg-purple-50 text-purple-600 border-purple-200'
+                    : 'bg-indigo-50 text-indigo-600 border-indigo-200'
+              }`}
+              title={`${item.import_count} 人已归档此文档`}
+            >
+              {item.import_count >= 10 ? '\ud83d\udd25 ' : ''}{item.import_count} 人归档
+            </span>
+          )}
+          {item.extraction_rule_id && rulesMap[item.extraction_rule_id] && (
+            <span className="shrink-0 px-1.5 py-0.5 rounded text-xs bg-violet-50 text-violet-700 border border-violet-200 font-medium">
+              {rulesMap[item.extraction_rule_id]}
+            </span>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: 'file_type',
+      label: '类型',
+      width: 90,
+      headerExtra: (
+        <ColumnFilter options={uniqueValues('file_type')} selected={columnFilters.file_type || []} onChange={(v) => updateColumnFilter('file_type', v)} />
+      ),
+      cell: (item) => <span className="text-gray-500">{fileTypeLabel(item.file_type)}</span>,
+    },
+    {
+      key: 'tags',
+      label: '标签',
+      width: 180,
+      minWidth: 100,
+      cell: (item) => (
+        <InlineTagEditor
+          contentType="document"
+          contentId={item.id}
+          tags={tagsMap[item.id] || []}
+          onChanged={() => { reloadTags(); setTagRefreshKey(k => k + 1) }}
+        />
+      ),
+    },
+    {
+      key: 'summary',
+      label: '摘要',
+      width: 260,
+      cellClassName: (item) => search && item.matched_fields?.includes('summary') ? 'bg-amber-50' : '',
+      cell: (item) => (
+        <span className="text-gray-500">
+          <HighlightText text={item.summary || item.content_text?.slice(0, 60) || '-'} keyword={search} />
+        </span>
+      ),
+    },
+    {
+      key: 'key_info',
+      label: '自定义提取内容',
+      width: 300,
+      headerClassName: 'text-violet-700 font-semibold bg-violet-50/50',
+      cellClassName: (item) => search && item.matched_fields?.includes('key_info') ? 'bg-amber-50' : 'bg-violet-50/30',
+      cell: (item) => {
+        if (!item.key_info || Object.keys(item.key_info).length === 0) {
+          return <span className="text-gray-300 text-xs">-</span>
+        }
+        return (
+          <div className="flex flex-wrap gap-1">
+            {Object.entries(item.key_info).slice(0, 3).map(([k, v]) => (
+              <span key={k} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-violet-100 text-violet-800 border border-violet-200" title={`${k}: ${v}`}>
+                <span className="text-violet-500 mr-0.5">{k}:</span>
+                <span className="truncate max-w-[90px]"><HighlightText text={String(v)} keyword={search} /></span>
+              </span>
+            ))}
+            {Object.keys(item.key_info).length > 3 && (
+              <span className="text-xs text-violet-400">+{Object.keys(item.key_info).length - 3}</span>
+            )}
+          </div>
+        )
+      },
+    },
+    {
+      key: 'source_type',
+      label: '来源',
+      width: 120,
+      headerExtra: (
+        <ColumnFilter options={sourceTypeOptions} selected={columnFilters.source_type || []} onChange={(v) => updateColumnFilter('source_type', v)} />
+      ),
+      cell: (item) => (
+        <span className={`px-2 py-1 rounded-full text-xs ${item.source_type === 'cloud' ? 'bg-blue-50 text-blue-700' : 'bg-green-50 text-green-700'}`}>
+          {getSourceLabel(item)}
+        </span>
+      ),
+    },
+    {
+      key: 'feishu_created_at',
+      label: '创建时间',
+      width: 110,
+      sortable: true,
+      headerExtra: (
+        <DateRangeFilter from={dateFilters.feishu_created_at?.from || ''} to={dateFilters.feishu_created_at?.to || ''} onChange={(f, t) => updateDateFilter('feishu_created_at', f, t)} />
+      ),
+      cell: (item) => (
+        <span className="text-gray-500 whitespace-nowrap">
+          {item.feishu_created_at ? new Date(item.feishu_created_at).toLocaleDateString('zh-CN') : '-'}
+        </span>
+      ),
+    },
+    {
+      key: 'feishu_updated_at',
+      label: '修改时间',
+      width: 110,
+      sortable: true,
+      headerExtra: (
+        <DateRangeFilter from={dateFilters.feishu_updated_at?.from || ''} to={dateFilters.feishu_updated_at?.to || ''} onChange={(f, t) => updateDateFilter('feishu_updated_at', f, t)} />
+      ),
+      cell: (item) => (
+        <span className="text-gray-500 whitespace-nowrap">
+          {item.feishu_updated_at ? new Date(item.feishu_updated_at).toLocaleDateString('zh-CN') : '-'}
+        </span>
+      ),
+    },
+    {
+      key: 'synced_at',
+      label: '上传时间',
+      width: 150,
+      sortable: true,
+      headerExtra: (
+        <DateRangeFilter from={dateFilters.synced_at?.from || ''} to={dateFilters.synced_at?.to || ''} onChange={(f, t) => updateDateFilter('synced_at', f, t)} />
+      ),
+      cell: (item) => (
+        <span className="text-gray-500 whitespace-nowrap">{new Date(item.synced_at || item.created_at).toLocaleString('zh-CN')}</span>
+      ),
+    },
+    {
+      key: 'asset_owner_name',
+      label: '资产所有人',
+      width: 130,
+      headerClassName: 'text-indigo-700 font-semibold bg-indigo-50/50',
+      cellClassName: (item) => search && item.matched_fields?.includes('asset_owner_name') ? 'bg-amber-50' : 'bg-indigo-50/30',
+      headerExtra: (
+        <ColumnFilter options={uniqueValues('asset_owner_name')} selected={columnFilters.asset_owner_name || []} onChange={(v) => updateColumnFilter('asset_owner_name', v)} />
+      ),
+      cell: (item) => (
+        <span className="text-indigo-700 font-medium">
+          <HighlightText text={item.asset_owner_name || '-'} keyword={search} />
+        </span>
+      ),
+    },
+    {
+      key: 'uploader_name',
+      label: '上传人',
+      width: 120,
+      headerExtra: (
+        <ColumnFilter options={uniqueValues('uploader_name')} selected={columnFilters.uploader_name || []} onChange={(v) => updateColumnFilter('uploader_name', v)} />
+      ),
+      cell: (item) => (
+        <span className="text-gray-700 font-medium">
+          <HighlightText text={item.uploader_name || '-'} keyword={search} />
+        </span>
+      ),
+    },
+    {
+      key: 'keywords',
+      label: '关键词',
+      width: 200,
+      cell: (item) => (
+        <div className="flex flex-wrap gap-1">
+          {(item.keywords || []).slice(0, 3).map((kw, i) => (
+            <span key={i} className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-xs"><HighlightText text={kw} keyword={search} /></span>
+          ))}
+          {(item.keywords || []).length > 3 && (
+            <span className="px-1.5 py-0.5 text-gray-400 text-xs">+{(item.keywords || []).length - 3}</span>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: 'actions',
+      label: '操作',
+      width: 120,
+      minWidth: 80,
+      cell: (item) => (
+        <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+          {item.source_type === 'local' && (
+            <button onClick={() => handleDownload(item.id, item.title)} className="p-1.5 hover:bg-green-50 rounded text-green-600" title="下载文件">
+              <Download size={14} />
+            </button>
+          )}
+          {item.source_url && (
+            <a href={item.source_url} target="_blank" rel="noopener noreferrer" className="p-1.5 hover:bg-blue-50 rounded text-blue-600" title="跳转源文档">
+              <ExternalLink size={14} />
+            </a>
+          )}
+          {item.bitable_url && (
+            <a href={item.bitable_url} target="_blank" rel="noopener noreferrer" className="p-1.5 hover:bg-purple-50 rounded text-purple-600" title="跳转源多维表格">
+              <Table2 size={14} />
+            </a>
+          )}
+          <button onClick={() => handleDelete(item.id)} className="p-1.5 hover:bg-red-50 rounded text-red-500" title="删除">
+            <Trash2 size={14} />
+          </button>
+        </div>
+      ),
+    },
+  ], [search, tagsMap, rulesMap, columnFilters, dateFilters, reloadTags])
 
   useEffect(() => {
     setLoading(true)
-    const params: Record<string, unknown> = { page, page_size: pageSize }
+    const params: Record<string, unknown> = { page: 1, page_size: displayCount }
     if (search) params.search = search
     if (tagIds.length > 0) params.tag_ids = tagIds
     if (extractionRuleId) params.extraction_rule_id = extractionRuleId
@@ -151,12 +403,12 @@ export default function Documents() {
       .then((res) => setData(res.data))
       .catch(() => toast.error('加载文档列表失败'))
       .finally(() => setLoading(false))
-  }, [page, search, columnFilters, dateFilters, tagIds, extractionRuleId, refreshKey])
+  }, [displayCount, search, columnFilters, dateFilters, tagIds, extractionRuleId, refreshKey])
 
-  // 翻页/筛选变化时清空选择
+  // 筛选变化时清空选择
   useEffect(() => {
     setSelectedIds(new Set())
-  }, [page, search, columnFilters, dateFilters, tagIds, extractionRuleId])
+  }, [search, columnFilters, dateFilters, tagIds, extractionRuleId])
 
   // 从搜索结果跳转过来时自动打开详情
   useEffect(() => {
@@ -169,57 +421,6 @@ export default function Documents() {
       }
     }
   }, [data, searchParams, setSearchParams])
-
-  // 从当前页数据提取唯一值用于列筛选
-  const uniqueValues = (key: string) => {
-    if (!data?.items) return []
-    const vals = new Set<string>()
-    for (const item of data.items) {
-      const v = (item as unknown as Record<string, unknown>)[key]
-      if (v != null && v !== '') vals.add(String(v))
-    }
-    return Array.from(vals).sort()
-  }
-  const sourceTypeOptions = ['cloud', 'local']
-  const updateColumnFilter = (key: string, vals: string[]) => {
-    setColumnFilters((prev) => {
-      const next = { ...prev }
-      if (vals.length === 0) delete next[key]
-      else next[key] = vals
-      return next
-    })
-    setPage(1)
-  }
-
-  const updateDateFilter = (field: string, from: string, to: string) => {
-    setDateFilters((prev) => {
-      const next = { ...prev }
-      if (!from && !to) delete next[field]
-      else next[field] = { from, to }
-      return next
-    })
-    setPage(1)
-  }
-
-  const totalPages = data ? Math.ceil(data.total / pageSize) : 0
-  const currentIds = data?.items.map((i) => i.id) || []
-  const allSelected = currentIds.length > 0 && currentIds.every((id) => selectedIds.has(id))
-  const { tagsMap, reloadTags } = useContentTags('document', currentIds, tagRefreshKey)
-
-  const toggleSelectAll = () => {
-    if (allSelected) {
-      setSelectedIds(new Set())
-    } else {
-      setSelectedIds(new Set(currentIds))
-    }
-  }
-
-  const toggleSelect = (id: number) => {
-    const next = new Set(selectedIds)
-    if (next.has(id)) next.delete(id)
-    else next.add(id)
-    setSelectedIds(next)
-  }
 
   const handleBatchDelete = async () => {
     if (selectedIds.size === 0) return
@@ -286,23 +487,22 @@ export default function Documents() {
               placeholder="搜索标题、内容、摘要、关键词、自定义提取..."
               className="pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm w-full sm:w-72 focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400"
               value={search}
-              onChange={(e) => { setSearch(e.target.value); setPage(1) }}
+              onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          <ColumnSettingsButton columns={colDefs} isVisible={isVisible} toggle={toggle} />
         </div>
       </div>
 
       {/* 标签切片器 */}
       <TagFilter
         selectedTagIds={tagIds}
-        onChange={(ids) => { setTagIds(ids); setPage(1) }}
+        onChange={setTagIds}
       />
 
       {/* 提取规则切片器 */}
       <ExtractionRuleSlicer
         selectedRuleId={extractionRuleId}
-        onSelect={(id) => { setExtractionRuleId(id); setPage(1) }}
+        onSelect={setExtractionRuleId}
         onViewFields={(id) => setFieldViewRuleId(id)}
       />
 
@@ -331,271 +531,36 @@ export default function Documents() {
         </div>
       )}
 
-      {/* Table */}
-      <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-        {loading ? (
-          <div className="p-8 text-center text-gray-400">加载中...</div>
-        ) : (
-          <>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="py-3 px-4 w-10">
-                      <input
-                        type="checkbox"
-                        checked={allSelected}
-                        onChange={toggleSelectAll}
-                        className="rounded"
-                      />
-                    </th>
-                    {isVisible('title') && <th className="text-left py-3 px-4 text-gray-500 font-medium">标题</th>}
-                    {isVisible('tags') && <th className="text-left py-3 px-4 text-gray-500 font-medium">标签</th>}
-                    {isVisible('keywords') && <th className="text-left py-3 px-4 text-gray-500 font-medium">关键词</th>}
-                    {isVisible('summary') && <th className="text-left py-3 px-4 text-gray-500 font-medium">摘要</th>}
-                    {isVisible('key_info') && <th className="text-left py-3 px-4 text-violet-700 font-semibold bg-violet-50/50">自定义提取内容</th>}
-                    {isVisible('source_type') && (
-                      <th className="text-left py-3 px-4 text-gray-500 font-medium">
-                        <span className="inline-flex items-center gap-1">来源
-                          <ColumnFilter options={sourceTypeOptions} selected={columnFilters.source_type || []} onChange={(v) => updateColumnFilter('source_type', v)} />
-                        </span>
-                      </th>
-                    )}
-                    {isVisible('uploader_name') && (
-                      <th className="text-left py-3 px-4 text-indigo-700 font-semibold bg-indigo-50/50">
-                        <span className="inline-flex items-center gap-1">资产所有人
-                          <ColumnFilter options={uniqueValues('uploader_name')} selected={columnFilters.uploader_name || []} onChange={(v) => updateColumnFilter('uploader_name', v)} />
-                        </span>
-                      </th>
-                    )}
-                    {isVisible('uploaded_by') && (
-                      <th className="text-left py-3 px-4 text-indigo-700 font-semibold bg-indigo-50/50">
-                        <span className="inline-flex items-center gap-1">上传人
-                          <ColumnFilter options={uniqueValues('uploaded_by')} selected={columnFilters.uploaded_by || []} onChange={(v) => updateColumnFilter('uploaded_by', v)} />
-                        </span>
-                      </th>
-                    )}
-                    {isVisible('file_type') && (
-                      <th className="text-left py-3 px-4 text-gray-500 font-medium">
-                        <span className="inline-flex items-center gap-1">类型
-                          <ColumnFilter options={uniqueValues('file_type')} selected={columnFilters.file_type || []} onChange={(v) => updateColumnFilter('file_type', v)} />
-                        </span>
-                      </th>
-                    )}
-                    {isVisible('doc_created_time') && (
-                      <th className="text-left py-3 px-4 text-gray-500 font-medium">
-                        <span className="inline-flex items-center gap-1">创建时间
-                          <DateRangeFilter from={dateFilters.feishu_created_at?.from || ''} to={dateFilters.feishu_created_at?.to || ''} onChange={(f, t) => updateDateFilter('feishu_created_at', f, t)} />
-                        </span>
-                      </th>
-                    )}
-                    {isVisible('doc_modified_time') && (
-                      <th className="text-left py-3 px-4 text-gray-500 font-medium">
-                        <span className="inline-flex items-center gap-1">修改时间
-                          <DateRangeFilter from={dateFilters.feishu_updated_at?.from || ''} to={dateFilters.feishu_updated_at?.to || ''} onChange={(f, t) => updateDateFilter('feishu_updated_at', f, t)} />
-                        </span>
-                      </th>
-                    )}
-                    {isVisible('time') && (
-                      <th className="text-left py-3 px-4 text-gray-500 font-medium">
-                        <span className="inline-flex items-center gap-1">上传时间
-                          <DateRangeFilter from={dateFilters.synced_at?.from || ''} to={dateFilters.synced_at?.to || ''} onChange={(f, t) => updateDateFilter('synced_at', f, t)} />
-                        </span>
-                      </th>
-                    )}
-                    <th className="text-left py-3 px-4 text-gray-500 font-medium">操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data && data.items.length > 0 ? data.items.map((item) => (
-                    <tr
-                      key={item.id}
-                      className={`border-t border-gray-50 hover:bg-indigo-50/50 cursor-pointer transition-colors ${selectedIds.has(item.id) ? 'bg-indigo-50/30' : ''}`}
-                      onClick={() => setSelected(item)}
-                    >
-                      <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
-                        <input
-                          type="checkbox"
-                          checked={selectedIds.has(item.id)}
-                          onChange={() => toggleSelect(item.id)}
-                          className="rounded"
-                        />
-                      </td>
-                      {isVisible('title') && (
-                        <td className="py-3 px-4 max-w-[240px]">
-                          <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
-                            <span className="text-gray-800 font-medium truncate">
-                              <HighlightText text={item.original_filename || item.title || '无标题'} keyword={search} />
-                            </span>
-                            {item.parse_status === 'pending' && (
-                              <span className="shrink-0 px-1.5 py-0.5 rounded text-xs bg-amber-50 text-amber-600 border border-amber-200">
-                                分析中
-                              </span>
-                            )}
-                            {item.parse_status === 'failed' && (
-                              <span className="shrink-0 px-1.5 py-0.5 rounded text-xs bg-red-50 text-red-500 border border-red-200">
-                                解析失败
-                              </span>
-                            )}
-                            {(item.import_count ?? 1) > 1 && (
-                              <span
-                                className={`shrink-0 px-1.5 py-0.5 rounded text-xs border ${
-                                  item.import_count >= 10
-                                    ? 'bg-amber-50 text-amber-700 border-amber-300 font-semibold'
-                                    : item.import_count >= 5
-                                      ? 'bg-purple-50 text-purple-600 border-purple-200'
-                                      : 'bg-indigo-50 text-indigo-600 border-indigo-200'
-                                }`}
-                                title={`${item.import_count} 人已归档此文档`}
-                              >
-                                {item.import_count >= 10 ? '🔥 ' : ''}{item.import_count} 人归档
-                              </span>
-                            )}
-                            {item.extraction_rule_id && rulesMap[item.extraction_rule_id] && (
-                              <span className="shrink-0 px-1.5 py-0.5 rounded text-xs bg-violet-50 text-violet-700 border border-violet-200 font-medium">
-                                {rulesMap[item.extraction_rule_id]}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                      )}
-                      {isVisible('tags') && (
-                        <td className="py-3 px-4 max-w-[200px]" onClick={(e) => e.stopPropagation()}>
-                          <InlineTagEditor
-                            contentType="document"
-                            contentId={item.id}
-                            tags={tagsMap[item.id] || []}
-                            onChanged={() => { reloadTags(); setTagRefreshKey(k => k + 1) }}
-                          />
-                        </td>
-                      )}
-                      {isVisible('keywords') && (
-                        <td className="py-3 px-4 max-w-[200px]">
-                          <div className="flex flex-wrap gap-1">
-                            {(item.keywords || []).slice(0, 3).map((kw, i) => (
-                              <span key={i} className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-xs"><HighlightText text={kw} keyword={search} /></span>
-                            ))}
-                            {(item.keywords || []).length > 3 && (
-                              <span className="px-1.5 py-0.5 text-gray-400 text-xs">+{(item.keywords || []).length - 3}</span>
-                            )}
-                          </div>
-                        </td>
-                      )}
-                      {isVisible('summary') && (
-                        <td className={`py-3 px-4 text-gray-500 max-w-[250px] truncate ${search && item.matched_fields?.includes('summary') ? 'bg-amber-50' : ''}`}>
-                          <HighlightText text={item.summary || item.content_text?.slice(0, 60) || '-'} keyword={search} />
-                        </td>
-                      )}
-                      {isVisible('key_info') && (
-                        <td className={`py-3 px-4 max-w-[280px] ${search && item.matched_fields?.includes('key_info') ? 'bg-amber-50' : 'bg-violet-50/30'}`}>
-                          {item.key_info && Object.keys(item.key_info).length > 0 ? (
-                            <div className="flex flex-wrap gap-1">
-                              {Object.entries(item.key_info).slice(0, 3).map(([k, v]) => (
-                                <span key={k} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-violet-100 text-violet-800 border border-violet-200" title={`${k}: ${v}`}>
-                                  <span className="text-violet-500 mr-0.5">{k}:</span>
-                                  <span className="truncate max-w-[90px]"><HighlightText text={String(v)} keyword={search} /></span>
-                                </span>
-                              ))}
-                              {Object.keys(item.key_info).length > 3 && (
-                                <span className="text-xs text-violet-400">+{Object.keys(item.key_info).length - 3}</span>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-gray-300 text-xs">-</span>
-                          )}
-                        </td>
-                      )}
-                      {isVisible('source_type') && (
-                        <td className="py-3 px-4">
-                          <span className={`px-2 py-1 rounded-full text-xs ${item.source_type === 'cloud' ? 'bg-blue-50 text-blue-700' : 'bg-green-50 text-green-700'}`}>
-                            {getSourceLabel(item)}
-                          </span>
-                        </td>
-                      )}
-                      {isVisible('uploader_name') && (
-                        <td className={`py-3 px-4 text-indigo-700 font-medium ${search && item.matched_fields?.includes('uploader_name') ? 'bg-amber-50' : 'bg-indigo-50/30'}`}>
-                          <HighlightText text={item.uploader_name || '-'} keyword={search} />
-                        </td>
-                      )}
-                      {isVisible('uploaded_by') && (
-                        <td className="py-3 px-4 text-gray-600">
-                          {item.uploaded_by || '-'}
-                        </td>
-                      )}
-                      {isVisible('file_type') && <td className="py-3 px-4 text-gray-500">{item.file_type ? item.file_type.toUpperCase() : '-'}</td>}
-                      {isVisible('doc_created_time') && (
-                        <td className="py-3 px-4 text-gray-500 whitespace-nowrap">
-                          {item.feishu_created_at
-                            ? new Date(item.feishu_created_at).toLocaleDateString('zh-CN')
-                            : '-'}
-                        </td>
-                      )}
-                      {isVisible('doc_modified_time') && (
-                        <td className="py-3 px-4 text-gray-500 whitespace-nowrap">
-                          {item.feishu_updated_at
-                            ? new Date(item.feishu_updated_at).toLocaleDateString('zh-CN')
-                            : '-'}
-                        </td>
-                      )}
-                      {isVisible('time') && <td className="py-3 px-4 text-gray-500 whitespace-nowrap">{new Date(item.synced_at || item.created_at).toLocaleString('zh-CN')}</td>}
-                      <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center gap-1">
-                          {item.source_type === 'local' && (
-                            <button onClick={() => handleDownload(item.id, item.title)} className="p-1.5 hover:bg-green-50 rounded text-green-600" title="下载文件">
-                              <Download size={14} />
-                            </button>
-                          )}
-                          {item.source_url && (
-                            <a href={item.source_url} target="_blank" rel="noopener noreferrer" className="p-1.5 hover:bg-blue-50 rounded text-blue-600" title="跳转源文档">
-                              <ExternalLink size={14} />
-                            </a>
-                          )}
-                          {item.bitable_url && (
-                            <a href={item.bitable_url} target="_blank" rel="noopener noreferrer" className="p-1.5 hover:bg-purple-50 rounded text-purple-600" title="跳转源多维表格">
-                              <Table2 size={14} />
-                            </a>
-                          )}
-                          <button onClick={() => handleDelete(item.id)} className="p-1.5 hover:bg-red-50 rounded text-red-500" title="删除">
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  )) : (
-                    <tr>
-                      <td colSpan={99} className="py-12 text-center text-gray-400">
-                        <p>暂无文档数据</p>
-                        <button
-                          type="button"
-                          onClick={() => navigate('/data-import')}
-                          className="mt-2 text-indigo-600 hover:text-indigo-700 text-sm font-medium"
-                        >
-                          前往数据归档
-                        </button>
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {totalPages > 1 && (
-              <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
-                <span className="text-sm text-gray-500">共 {data?.total ?? 0} 条，第 {page}/{totalPages} 页</span>
-                <div className="flex items-center gap-2">
-                  <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1} className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-30">
-                    <ChevronLeft size={16} />
-                  </button>
-                  <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages} className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-30">
-                    <ChevronRight size={16} />
-                  </button>
-                </div>
-              </div>
-            )}
-          </>
-        )}
-      </div>
-
+      {/* DataTable */}
+      <DataTable<DocumentItem>
+        columns={tableColumns}
+        data={data?.items || []}
+        rowKey={(item) => item.id}
+        loading={loading}
+        storageKey="documents"
+        search={search}
+        reorderable
+        selectable
+        selectedIds={selectedIds}
+        onSelectionChange={setSelectedIds}
+        onRowClick={(item) => setSelected(item)}
+        activeRowId={selected?.id}
+        total={data?.total ?? 0}
+        displayCount={displayCount}
+        onDisplayCountChange={setDisplayCount}
+        emptyContent={
+          <div>
+            <p>暂无文档数据</p>
+            <button
+              type="button"
+              onClick={() => navigate('/data-import')}
+              className="mt-2 text-indigo-600 hover:text-indigo-700 text-sm font-medium"
+            >
+              前往数据归档
+            </button>
+          </div>
+        }
+      />
 
       {/* Detail panel */}
       {selected && <DocumentDetail doc={selected} onClose={() => setSelected(null)} onDelete={async (id) => {
@@ -641,7 +606,8 @@ function DocumentDetail({ doc, onClose, onDelete }: { doc: DocumentItem; onClose
           <Field label="标题" value={doc.title || '无标题'} />
           {doc.original_filename && <Field label="原始文件名" value={doc.original_filename} />}
           <Field label="来源" value={getSourceLabel(doc)} />
-          {doc.uploader_name && <Field label="资产所有人" value={doc.uploader_name} icon={<User size={14} />} />}
+          {doc.asset_owner_name && <Field label="资产所有人" value={doc.asset_owner_name} icon={<User size={14} />} />}
+          {doc.uploader_name && <Field label="上传人" value={doc.uploader_name} icon={<User size={14} />} />}
           {doc.file_type && <Field label="文件类型" value={doc.file_type.toUpperCase()} />}
           <Field label="时间" value={new Date(doc.synced_at || doc.created_at).toLocaleString('zh-CN')} />
 

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import {
   Search, ChevronLeft, ChevronRight, X, Trash2, RefreshCw,
@@ -10,6 +10,7 @@ import { BatchTagBar, TagChips, useContentTags, InlineTagEditor, TagFilter } fro
 import { ColumnFilter } from '../components/ColumnFilter'
 import { DateRangeFilter } from '../components/DateRangeFilter'
 import { HighlightText } from '../components/HighlightText'
+import { DataTable, type DataTableColumn, getPersistedDisplayCount } from '../components/DataTable'
 
 /* ── 类型定义 ────────────────────────────────── */
 
@@ -28,8 +29,8 @@ interface StructuredTableItem {
   import_count: number
   cleaning_rule_id?: number | null
   cleaning_rule_name?: string | null
+  asset_owner_name: string | null
   uploader_name: string | null
-  uploaded_by: string | null
   synced_at: string | null
   created_at: string
   updated_at: string
@@ -77,15 +78,17 @@ export default function StructuredTables() {
   const [items, setItems] = useState<StructuredTableItem[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
+  const [displayCount, setDisplayCount] = useState(() => getPersistedDisplayCount('structured-tables'))
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({})
   const [dateFilters, setDateFilters] = useState<Record<string, { from: string; to: string }>>({})
   const [tagIds, setTagIds] = useState<number[]>([])
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [refreshKey, setRefreshKey] = useState(0)
 
-  // 穿透搜索（与 search 共用关键词）
+  const detailPageSize = 20 // 穿透搜索和详情面板的分页大小
+
+  // 穿透搜索
   const [searchResults, setSearchResults] = useState<SearchResultItem[] | null>(null)
   const [searchTotal, setSearchTotal] = useState(0)
   const [searchPage, setSearchPage] = useState(1)
@@ -102,49 +105,12 @@ export default function StructuredTables() {
   const [tagRefreshKey, setTagRefreshKey] = useState(0)
   const navigate = useNavigate()
 
-  const pageSize = 20
+  const currentIds = items.map((i) => i.id)
+  const { tagsMap, reloadTags } = useContentTags('structured_table', currentIds, tagRefreshKey)
 
-  /* ── 加载表格列表 ─────────────────────────────── */
 
-  useEffect(() => {
-    setLoading(true)
-    const params: Record<string, unknown> = { page, page_size: pageSize }
-    if (search) params.search = search
-    if (tagIds.length > 0) params.tag_ids = tagIds
-    for (const [key, vals] of Object.entries(columnFilters)) {
-      if (vals.length > 0) params[key] = vals.join(',')
-    }
-    // 时间筛选
-    for (const [field, range] of Object.entries(dateFilters)) {
-      if (range.from || range.to) {
-        params.date_field = field
-        if (range.from) params.date_from = range.from + 'T00:00:00'
-        if (range.to) params.date_to = range.to + 'T23:59:59'
-        break
-      }
-    }
+  const sourceTypeOptions = ['bitable', 'spreadsheet', 'local']
 
-    api.get('/structured-tables', { params })
-      .then((res) => {
-        setItems(res.data.items)
-        setTotal(res.data.total)
-      })
-      .catch(() => toast.error('加载表格列表失败'))
-      .finally(() => setLoading(false))
-  }, [page, search, columnFilters, dateFilters, tagIds, refreshKey])
-
-  useEffect(() => { setSelectedIds(new Set()) }, [page, search, columnFilters, dateFilters, tagIds])
-
-  // 从搜索结果跳转过来时自动打开详情
-  useEffect(() => {
-    const highlightId = searchParams.get('highlight')
-    if (highlightId && items.length > 0) {
-      openDetail(Number(highlightId))
-      setSearchParams({}, { replace: true })
-    }
-  }, [items, searchParams, setSearchParams])
-
-  // 从当前页数据提取唯一值用于列筛选
   const uniqueValues = (key: string) => {
     const vals = new Set<string>()
     for (const item of items) {
@@ -153,7 +119,7 @@ export default function StructuredTables() {
     }
     return Array.from(vals).sort()
   }
-  const sourceTypeOptions = ['bitable', 'spreadsheet', 'local']
+
   const updateColumnFilter = (key: string, vals: string[]) => {
     setColumnFilters((prev) => {
       const next = { ...prev }
@@ -161,7 +127,6 @@ export default function StructuredTables() {
       else next[key] = vals
       return next
     })
-    setPage(1)
   }
   const updateDateFilter = (field: string, from: string, to: string) => {
     setDateFilters((prev) => {
@@ -170,36 +135,190 @@ export default function StructuredTables() {
       else next[field] = { from, to }
       return next
     })
-    setPage(1)
   }
 
-  const totalPages = Math.ceil(total / pageSize)
-  const currentIds = items.map((i) => i.id)
-  const allSelected = currentIds.length > 0 && currentIds.every((id) => selectedIds.has(id))
-  const { tagsMap, reloadTags } = useContentTags('structured_table', currentIds, tagRefreshKey)
+  /* ── DataTable 列定义 ──────────────────────── */
+
+  const tableColumns = useMemo<DataTableColumn<StructuredTableItem>[]>(() => [
+    {
+      key: 'name',
+      label: '表名',
+      width: 260,
+      minWidth: 160,
+      frozen: true,
+      sortable: true,
+      cell: (item) => (
+        <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
+          <span className="text-gray-800 font-medium truncate">{item.name}</span>
+          {(item.import_count ?? 1) > 1 && (
+            <span
+              className={`shrink-0 px-1.5 py-0.5 rounded text-xs border ${
+                item.import_count >= 10
+                  ? 'bg-amber-50 text-amber-700 border-amber-300 font-semibold'
+                  : item.import_count >= 5
+                    ? 'bg-purple-50 text-purple-600 border-purple-200'
+                    : 'bg-indigo-50 text-indigo-600 border-indigo-200'
+              }`}
+              title={`${item.import_count} 人已归档此表格`}
+            >
+              {item.import_count >= 10 ? '\ud83d\udd25 ' : ''}{item.import_count} 人归档
+            </span>
+          )}
+          {item.cleaning_rule_id ? (
+            <span className="shrink-0 px-1.5 py-0.5 rounded text-xs bg-green-50 text-green-600 border border-green-200" title={item.cleaning_rule_name || '已清洗'}>
+              {item.cleaning_rule_name || '已清洗'}
+            </span>
+          ) : (
+            <span className="shrink-0 px-1.5 py-0.5 rounded text-xs bg-gray-50 text-gray-400 border border-gray-200">未清洗</span>
+          )}
+        </div>
+      ),
+    },
+    {
+      key: 'tags',
+      label: '标签',
+      width: 180,
+      minWidth: 100,
+      cell: (item) => (
+        <InlineTagEditor
+          contentType="structured_table"
+          contentId={item.id}
+          tags={tagsMap[item.id] || []}
+          onChanged={() => { reloadTags(); setTagRefreshKey(k => k + 1) }}
+        />
+      ),
+    },
+    {
+      key: 'summary',
+      label: '摘要',
+      width: 220,
+      cell: (item) => <span className="text-gray-500">{item.summary || '-'}</span>,
+    },
+    {
+      key: 'source_type',
+      label: '来源',
+      width: 130,
+      headerExtra: <ColumnFilter options={sourceTypeOptions} selected={columnFilters.source_type || []} onChange={(v) => updateColumnFilter('source_type', v)} />,
+      cell: (item) => (
+        <span className={`px-2 py-1 rounded-full text-xs ${SOURCE_COLORS[item.source_type] || 'bg-gray-50 text-gray-700'}`}>
+          {SOURCE_LABELS[item.source_type] || item.source_type}
+        </span>
+      ),
+    },
+    {
+      key: 'asset_owner_name',
+      label: '资产所有人',
+      width: 130,
+      headerClassName: 'text-indigo-700 font-semibold bg-indigo-50/50',
+      cellClassName: () => 'bg-indigo-50/30',
+      headerExtra: <ColumnFilter options={uniqueValues('asset_owner_name')} selected={columnFilters.asset_owner_name || []} onChange={(v) => updateColumnFilter('asset_owner_name', v)} />,
+      cell: (item) => <span className="text-indigo-700 font-medium">{item.asset_owner_name || '-'}</span>,
+    },
+    {
+      key: 'uploader_name',
+      label: '上传人',
+      width: 110,
+      headerExtra: <ColumnFilter options={uniqueValues('uploader_name')} selected={columnFilters.uploader_name || []} onChange={(v) => updateColumnFilter('uploader_name', v)} />,
+      cell: (item) => <span className="text-gray-600">{item.uploader_name || '-'}</span>,
+    },
+    {
+      key: 'row_count',
+      label: '记录数',
+      width: 80,
+      sortable: true,
+      cell: (item) => <span className="text-gray-500">{item.row_count}</span>,
+    },
+    {
+      key: 'column_count',
+      label: '字段数',
+      width: 80,
+      cell: (item) => <span className="text-gray-500">{item.column_count}</span>,
+    },
+    {
+      key: 'synced_at',
+      label: '同步/上传时间',
+      width: 160,
+      sortable: true,
+      headerExtra: <DateRangeFilter from={dateFilters.synced_at?.from || ''} to={dateFilters.synced_at?.to || ''} onChange={(f, t) => updateDateFilter('synced_at', f, t)} />,
+      cell: (item) => <span className="text-gray-500 whitespace-nowrap">{item.synced_at ? new Date(item.synced_at).toLocaleString('zh-CN') : '-'}</span>,
+    },
+    {
+      key: 'actions',
+      label: '操作',
+      width: 130,
+      minWidth: 100,
+      cell: (item) => (
+        <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+          {item.source_type === 'local' && (
+            <button onClick={() => handleExport(item.id, item.name)} className="p-1.5 hover:bg-green-50 rounded text-green-600" title="下载 XLSX">
+              <Download size={14} />
+            </button>
+          )}
+          {item.source_url && (
+            <a href={item.source_url} target="_blank" rel="noopener noreferrer" className="p-1.5 hover:bg-purple-50 rounded text-purple-600" title="跳转源表格">
+              <ExternalLink size={14} />
+            </a>
+          )}
+          {item.source_type !== 'local' && (
+            <button onClick={() => handleSync(item.id)} className="p-1.5 hover:bg-blue-50 rounded text-blue-600" title="重新同步">
+              <RefreshCw size={14} />
+            </button>
+          )}
+          <button onClick={() => handleDelete(item.id)} className="p-1.5 hover:bg-red-50 rounded text-red-500" title="删除">
+            <Trash2 size={14} />
+          </button>
+        </div>
+      ),
+    },
+  ], [tagsMap, columnFilters, dateFilters, reloadTags, items])
+
+  /* ── 加载表格列表 ─────────────────────────────── */
+
+  useEffect(() => {
+    setLoading(true)
+    const params: Record<string, unknown> = { page: 1, page_size: displayCount }
+    if (search) params.search = search
+    if (tagIds.length > 0) params.tag_ids = tagIds
+    for (const [key, vals] of Object.entries(columnFilters)) {
+      if (vals.length > 0) params[key] = vals.join(',')
+    }
+    for (const [field, range] of Object.entries(dateFilters)) {
+      if (range.from || range.to) {
+        params.date_field = field
+        if (range.from) params.date_from = range.from + 'T00:00:00'
+        if (range.to) params.date_to = range.to + 'T23:59:59'
+        break
+      }
+    }
+    api.get('/structured-tables', { params })
+      .then((res) => { setItems(res.data.items); setTotal(res.data.total) })
+      .catch(() => toast.error('加载表格列表失败'))
+      .finally(() => setLoading(false))
+  }, [displayCount, search, columnFilters, dateFilters, tagIds, refreshKey])
+
+  useEffect(() => { setSelectedIds(new Set()) }, [search, columnFilters, dateFilters, tagIds])
+
+  useEffect(() => {
+    const highlightId = searchParams.get('highlight')
+    if (highlightId && items.length > 0) {
+      openDetail(Number(highlightId))
+      setSearchParams({}, { replace: true })
+    }
+  }, [items, searchParams, setSearchParams])
 
   /* ── 穿透搜索 ──────────────────────────────────── */
 
   const doGlobalSearch = useCallback((keyword: string, p: number) => {
-    if (!keyword.trim()) {
-      setSearchResults(null)
-      return
-    }
+    if (!keyword.trim()) { setSearchResults(null); return }
     setSearching(true)
-    api.get('/structured-tables/search', { params: { q: keyword, page: p, page_size: pageSize } })
-      .then((res) => {
-        setSearchResults(res.data.results)
-        setSearchTotal(res.data.total)
-      })
+    api.get('/structured-tables/search', { params: { q: keyword, page: p, page_size: detailPageSize } })
+      .then((res) => { setSearchResults(res.data.results); setSearchTotal(res.data.total) })
       .catch(() => toast.error('搜索失败'))
       .finally(() => setSearching(false))
   }, [])
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setSearchPage(1)
-      doGlobalSearch(search, 1)
-    }, 400)
+    const timer = setTimeout(() => { setSearchPage(1); doGlobalSearch(search, 1) }, 400)
     return () => clearTimeout(timer)
   }, [search, doGlobalSearch])
 
@@ -210,42 +329,31 @@ export default function StructuredTables() {
       setDetailLoading(true)
       const [detailRes, rowsRes] = await Promise.all([
         api.get(`/structured-tables/${id}`),
-        api.get(`/structured-tables/${id}/rows`, { params: { page: 1, page_size: pageSize } }),
+        api.get(`/structured-tables/${id}/rows`, { params: { page: 1, page_size: detailPageSize } }),
       ])
       setDetail(detailRes.data)
       setDetailRows(rowsRes.data.items)
       setDetailRowsTotal(rowsRes.data.total)
       setDetailPage(1)
       setDetailSearch('')
-    } catch {
-      toast.error('加载详情失败')
-    } finally {
-      setDetailLoading(false)
-    }
+    } catch { toast.error('加载详情失败') }
+    finally { setDetailLoading(false) }
   }
 
   const loadDetailRows = async (tableId: number, p: number, s: string) => {
     try {
-      const params: Record<string, unknown> = { page: p, page_size: pageSize }
+      const params: Record<string, unknown> = { page: p, page_size: detailPageSize }
       if (s) params.search = s
       const res = await api.get(`/structured-tables/${tableId}/rows`, { params })
       setDetailRows(res.data.items)
       setDetailRowsTotal(res.data.total)
-    } catch {
-      toast.error('加载行数据失败')
-    }
+    } catch { toast.error('加载行数据失败') }
   }
 
-  useEffect(() => {
-    if (detail) loadDetailRows(detail.id, detailPage, detailSearch)
-  }, [detailPage])
-
+  useEffect(() => { if (detail) loadDetailRows(detail.id, detailPage, detailSearch) }, [detailPage])
   useEffect(() => {
     if (!detail) return
-    const timer = setTimeout(() => {
-      setDetailPage(1)
-      loadDetailRows(detail.id, 1, detailSearch)
-    }, 400)
+    const timer = setTimeout(() => { setDetailPage(1); loadDetailRows(detail.id, 1, detailSearch) }, 400)
     return () => clearTimeout(timer)
   }, [detailSearch])
 
@@ -257,9 +365,7 @@ export default function StructuredTables() {
       toast.success('同步成功')
       setRefreshKey((k) => k + 1)
       if (detail?.id === id) openDetail(id)
-    } catch (err: any) {
-      toast.error(err?.response?.data?.detail || '同步失败')
-    }
+    } catch (err: any) { toast.error(err?.response?.data?.detail || '同步失败') }
   }
 
   const handleDelete = async (id: number) => {
@@ -278,16 +384,13 @@ export default function StructuredTables() {
       const url = window.URL.createObjectURL(new Blob([response.data]))
       const link = document.createElement('a')
       link.href = url
-      const downloadName = name.endsWith('.xlsx') ? name : `${name}.xlsx`
-      link.setAttribute('download', downloadName)
+      link.setAttribute('download', name.endsWith('.xlsx') ? name : `${name}.xlsx`)
       document.body.appendChild(link)
       link.click()
       link.remove()
       window.URL.revokeObjectURL(url)
       toast.success('导出成功')
-    } catch {
-      toast.error('导出失败')
-    }
+    } catch { toast.error('导出失败') }
   }
 
   const handleDownloadOriginal = async (id: number, name: string) => {
@@ -302,9 +405,7 @@ export default function StructuredTables() {
       link.remove()
       window.URL.revokeObjectURL(url)
       toast.success('下载成功')
-    } catch {
-      toast.error('无原始文件')
-    }
+    } catch { toast.error('无原始文件') }
   }
 
   const handleBatchDelete = async () => {
@@ -342,7 +443,7 @@ export default function StructuredTables() {
             placeholder="搜索表名或表内数据..."
             className="pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm w-full sm:w-72 focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400"
             value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(1) }}
+            onChange={(e) => setSearch(e.target.value)}
           />
         </div>
       </div>
@@ -351,12 +452,8 @@ export default function StructuredTables() {
       {searchResults !== null && (
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-            <span className="text-sm font-medium text-gray-700">
-              搜索结果: 共 {searchTotal} 条匹配
-            </span>
-            <button onClick={() => { setSearch(''); setSearchResults(null) }} className="text-gray-400 hover:text-gray-600">
-              <X size={16} />
-            </button>
+            <span className="text-sm font-medium text-gray-700">搜索结果: 共 {searchTotal} 条匹配</span>
+            <button onClick={() => { setSearch(''); setSearchResults(null) }} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
           </div>
           {searching ? (
             <div className="p-6 text-center text-gray-400">搜索中...</div>
@@ -365,11 +462,7 @@ export default function StructuredTables() {
           ) : (
             <div className="divide-y divide-gray-50">
               {searchResults.map((r) => (
-                <div
-                  key={r.row_id}
-                  className="px-4 py-3 hover:bg-indigo-50/50 cursor-pointer transition-colors"
-                  onClick={() => openDetail(r.table_id)}
-                >
+                <div key={r.row_id} className="px-4 py-3 hover:bg-indigo-50/50 cursor-pointer transition-colors" onClick={() => openDetail(r.table_id)}>
                   <div className="flex items-center gap-2 mb-1">
                     <Table2 size={14} className="text-indigo-500" />
                     <span className="text-xs text-indigo-600 font-medium">{r.table_name}</span>
@@ -388,12 +481,12 @@ export default function StructuredTables() {
               ))}
             </div>
           )}
-          {searchTotal > pageSize && (
+          {searchTotal > detailPageSize && (
             <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
-              <span className="text-sm text-gray-500">第 {searchPage}/{Math.ceil(searchTotal / pageSize)} 页</span>
+              <span className="text-sm text-gray-500">第 {searchPage}/{Math.ceil(searchTotal / detailPageSize)} 页</span>
               <div className="flex items-center gap-2">
                 <button onClick={() => { const p = Math.max(1, searchPage - 1); setSearchPage(p); doGlobalSearch(search, p) }} disabled={searchPage <= 1} className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-30"><ChevronLeft size={16} /></button>
-                <button onClick={() => { const p = Math.min(Math.ceil(searchTotal / pageSize), searchPage + 1); setSearchPage(p); doGlobalSearch(search, p) }} disabled={searchPage >= Math.ceil(searchTotal / pageSize)} className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-30"><ChevronRight size={16} /></button>
+                <button onClick={() => { const p = Math.min(Math.ceil(searchTotal / detailPageSize), searchPage + 1); setSearchPage(p); doGlobalSearch(search, p) }} disabled={searchPage >= Math.ceil(searchTotal / detailPageSize)} className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-30"><ChevronRight size={16} /></button>
               </div>
             </div>
           )}
@@ -401,20 +494,13 @@ export default function StructuredTables() {
       )}
 
       {/* 标签切片器 */}
-      <TagFilter
-        selectedTagIds={tagIds}
-        onChange={(ids) => { setTagIds(ids); setPage(1) }}
-      />
+      <TagFilter selectedTagIds={tagIds} onChange={setTagIds} />
 
       {/* 批量操作栏 */}
       {selectedIds.size > 0 && (
         <div className="flex items-center gap-3 px-4 py-2 bg-indigo-50 border border-indigo-200 rounded-lg flex-wrap">
           <span className="text-sm text-indigo-700 font-medium">已选择 {selectedIds.size} 项</span>
-          <BatchTagBar
-            selectedIds={selectedIds}
-            contentType="structured_table"
-            onDone={() => setRefreshKey((k) => k + 1)}
-          />
+          <BatchTagBar selectedIds={selectedIds} contentType="structured_table" onDone={() => setRefreshKey((k) => k + 1)} />
           <button onClick={handleBatchDelete} className="flex items-center gap-1 px-3 py-1.5 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 text-sm">
             <Trash2 size={14} /> 批量删除
           </button>
@@ -422,166 +508,32 @@ export default function StructuredTables() {
         </div>
       )}
 
-      {/* 表格列表 */}
-      <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-        {loading ? (
-          <div className="p-8 text-center text-gray-400">加载中...</div>
-        ) : (
-          <>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="py-3 px-4 w-10">
-                      <input type="checkbox" checked={allSelected} onChange={() => {
-                        if (allSelected) setSelectedIds(new Set())
-                        else setSelectedIds(new Set(currentIds))
-                      }} className="rounded" />
-                    </th>
-                    <th className="text-left py-3 px-4 text-gray-500 font-medium">表名</th>
-                    <th className="text-left py-3 px-4 text-gray-500 font-medium">标签</th>
-                    <th className="text-left py-3 px-4 text-gray-500 font-medium">
-                      <span className="inline-flex items-center gap-1">来源
-                        <ColumnFilter options={sourceTypeOptions} selected={columnFilters.source_type || []} onChange={(v) => updateColumnFilter('source_type', v)} />
-                      </span>
-                    </th>
-                    <th className="text-left py-3 px-4 text-indigo-700 font-semibold bg-indigo-50/50">
-                      <span className="inline-flex items-center gap-1">资产所有人
-                        <ColumnFilter options={uniqueValues('uploader_name')} selected={columnFilters.uploader_name || []} onChange={(v) => updateColumnFilter('uploader_name', v)} />
-                      </span>
-                    </th>
-                    <th className="text-left py-3 px-4 text-gray-500 font-medium">
-                      <span className="inline-flex items-center gap-1">上传人
-                        <ColumnFilter options={uniqueValues('uploaded_by')} selected={columnFilters.uploaded_by || []} onChange={(v) => updateColumnFilter('uploaded_by', v)} />
-                      </span>
-                    </th>
-                    <th className="text-left py-3 px-4 text-gray-500 font-medium">记录数</th>
-                    <th className="text-left py-3 px-4 text-gray-500 font-medium">字段数</th>
-                    <th className="text-left py-3 px-4 text-gray-500 font-medium">摘要</th>
-                    <th className="text-left py-3 px-4 text-gray-500 font-medium">
-                      <span className="inline-flex items-center gap-1">同步/上传时间
-                        <DateRangeFilter from={dateFilters.synced_at?.from || ''} to={dateFilters.synced_at?.to || ''} onChange={(f, t) => updateDateFilter('synced_at', f, t)} />
-                      </span>
-                    </th>
-                    <th className="text-left py-3 px-4 text-gray-500 font-medium">操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.length > 0 ? items.map((item) => (
-                    <tr
-                      key={item.id}
-                      className={`border-t border-gray-50 hover:bg-indigo-50/50 cursor-pointer transition-colors ${selectedIds.has(item.id) ? 'bg-indigo-50/30' : ''}`}
-                      onClick={() => openDetail(item.id)}
-                    >
-                      <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
-                        <input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => {
-                          const next = new Set(selectedIds)
-                          if (next.has(item.id)) next.delete(item.id)
-                          else next.add(item.id)
-                          setSelectedIds(next)
-                        }} className="rounded" />
-                      </td>
-                      <td className="py-3 px-4 max-w-[240px]">
-                        <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
-                          <span className="text-gray-800 font-medium truncate">{item.name}</span>
-                          {(item.import_count ?? 1) > 1 && (
-                            <span
-                              className={`shrink-0 px-1.5 py-0.5 rounded text-xs border ${
-                                item.import_count >= 10
-                                  ? 'bg-amber-50 text-amber-700 border-amber-300 font-semibold'
-                                  : item.import_count >= 5
-                                    ? 'bg-purple-50 text-purple-600 border-purple-200'
-                                    : 'bg-indigo-50 text-indigo-600 border-indigo-200'
-                              }`}
-                              title={`${item.import_count} 人已归档此表格`}
-                            >
-                              {item.import_count >= 10 ? '🔥 ' : ''}{item.import_count} 人归档
-                            </span>
-                          )}
-                          {item.cleaning_rule_id ? (
-                            <span className="shrink-0 px-1.5 py-0.5 rounded text-xs bg-green-50 text-green-600 border border-green-200" title={item.cleaning_rule_name || '已清洗'}>
-                              {item.cleaning_rule_name || '已清洗'}
-                            </span>
-                          ) : (
-                            <span className="shrink-0 px-1.5 py-0.5 rounded text-xs bg-gray-50 text-gray-400 border border-gray-200">
-                              未清洗
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="py-3 px-4 max-w-[200px]" onClick={(e) => e.stopPropagation()}>
-                        <InlineTagEditor
-                          contentType="structured_table"
-                          contentId={item.id}
-                          tags={tagsMap[item.id] || []}
-                          onChanged={() => { reloadTags(); setTagRefreshKey(k => k + 1) }}
-                        />
-                      </td>
-                      <td className="py-3 px-4">
-                        <span className={`px-2 py-1 rounded-full text-xs ${SOURCE_COLORS[item.source_type] || 'bg-gray-50 text-gray-700'}`}>
-                          {SOURCE_LABELS[item.source_type] || item.source_type}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-indigo-700 font-medium bg-indigo-50/30">{item.uploader_name || '-'}</td>
-                      <td className="py-3 px-4 text-gray-600">{item.uploaded_by || '-'}</td>
-                      <td className="py-3 px-4 text-gray-500">{item.row_count}</td>
-                      <td className="py-3 px-4 text-gray-500">{item.column_count}</td>
-                      <td className="py-3 px-4 text-gray-500 max-w-[200px] truncate">{item.summary || '-'}</td>
-                      <td className="py-3 px-4 text-gray-500 whitespace-nowrap">
-                        {item.synced_at ? new Date(item.synced_at).toLocaleString('zh-CN') : '-'}
-                      </td>
-                      <td className="py-3 px-4" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center gap-1">
-                          {item.source_type === 'local' && (
-                            <button onClick={() => handleExport(item.id, item.name)} className="p-1.5 hover:bg-green-50 rounded text-green-600" title="下载 XLSX">
-                              <Download size={14} />
-                            </button>
-                          )}
-                          {item.source_url && (
-                            <a href={item.source_url} target="_blank" rel="noopener noreferrer" className="p-1.5 hover:bg-purple-50 rounded text-purple-600" title="跳转源表格">
-                              <ExternalLink size={14} />
-                            </a>
-                          )}
-                          {item.source_type !== 'local' && (
-                            <button onClick={() => handleSync(item.id)} className="p-1.5 hover:bg-blue-50 rounded text-blue-600" title="重新同步">
-                              <RefreshCw size={14} />
-                            </button>
-                          )}
-                          <button onClick={() => handleDelete(item.id)} className="p-1.5 hover:bg-red-50 rounded text-red-500" title="删除">
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  )) : (
-                    <tr>
-                      <td colSpan={99} className="py-12 text-center text-gray-400">
-                        <p>暂无表格数据</p>
-                        <button
-                          type="button"
-                          onClick={() => navigate('/data-import')}
-                          className="mt-2 text-indigo-600 hover:text-indigo-700 text-sm font-medium"
-                        >
-                          前往数据归档
-                        </button>
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-            {totalPages > 1 && (
-              <div className="flex items-center justify-between px-4 py-3 border-t border-gray-100">
-                <span className="text-sm text-gray-500">共 {total} 条，第 {page}/{totalPages} 页</span>
-                <div className="flex items-center gap-2">
-                  <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1} className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-30"><ChevronLeft size={16} /></button>
-                  <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages} className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-30"><ChevronRight size={16} /></button>
-                </div>
-              </div>
-            )}
-          </>
-        )}
-      </div>
+      {/* DataTable */}
+      <DataTable<StructuredTableItem>
+        columns={tableColumns}
+        data={items}
+        rowKey={(item) => item.id}
+        loading={loading}
+        storageKey="structured-tables"
+        search={search}
+        reorderable
+        selectable
+        selectedIds={selectedIds}
+        onSelectionChange={setSelectedIds}
+        onRowClick={(item) => openDetail(item.id)}
+        activeRowId={detail?.id}
+        total={total}
+        displayCount={displayCount}
+        onDisplayCountChange={setDisplayCount}
+        emptyContent={
+          <div>
+            <p>暂无表格数据</p>
+            <button type="button" onClick={() => navigate('/data-import')} className="mt-2 text-indigo-600 hover:text-indigo-700 text-sm font-medium">
+              前往数据归档
+            </button>
+          </div>
+        }
+      />
 
       {/* 详情弹窗 */}
       {detail && (
@@ -591,7 +543,7 @@ export default function StructuredTables() {
           rowsTotal={detailRowsTotal}
           rowPage={detailPage}
           rowSearch={detailSearch}
-          pageSize={pageSize}
+          detailPageSize={detailPageSize}
           loading={detailLoading}
           onClose={() => setDetail(null)}
           onPageChange={setDetailPage}
@@ -602,7 +554,6 @@ export default function StructuredTables() {
           onDownloadOriginal={handleDownloadOriginal}
         />
       )}
-
     </div>
   )
 }
@@ -610,7 +561,7 @@ export default function StructuredTables() {
 /* ── 详情面板 ─────────────────────────────────── */
 
 function TableDetailPanel({
-  detail, rows, rowsTotal, rowPage, rowSearch, pageSize, loading,
+  detail, rows, rowsTotal, rowPage, rowSearch, detailPageSize, loading,
   onClose, onPageChange, onSearchChange, onSync, onDelete, onExport, onDownloadOriginal,
 }: {
   detail: StructuredTableDetail
@@ -618,7 +569,7 @@ function TableDetailPanel({
   rowsTotal: number
   rowPage: number
   rowSearch: string
-  pageSize: number
+  detailPageSize: number
   loading: boolean
   onClose: () => void
   onPageChange: (p: number) => void
@@ -628,24 +579,20 @@ function TableDetailPanel({
   onExport: (id: number, name: string) => void
   onDownloadOriginal: (id: number, name: string) => void
 }) {
-  // 构建 field_id -> field_name 映射，用于把原始字段ID翻译成中文
   const fieldIdToName: Record<string, string> = {}
   if (detail.schema_info) {
     detail.schema_info.forEach((s) => {
       fieldIdToName[s.field_id] = s.field_name
-      fieldIdToName[s.field_name] = s.field_name // 兼容已经是中文名的情况
+      fieldIdToName[s.field_name] = s.field_name
     })
   }
-  // columnKeys: 用于访问 row_data 的实际 key（field_id 或 field_name）
   const columnKeys = detail.schema_info?.map((s) => s.field_name) || (rows.length > 0 ? Object.keys(rows[0].row_data) : [])
-  // 显示用的列名：优先用中文 field_name
   const getColumnLabel = (key: string) => fieldIdToName[key] || key
-  const rowTotalPages = Math.ceil(rowsTotal / pageSize)
+  const rowTotalPages = Math.ceil(rowsTotal / detailPageSize)
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex justify-end" onClick={onClose}>
       <div className="w-full max-w-4xl bg-white h-full overflow-y-auto shadow-xl" onClick={(e) => e.stopPropagation()}>
-        {/* 头部 */}
         <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between z-10">
           <div>
             <h2 className="text-lg font-semibold text-gray-800">{detail.name}</h2>
@@ -656,9 +603,7 @@ function TableDetailPanel({
               <span>{detail.row_count} 行 × {detail.column_count} 列</span>
               {detail.synced_at && <span>同步: {new Date(detail.synced_at).toLocaleString('zh-CN')}</span>}
               {detail.cleaning_rule_id ? (
-                <span className="px-2 py-0.5 rounded-full text-xs bg-green-50 text-green-600 border border-green-200">
-                  {detail.cleaning_rule_name || '已清洗'}
-                </span>
+                <span className="px-2 py-0.5 rounded-full text-xs bg-green-50 text-green-600 border border-green-200">{detail.cleaning_rule_name || '已清洗'}</span>
               ) : (
                 <span className="px-2 py-0.5 rounded-full text-xs bg-gray-50 text-gray-400 border border-gray-200">未清洗</span>
               )}
@@ -679,8 +624,7 @@ function TableDetailPanel({
               </button>
             )}
             {detail.source_url && (
-              <a href={detail.source_url} target="_blank" rel="noopener noreferrer"
-                className="flex items-center gap-1 px-3 py-1.5 bg-purple-50 text-purple-700 rounded-lg text-sm hover:bg-purple-100">
+              <a href={detail.source_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 px-3 py-1.5 bg-purple-50 text-purple-700 rounded-lg text-sm hover:bg-purple-100">
                 <ExternalLink size={14} /> 源表格
               </a>
             )}
@@ -688,31 +632,21 @@ function TableDetailPanel({
             <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded"><X size={20} /></button>
           </div>
         </div>
-
-        {/* 标签 */}
         <div className="px-6 py-3 border-b border-gray-100">
           <TagChips contentType="structured_table" contentId={detail.id} editable />
         </div>
-
-        {/* 摘要 */}
         {detail.summary && (
           <div className="px-6 py-3 bg-blue-50 border-b border-blue-100">
             <p className="text-sm text-blue-800">{detail.summary}</p>
           </div>
         )}
-
-        {/* 关键词 */}
         {detail.keywords && detail.keywords.length > 0 && (
           <div className="px-6 py-3 border-b border-gray-100">
             <div className="flex flex-wrap gap-1.5">
-              {detail.keywords.map((kw, i) => (
-                <span key={i} className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full text-xs">{kw}</span>
-              ))}
+              {detail.keywords.map((kw, i) => <span key={i} className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full text-xs">{kw}</span>)}
             </div>
           </div>
         )}
-
-        {/* 行搜索 */}
         <div className="px-6 py-3 border-b border-gray-100">
           <div className="relative">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -725,8 +659,6 @@ function TableDetailPanel({
             />
           </div>
         </div>
-
-        {/* 表格预览 */}
         <div className="px-6 py-4">
           {loading ? (
             <div className="text-center text-gray-400 py-8">加载中...</div>
@@ -736,18 +668,14 @@ function TableDetailPanel({
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="text-left py-2 px-3 text-gray-500 font-medium text-xs whitespace-nowrap">#</th>
-                    {columnKeys.map((col) => (
-                      <th key={col} className="text-left py-2 px-3 text-gray-500 font-medium text-xs whitespace-nowrap">{getColumnLabel(col)}</th>
-                    ))}
+                    {columnKeys.map((col) => <th key={col} className="text-left py-2 px-3 text-gray-500 font-medium text-xs whitespace-nowrap">{getColumnLabel(col)}</th>)}
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((row) => (
                     <tr key={row.id} className="border-t border-gray-100 hover:bg-gray-50">
                       <td className="py-2 px-3 text-gray-400 text-xs">{row.row_index + 1}</td>
-                      {columnKeys.map((col) => (
-                        <td key={col} className="py-2 px-3 text-gray-700 max-w-[200px] truncate">{String(row.row_data[col] ?? '')}</td>
-                      ))}
+                      {columnKeys.map((col) => <td key={col} className="py-2 px-3 text-gray-700 max-w-[200px] truncate">{String(row.row_data[col] ?? '')}</td>)}
                     </tr>
                   ))}
                 </tbody>
@@ -756,7 +684,6 @@ function TableDetailPanel({
           ) : (
             <div className="text-center text-gray-400 py-8">暂无数据</div>
           )}
-
           {rowTotalPages > 1 && (
             <div className="flex items-center justify-between mt-3">
               <span className="text-sm text-gray-500">共 {rowsTotal} 行，第 {rowPage}/{rowTotalPages} 页</span>
@@ -771,4 +698,3 @@ function TableDetailPanel({
     </div>
   )
 }
-

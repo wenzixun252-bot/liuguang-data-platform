@@ -95,7 +95,7 @@ interface DocumentDetail {
   file_type: string | null
   tags: Record<string, unknown>
   source_url: string | null
-  uploader_name: string | null
+  asset_owner_name: string | null
   extra_fields?: { _attachments?: AttachmentMeta[]; _links?: LinkMeta[]; [key: string]: unknown }
   bitable_url: string | null
   synced_at: string | null
@@ -116,7 +116,7 @@ interface MeetingDetailData {
   action_items: { task?: string; assignee?: string; deadline?: string }[]
   content_text: string
   source_url: string | null
-  uploader_name: string | null
+  asset_owner_name: string | null
   extra_fields?: { _attachments?: AttachmentMeta[]; _links?: LinkMeta[]; [key: string]: unknown }
   bitable_url: string | null
   synced_at: string | null
@@ -1635,8 +1635,8 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
                   {meetingDetail.location && <span>{meetingDetail.location}</span>}
                 </div>
 
-                {meetingDetail.uploader_name && (
-                  <div><p className="text-sm text-indigo-600 font-medium">资产所有人</p><p className="text-sm text-gray-800 font-medium">{meetingDetail.uploader_name}</p></div>
+                {meetingDetail.asset_owner_name && (
+                  <div><p className="text-sm text-indigo-600 font-medium">资产所有人</p><p className="text-sm text-gray-800 font-medium">{meetingDetail.asset_owner_name}</p></div>
                 )}
                 {meetingDetail.initiator && (
                   <div><p className="text-sm text-gray-500">组织者/发送者</p><p className="text-sm text-gray-800 font-medium">{meetingDetail.initiator}</p></div>
@@ -1759,8 +1759,8 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
                   <p className="text-sm text-gray-500">来源</p>
                   <p className="text-sm text-gray-800 font-medium">{SOURCE_TYPE_LABELS[assetDetail.source_type] || assetDetail.source_type}</p>
                 </div>
-                {assetDetail.uploader_name && (
-                  <div><p className="text-sm text-indigo-600 font-medium">资产所有人</p><p className="text-sm text-gray-800 font-medium">{assetDetail.uploader_name}</p></div>
+                {assetDetail.asset_owner_name && (
+                  <div><p className="text-sm text-indigo-600 font-medium">资产所有人</p><p className="text-sm text-gray-800 font-medium">{assetDetail.asset_owner_name}</p></div>
                 )}
                 {assetDetail.author && (
                   <div><p className="text-sm text-gray-500">作者</p><p className="text-sm text-gray-800 font-medium">{assetDetail.author}</p></div>

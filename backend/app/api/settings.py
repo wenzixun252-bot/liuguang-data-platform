@@ -489,7 +489,6 @@ async def fast_import_keyword_docs(
             file_info=file_info,
             owner_id=user.feishu_open_id,
             db=db,
-            uploader_name=user.name,
             tag_ids=body.tag_ids or None,
         )
         if status == "imported":
@@ -528,7 +527,7 @@ async def trigger_single_rule_sync(
 
     from app.services.keyword_sync import sync_single_rule
     sync_result = await sync_single_rule(
-        rule, db, user_token, uploader_name=user.name,
+        rule, db, user_token, asset_owner_name=user.name,
     )
     return {
         "keyword": sync_result.keyword,

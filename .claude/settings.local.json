@@ -79,7 +79,10 @@
       "Read(//c/Users/ljadmin/.claude/**)",
       "mcp__feishu-mcp__docx_builtin_import",
       "Bash(choco install:*)",
-      "Bash(alembic current:*)"
+      "Bash(alembic current:*)",
+      "Bash(find d:CCliuguang-data-platformbackendappapi -name *todo* -o -name *task*)",
+      "Bash(ngrok version:*)",
+      "Bash(ngrok http:*)"
     ]
   },
   "hooks": {

@@ -33,6 +33,11 @@ const EXTENSION_MAP: Record<string, ImportCategory> = {
   ppt: 'document',
   pptx: 'document',
 
+  // 图片：归入文档资产（后端用视觉模型识别内容）
+  png: 'document',
+  jpg: 'document',
+  jpeg: 'document',
+
   // 结构化表格：数据类
   xls: 'structured',
   xlsx: 'structured',
@@ -55,7 +60,7 @@ export const CATEGORY_CONFIG: Record<ImportCategory, FileClassification> = {
   document: {
     category: 'document',
     categoryName: '文档资产',
-    extensions: ['PDF', 'Word', 'Markdown', 'PPT'],
+    extensions: ['PDF', 'Word', 'PPT', 'Image'],
     icon: 'FileText',
     description: '归档您的重要文档资料',
   },
@@ -143,6 +148,10 @@ export function getFileTypeLabel(ext: string): string {
     txt: '文本文件',
     ppt: 'PPT 演示文稿',
     pptx: 'PPT 演示文稿',
+    // 图片
+    png: '图片文件',
+    jpg: '图片文件',
+    jpeg: '图片文件',
     // 表格
     xls: 'Excel 表格',
     xlsx: 'Excel 表格',

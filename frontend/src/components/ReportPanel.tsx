@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { FileText, Loader2, Send, Download, UserSearch, X, ChevronDown, ChevronUp, Database, ExternalLink } from 'lucide-react'
+import { FileText, Loader2, Send, Download, UserSearch, X, ChevronDown, ChevronUp, Database, ExternalLink, Brain, ChevronRight } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import api from '../lib/api'
@@ -32,6 +32,35 @@ interface Props {
   onClearActive: () => void
 }
 
+function ReasoningBlock({ reasoning, isStreaming }: { reasoning: string; isStreaming: boolean }) {
+  const [expanded, setExpanded] = useState(isStreaming)
+
+  useEffect(() => {
+    if (isStreaming) setExpanded(true)
+  }, [isStreaming])
+
+  return (
+    <div className="mb-3 rounded-lg overflow-hidden bg-gray-50 border border-gray-100">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-1.5 w-full px-3 py-2 text-xs font-medium text-gray-500 transition-colors hover:bg-gray-100"
+      >
+        <Brain size={13} className="text-purple-500" />
+        <span>思考过程</span>
+        {isStreaming && (
+          <span className="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse" />
+        )}
+        {expanded ? <ChevronDown size={13} className="ml-auto" /> : <ChevronRight size={13} className="ml-auto" />}
+      </button>
+      {expanded && (
+        <div className="px-3 pb-2 text-xs leading-relaxed max-h-48 overflow-y-auto whitespace-pre-wrap text-gray-400">
+          {reasoning}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function ReportPanel({ activeReport, onReportCreated, onClearActive }: Props) {
   const navigate = useNavigate()
   const [templates, setTemplates] = useState<Template[]>([])
@@ -46,22 +75,15 @@ export default function ReportPanel({ activeReport, onReportCreated, onClearActi
 
   // 流式输出状态
   const [streamingContent, setStreamingContent] = useState('')
-  const [streamingReportId, setStreamingReportId] = useState<number | null>(null)
-  const streamContentRef = useRef('')
-  const abortRef = useRef<AbortController | null>(null)
+  const [reasoningContent, setReasoningContent] = useState('')
+  const [, setStreamingReportId] = useState<number | null>(null)
+  const streamRef = useRef<HTMLDivElement>(null)
 
   // 阅读者
   const [persons, setPersons] = useState<PersonEntity[]>([])
   const [selectedReaders, setSelectedReaders] = useState<PersonEntity[]>([])
   const [showReaderPicker, setShowReaderPicker] = useState(false)
   const [personsLoading, setPersonsLoading] = useState(false)
-
-  // 清理
-  useEffect(() => {
-    return () => {
-      abortRef.current?.abort()
-    }
-  }, [])
 
   useEffect(() => {
     api
@@ -117,6 +139,27 @@ export default function ReportPanel({ activeReport, onReportCreated, onClearActi
     setTimeStart(toLocalDatetime(weekAgo))
   }, [])
 
+  // 查看模式：报告正在生成中 — 轮询刷新状态
+  useEffect(() => {
+    const target = activeReport && activeReport.status === 'generating' && !generating ? activeReport : null
+    if (!target) return
+
+    const poll = async () => {
+      try {
+        const res = await api.get(`/reports/${target.id}`)
+        const updated = res.data as ReportItem
+        if (updated.status !== 'generating') {
+          onReportCreated()
+        }
+      } catch {
+        // 忽略轮询错误
+      }
+    }
+
+    const timer = setInterval(poll, 3000)
+    return () => clearInterval(timer)
+  }, [activeReport?.id, activeReport?.status, generating])
+
   // 加载人物
   const loadPersons = async () => {
     if (persons.length > 0) {
@@ -148,7 +191,14 @@ export default function ReportPanel({ activeReport, onReportCreated, onClearActi
     setSelectedReaders((prev) => prev.filter((p) => p.id !== id))
   }
 
-  // SSE 流式生成
+  // 自动滚动流式内容
+  useEffect(() => {
+    if (generating && streamRef.current) {
+      streamRef.current.scrollTop = streamRef.current.scrollHeight
+    }
+  }, [streamingContent, reasoningContent, generating])
+
+  // 流式生成报告
   const handleGenerate = async () => {
     if (!selectedTemplate || !title.trim() || !timeStart || !timeEnd) {
       toast.error('请填写完整信息')
@@ -157,45 +207,40 @@ export default function ReportPanel({ activeReport, onReportCreated, onClearActi
 
     setGenerating(true)
     setStreamingContent('')
+    setReasoningContent('')
     setStreamingReportId(null)
-    streamContentRef.current = ''
-
-    const body = JSON.stringify({
-      template_id: selectedTemplate,
-      title: title.trim(),
-      time_range_start: new Date(timeStart).toISOString(),
-      time_range_end: new Date(timeEnd).toISOString(),
-      data_sources: dataSelection.source_tables || ['document', 'communication'],
-      extra_instructions: extraInstructions || null,
-      target_reader_ids: selectedReaders.length > 0
-        ? selectedReaders.map((r) => r.name)
-        : null,
-    })
-
-    const abortController = new AbortController()
-    abortRef.current = abortController
 
     try {
-      const baseUrl = api.defaults.baseURL || '/api'
-      const response = await fetch(`${baseUrl}/reports/generate/stream`, {
+      const res = await fetch('/api/reports/generate/stream', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${getToken()}`,
+          Authorization: `Bearer ${getToken()}`,
         },
-        body,
-        signal: abortController.signal,
+        body: JSON.stringify({
+          template_id: selectedTemplate,
+          title: title.trim(),
+          time_range_start: new Date(timeStart).toISOString(),
+          time_range_end: new Date(timeEnd).toISOString(),
+          data_sources: dataSelection.source_tables || ['document', 'communication'],
+          extra_instructions: extraInstructions || null,
+          target_reader_ids: selectedReaders.length > 0
+            ? selectedReaders.map((r) => r.name)
+            : null,
+        }),
       })
 
-      if (!response.ok) {
-        const errText = await response.text()
-        throw new Error(errText || `HTTP ${response.status}`)
+      if (!res.ok) {
+        const errText = await res.text()
+        throw new Error(errText || `HTTP ${res.status}`)
       }
 
-      const reader = response.body?.getReader()
-      if (!reader) throw new Error('无法读取响应流')
+      const reader = res.body?.getReader()
+      if (!reader) throw new Error('No reader')
 
       const decoder = new TextDecoder()
+      let content = ''
+      let reasoning = ''
       let buffer = ''
 
       while (true) {
@@ -207,38 +252,35 @@ export default function ReportPanel({ activeReport, onReportCreated, onClearActi
         buffer = lines.pop() || ''
 
         for (const line of lines) {
-          const trimmed = line.trim()
-          if (!trimmed.startsWith('data: ')) continue
-          const payload = trimmed.slice(6)
-          if (payload === '[DONE]') continue
+          if (!line.startsWith('data: ')) continue
+          const raw = line.slice(6).trim()
+          if (raw === '[DONE]') continue
 
           try {
-            const msg = JSON.parse(payload)
-            if (msg.type === 'report_id') {
-              setStreamingReportId(msg.id)
-            } else if (msg.type === 'content') {
-              streamContentRef.current += msg.content
-              setStreamingContent(streamContentRef.current)
-            } else if (msg.type === 'done') {
-              toast.success('报告生成完成')
-              onReportCreated()
-            } else if (msg.type === 'error') {
-              toast.error(`生成失败: ${msg.content || '未知错误'}`)
+            const parsed = JSON.parse(raw)
+            if (parsed.type === 'report_id') {
+              setStreamingReportId(parsed.id)
+            } else if (parsed.type === 'reasoning') {
+              reasoning += parsed.content
+              setReasoningContent(reasoning)
+            } else if (parsed.type === 'content') {
+              content += parsed.content
+              setStreamingContent(content)
+            } else if (parsed.type === 'done') {
+              setStreamingReportId(parsed.report_id)
+            } else if (parsed.type === 'error') {
+              toast.error(`生成失败: ${parsed.content}`)
             }
-          } catch {
-            // 解析失败，忽略
-          }
+          } catch { /* skip */ }
         }
       }
+
+      toast.success('报告生成完成')
+      onReportCreated()
     } catch (err: any) {
-      if (err.name !== 'AbortError') {
-        toast.error(`报告生成失败: ${err.message || '网络错误'}`)
-      }
+      toast.error(`创建报告失败: ${err.message || '网络错误'}`)
     } finally {
       setGenerating(false)
-      abortRef.current = null
-      // 生成完毕后刷新列表
-      onReportCreated()
     }
   }
 
@@ -267,80 +309,39 @@ export default function ReportPanel({ activeReport, onReportCreated, onClearActi
     }
   }
 
-  // 流式生成中：实时显示内容（最高优先级）
-  if (generating || streamingContent) {
+  // 流式生成中：显示实时内容
+  if (generating) {
     return (
       <div className="flex flex-col h-full">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            {generating && <Loader2 size={16} className="animate-spin text-indigo-500" />}
+            <Loader2 size={16} className="animate-spin text-indigo-500" />
             <h3 className="text-sm font-medium text-gray-700">{title}</h3>
-            {generating && <span className="text-xs text-gray-400">正在生成...</span>}
-          </div>
-          <div className="flex gap-2 shrink-0">
-            {generating && (
-              <button
-                type="button"
-                onClick={() => abortRef.current?.abort()}
-                className="px-3 py-1.5 text-xs text-red-500 hover:bg-red-50 rounded-lg"
-              >
-                取消
-              </button>
-            )}
-            {!generating && streamingContent && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => { setStreamingContent(''); setStreamingReportId(null); onReportCreated() }}
-                  className="px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-100 rounded-lg"
-                >
-                  新建报告
-                </button>
-                {streamingReportId && (
-                  <button
-                    type="button"
-                    onClick={() => navigate(`/reports/${streamingReportId}`)}
-                    className="flex items-center gap-1 px-3 py-1.5 text-xs text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg"
-                  >
-                    <ExternalLink size={12} />
-                    编辑详情
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => handleDownload(streamingContent, title)}
-                  className="flex items-center gap-1 px-3 py-1.5 text-xs text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg"
-                >
-                  <Download size={12} />
-                  下载
-                </button>
-                {streamingReportId && (
-                  <button
-                    type="button"
-                    onClick={() => handlePushFeishu(streamingReportId)}
-                    className="flex items-center gap-1 px-3 py-1.5 text-xs text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg"
-                  >
-                    <Send size={12} />
-                    推送飞书
-                  </button>
-                )}
-              </>
-            )}
+            <span className="text-xs text-gray-400">正在生成中...</span>
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto bg-white rounded-xl border border-gray-200 p-6">
-          <div className="prose prose-sm max-w-none">
-            {streamingContent ? (
+        <div ref={streamRef} className="flex-1 overflow-y-auto bg-white rounded-xl border border-gray-200 p-6">
+          {reasoningContent && (
+            <ReasoningBlock reasoning={reasoningContent} isStreaming={!streamingContent} />
+          )}
+          {streamingContent ? (
+            <div className="prose prose-sm max-w-none">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {streamingContent}
               </ReactMarkdown>
-            ) : (
-              <div className="flex items-center gap-2 text-gray-400 text-sm">
-                <Loader2 size={14} className="animate-spin" />
-                正在收集数据并生成报告...
-              </div>
-            )}
-          </div>
+              <span className="inline-block w-1.5 h-4 bg-indigo-500 animate-pulse ml-0.5 align-text-bottom rounded-sm" />
+            </div>
+          ) : !reasoningContent ? (
+            <div className="flex items-center gap-2 text-gray-400 py-8">
+              <Loader2 size={18} className="animate-spin" />
+              <span className="text-sm">正在收集数据并准备生成...</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 text-gray-400 py-2">
+              <Loader2 size={14} className="animate-spin" />
+              <span className="text-xs">AI 正在思考中，即将开始输出内容...</span>
+            </div>
+          )}
         </div>
       </div>
     )
@@ -408,8 +409,7 @@ export default function ReportPanel({ activeReport, onReportCreated, onClearActi
     )
   }
 
-  // 查看模式：报告正在生成中（从侧栏点击的后台任务）
-  if (activeReport && activeReport.status === 'generating') {
+  if (activeReport && activeReport.status === 'generating' && !generating) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-4">
         <Loader2 size={32} className="animate-spin text-indigo-500" />

@@ -6,7 +6,7 @@ from typing import Annotated
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import and_, delete, select
+from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
@@ -41,7 +41,16 @@ async def list_tags(
             | (TagDefinition.owner_id.is_(None))
         ).order_by(TagDefinition.id)
     )
-    return [TagDefinitionOut.model_validate(t) for t in result.scalars().all()]
+    tags = [TagDefinitionOut.model_validate(t) for t in result.scalars().all()]
+    if len(tags) == 0:
+        all_count = await db.execute(select(func.count()).select_from(TagDefinition))
+        total = all_count.scalar() or 0
+        logger.warning(
+            "list_tags: 0 tags for owner_id=%s, but %d total in DB. "
+            "Check if owner_id matches tag_definitions.owner_id",
+            owner_id, total,
+        )
+    return tags
 
 
 @router.post("", response_model=TagDefinitionOut, summary="创建标签")

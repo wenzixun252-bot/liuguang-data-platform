@@ -504,3 +504,38 @@
 - **2026-03-13 10:21:50** [其他] `C:/Users/ljadmin/.claude/plans/peaceful-noodling-turtle.md` — 修改逻辑 (+45/-1行)
 - **2026-03-13 10:36:08** [其他] `.superpowers/brainstorm/datatable-mockup.html` — 新建文件 `datatable-mockup` (702行)
 - **2026-03-13 11:00:10** [后端] `backend/app/config.py` — 修改逻辑 (+4/-1行)
+- **2026-03-13 12:39:01** [前端组件] `frontend/src/components/DataTable/index.tsx` — 新建文件 `index` (5行)
+- **2026-03-13 12:39:02** [前端组件] `frontend/src/components/DataTable/useTableViews.ts` — 新建文件 `useTableViews`，包含 STORAGE_PREFIX, raw, useTableViews, persist, activeView
+- **2026-03-13 12:50:02** [前端组件] `frontend/src/components/DataTable/useTableViews.ts` — 修改逻辑 (+1/-1行)
+- **2026-03-13 14:33:07** [前端组件] `frontend/src/components/DataTable/useTableViews.ts` — 新增 getFullKey, user, getUserPrefix
+- **2026-03-13 14:33:12** [前端组件] `frontend/src/components/DataTable/useTableViews.ts` — 修改逻辑 (+1/-1行)
+- **2026-03-13 14:33:18** [前端组件] `frontend/src/components/DataTable/useTableViews.ts` — 修改逻辑 (+1/-1行)
+- **2026-03-13 14:33:23** [前端组件] `frontend/src/components/DataTable/useTableViews.ts` — 修改逻辑 (+1/-1行)
+- **2026-03-13 14:33:30** [前端组件] `frontend/src/components/DataTable/useTableViews.ts` — 修改逻辑 (+2/-2行)
+- **2026-03-13 14:33:38** [前端组件] `frontend/src/components/DataTable/useTableViews.ts` — 新增 displayCountKey, loadDisplayCount, raw, saveDisplayCount
+- **2026-03-13 14:34:17** [前端组件] `frontend/src/components/DataTable/index.tsx` — 新增 getPersistedDisplayCount, val, user, raw
+- **2026-03-13 14:41:05** [前端组件] `frontend/src/components/DataTable/useTableViews.ts` — 新增 trimmed, raw, saveRowOrder, clearRowOrder
+- **2026-03-13 14:41:11** [前端组件] `frontend/src/components/DataTable/useTableViews.ts` — 新增 3 行代码
+- **2026-03-13 14:54:17** [前端组件] `frontend/src/components/ColumnSettings.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-13 14:56:57** [项目配置] `backend/requirements.txt` — 新增 1 行代码
+- **2026-03-13 14:57:10** [后端] `backend/app/config.py` — 修改逻辑 (+1/-1行)
+- **2026-03-13 14:57:44** [前端组件] `frontend/src/components/import/importUtils.ts` — 新增 4 行代码
+- **2026-03-13 14:57:45** [前端组件] `frontend/src/components/import/importUtils.ts` — 修改逻辑 (+1/-1行)
+- **2026-03-13 14:57:46** [前端组件] `frontend/src/components/import/importUtils.ts` — 新增 4 行代码
+- **2026-03-13 14:57:52** [前端组件] `frontend/src/components/import/LocalImportSection.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-13 14:57:53** [前端组件] `frontend/src/components/import/CategoryCard.tsx` — 修改逻辑 (+1/-1行)
+- **2026-03-13 16:41:30** [数据库迁移] `backend/alembic/versions/a1b2c3d4e5f6_rename_uploader_name_drop_uploaded_by.py` — 新建文件 `a1b2c3d4e5f6_rename_uploader_name_drop_uploaded_by`，包含 upgrade, downgrade
+- **2026-03-13 16:41:49** [数据库迁移] `backend/alembic/versions/a1b2c3d4e5f6_rename_uploader_name_drop_uploaded_by.py` — 新建文件 `a1b2c3d4e5f6_rename_uploader_name_drop_uploaded_by`，包含 upgrade, downgrade
+- **2026-03-13 16:52:02** [数据库迁移] `backend/alembic/versions/a1b2c3d4e5f6_rename_uploader_name_drop_uploaded_by.py` — 修改逻辑 (+4/-4行)
+- **2026-03-13 16:52:42** [数据库迁移] `backend/alembic/versions/b2c3d4e5f6a7_rename_uploader_name_drop_uploaded_by.py` — 修改逻辑 (+1/-1行)
+- **2026-03-13 16:52:48** [数据库迁移] `backend/alembic/versions/b2c3d4e5f6a7_rename_uploader_name_drop_uploaded_by.py` — 修改逻辑 (+1/-1行)
+- **2026-03-13 17:03:22** [前端组件] `frontend/src/components/DataTable/useTableViews.ts` — 新增 saveDefaultConfig, loadDefaultConfig, raw, defaultConfigKey
+- **2026-03-13 17:03:28** [前端组件] `frontend/src/components/DataTable/useTableViews.ts` — 修改逻辑 (+3/-1行)
+- **2026-03-13 18:54:17** [其他] `C:/Users/ljadmin/.claude/plans/synthetic-purring-river.md` — 新建文件 `synthetic-purring-river` (58行)
+- **2026-03-13 18:57:02** [其他] `C:/Users/ljadmin/.claude/plans/synthetic-purring-river.md` — 修改逻辑 (+16/-6行)
+- **2026-03-13 19:21:23** [其他] `frontend/nginx.conf` — 新增 1 行代码
+- **2026-03-13 19:39:45** [数据模型] `backend/app/models/__init__.py` — 添加依赖引用
+- **2026-03-13 19:39:50** [数据模型] `backend/app/models/__init__.py` — 新增 1 行代码
+- **2026-03-13 19:43:02** [前端页面] `frontend/src/pages/CalendarAssistant.tsx` — 新建文件 `CalendarAssistant`，包含 d, d, d, today, tomorrow
+- **2026-03-13 22:12:32** [前端组件] `frontend/src/components/DataTable/useTableViews.ts` — 新增 saveSort, raw, loadSort, sortKey
+- **2026-03-13 22:12:36** [前端组件] `frontend/src/components/DataTable/useTableViews.ts` — 新增 2 行代码

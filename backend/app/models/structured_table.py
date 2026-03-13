@@ -52,6 +52,7 @@ class StructuredTable(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    # owner_id: 实际含义是"导入人/数据归属人"的 feishu_open_id，用于行级权限控制(RLS)，而非资产所有人
     owner_id: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(512), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -79,7 +80,7 @@ class StructuredTable(Base):
     content_hash: Mapped[str | None] = mapped_column(String(64))
     # -- 清洗规则字段 --
     cleaning_rule_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    uploaded_by: Mapped[str | None] = mapped_column(String(256))
+    asset_owner_name: Mapped[str | None] = mapped_column(String(256))  # 飞书资产所有人名字（文档/表格的原始创建者）
     # -- 通用字段 --
     extra_fields: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
     parse_status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="done")

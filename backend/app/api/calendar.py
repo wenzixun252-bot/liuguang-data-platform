@@ -8,6 +8,7 @@ from typing import Annotated
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, get_db, get_visible_owner_ids
 from app.config import settings
 from app.services.llm import create_openai_client
+from app.models.calendar_brief import CalendarBrief
 from app.models.calendar_reminder import CalendarReminderPref
 from app.models.conversation import Conversation, ConversationMessage
 from app.models.user import User
@@ -304,6 +306,31 @@ async def _run_brief_task(
             task["message"] = "简报已生成"
             task["content"] = full_content
 
+            # 自动持久化简报到数据库
+            try:
+                from sqlalchemy import select as sa_select
+                result = await db.execute(
+                    sa_select(CalendarBrief).where(
+                        CalendarBrief.owner_id == owner_id,
+                        CalendarBrief.event_id == body.event_id,
+                    )
+                )
+                existing_brief = result.scalar_one_or_none()
+                if existing_brief:
+                    existing_brief.content = full_content
+                    existing_brief.event_summary = body.summary
+                    existing_brief.chat_messages = None
+                else:
+                    db.add(CalendarBrief(
+                        owner_id=owner_id,
+                        event_id=body.event_id,
+                        event_summary=body.summary,
+                        content=full_content,
+                    ))
+                await db.commit()
+            except Exception as e:
+                logger.warning("保存简报到数据库失败: %s", e)
+
     except asyncio.CancelledError:
         task["status"] = "cancelled"
         task["message"] = "已取消"
@@ -482,6 +509,59 @@ async def brief_chat(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ── 3.5 简报持久化（保存/加载） ──────────────────────────
+
+
+class SaveBriefChatRequest(BaseModel):
+    """保存简报追问对话。"""
+    event_id: str
+    chat_messages: list[dict]
+
+
+@router.get("/brief/saved/{event_id}", summary="获取已保存的简报")
+async def get_saved_brief(
+    event_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """根据 event_id 获取已持久化的会前简报。"""
+    result = await db.execute(
+        select(CalendarBrief).where(
+            CalendarBrief.owner_id == current_user.feishu_open_id,
+            CalendarBrief.event_id == event_id,
+        )
+    )
+    brief = result.scalar_one_or_none()
+    if not brief:
+        return {"found": False, "content": "", "chat_messages": []}
+    return {
+        "found": True,
+        "content": brief.content,
+        "chat_messages": brief.chat_messages or [],
+    }
+
+
+@router.post("/brief/save-chat", summary="保存简报追问对话")
+async def save_brief_chat(
+    body: SaveBriefChatRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """将追问对话保存到已有的简报记录中。"""
+    result = await db.execute(
+        select(CalendarBrief).where(
+            CalendarBrief.owner_id == current_user.feishu_open_id,
+            CalendarBrief.event_id == body.event_id,
+        )
+    )
+    brief = result.scalar_one_or_none()
+    if not brief:
+        return {"saved": False, "detail": "简报不存在"}
+    brief.chat_messages = body.chat_messages
+    await db.commit()
+    return {"saved": True}
 
 
 # ── 4. 提醒偏好 ──────────────────────────────────────────

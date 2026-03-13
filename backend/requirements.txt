@@ -33,6 +33,7 @@ openai>=1.58,<2
 python-multipart>=0.0.9,<1
 pypdf>=4.0,<5
 python-docx>=1.1,<2
+python-pptx>=1.0,<2
 openpyxl>=3.1,<4
 
 # Graph analysis

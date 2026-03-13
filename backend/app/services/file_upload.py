@@ -41,7 +41,7 @@ class FileUploadService:
         file: UploadFile,
         owner_id: str,
         db: AsyncSession,
-        uploader_name: str | None = None,
+        asset_owner_name: str | None = None,
     ) -> Document:
         """处理文件上传全流程。"""
         content_bytes = await file.read()
@@ -120,7 +120,7 @@ class FileUploadService:
             file_type=ext,
             file_size=file_size,
             file_path=file_path,
-            uploader_name=uploader_name,
+            asset_owner_name=asset_owner_name,
             feishu_created_at=now,
             feishu_updated_at=now,
             synced_at=now,
@@ -176,6 +176,21 @@ class FileUploadService:
                 logger.warning("DOCX 文本提取失败: %s", e)
                 return ""
 
+        if ext in ("pptx", "ppt"):
+            try:
+                from pptx import Presentation
+                import io
+                prs = Presentation(io.BytesIO(content))
+                texts = []
+                for slide in prs.slides:
+                    for shape in slide.shapes:
+                        if shape.has_text_frame:
+                            texts.append(shape.text_frame.text)
+                return "\n".join(texts)
+            except Exception as e:
+                logger.warning("PPT 文本提取失败: %s", e)
+                return ""
+
         if ext in ("xlsx", "xls"):
             try:
                 import io
@@ -194,6 +209,15 @@ class FileUploadService:
     # ── 音频文件 → 沟通资产 ──────────────────────────────────
 
     AUDIO_EXTENSIONS = {"mp3", "wav", "m4a", "aac", "ogg", "flac"}
+
+    async def _generate_title_fallback(self, content: str) -> str | None:
+        """当标题缺失时，用 LLM 从内容生成标题。"""
+        try:
+            from app.services.llm import llm_client
+            return await llm_client.generate_title_from_content(content)
+        except Exception as e:
+            logger.warning("LLM 生成标题失败: %s", e)
+            return None
 
     async def _transcribe_audio(self, file_path: str) -> str:
         """调用 ASR API 将音频文件转为文字。"""
@@ -227,7 +251,7 @@ class FileUploadService:
         file: UploadFile,
         owner_id: str,
         db: AsyncSession,
-        uploader_name: str | None = None,
+        asset_owner_name: str | None = None,
         user_metadata: dict | None = None,
     ) -> Communication:
         """处理音频文件上传：存储 → ASR 转文字 → LLM 提取 → 写入 communications 表。"""
@@ -332,7 +356,7 @@ class FileUploadService:
             source_platform="local",
             source_app_token=f"local_{file_id}",
             feishu_record_id=f"local_{file_id}",
-            title=meta.get("title") or parsed.get("title") or file.filename,
+            title=meta.get("title") or parsed.get("title") or await self._generate_title_fallback(transcript) or file.filename,
             comm_time=comm_time,
             initiator=parsed.get("initiator"),
             participants=participants,
@@ -342,7 +366,7 @@ class FileUploadService:
             transcript=transcript,
             content_text=transcript,
             summary=parsed.get("summary"),
-            uploader_name=uploader_name,
+            asset_owner_name=asset_owner_name,
             keywords=parsed.get("keywords") or [],
             sentiment=parsed.get("sentiment"),
             content_hash=content_hash,

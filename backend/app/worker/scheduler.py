@@ -49,6 +49,9 @@ async def trigger_login_sync(owner_id: str) -> None:
     logger.info("用户 %s 登录，触发全量同步", owner_id)
 
     try:
+        from app.database import async_session
+        from app.models.user import User
+        from sqlalchemy import select
         from app.worker.tasks import (
             etl_sync_job,
             cloud_folder_sync_job,
@@ -57,8 +60,21 @@ async def trigger_login_sync(owner_id: str) -> None:
             structured_table_sync_job,
         )
 
+        # 查找登录用户名，用于 ETL 任务日志标记触发人
+        user_name = None
+        try:
+            async with async_session() as db:
+                result = await db.execute(
+                    select(User).where(User.feishu_open_id == owner_id)
+                )
+                user = result.scalar_one_or_none()
+                if user:
+                    user_name = user.name
+        except Exception:
+            pass
+
         jobs = [
-            ("ETL同步", etl_sync_job),
+            ("ETL同步", lambda: etl_sync_job(triggered_by=user_name)),
             ("云文件夹同步", cloud_folder_sync_job),
             ("待办提取", todo_extract_job),
             ("飞书任务状态同步", todo_sync_status_job),

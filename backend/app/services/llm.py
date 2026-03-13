@@ -418,6 +418,39 @@ class LLMClient:
 
         return default
 
+    # ── 从内容生成标题 ─────────────────────────────────────
+
+    async def generate_title_from_content(self, content: str) -> str | None:
+        """当标题缺失或像文件名时，用 LLM 从内容中生成一个简短标题。"""
+        if not content or not content.strip():
+            return None
+        if not settings.llm_api_key or settings.llm_api_key.startswith("sk-xxx"):
+            return None
+
+        truncated = content[:3000] if len(content) > 3000 else content
+        prompt = (
+            "请根据以下内容，生成一个简短的中文标题（10-25个字），准确概括核心主题。\n"
+            "只输出标题文本，不要加引号、序号或其他内容。\n\n"
+            f"## 内容\n{truncated}"
+        )
+        try:
+            response = await asyncio.wait_for(
+                self.chat_client.chat.completions.create(
+                    model=settings.llm_model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.0,
+                    max_tokens=100,
+                ),
+                timeout=15,
+            )
+            title = response.choices[0].message.content.strip().strip('"\'""''')
+            if title and 2 <= len(title) <= 60:
+                logger.info("LLM 生成标题: %s", title)
+                return title
+        except Exception as e:
+            logger.warning("LLM 生成标题失败: %s", e)
+        return None
+
     # ── 图片内容识别 ──────────────────────────────────────
 
     async def parse_image_file(self, image_bytes: bytes, ext: str) -> dict:
@@ -557,6 +590,81 @@ class LLMClient:
                 "cleaning_rule_id": 0, "cleaning_reason": "未使用",
             }
 
+    # ── 自动标签推荐 ─────────────────────────────────────
+
+    async def suggest_tags(
+        self,
+        content_text: str,
+        tag_definitions: list[dict],
+    ) -> list[dict]:
+        """根据内容自动推荐匹配的标签。
+
+        Args:
+            content_text: 内容文本（会截断到 2000 字）
+            tag_definitions: [{"id": 1, "name": "项目A", "category": "project"}, ...]
+
+        Returns:
+            [{"tag_id": 1, "confidence": 0.85}, ...] 或空列表
+        """
+        if not tag_definitions:
+            logger.info("suggest_tags: 无标签定义，跳过")
+            return []
+        if not settings.llm_api_key or settings.llm_api_key.startswith("sk-xxx"):
+            logger.info("suggest_tags: LLM API Key 未配置或无效，跳过 LLM 推荐（将 fallback 到「其他」）")
+            return []
+
+        truncated = (content_text or "").strip()[:2000]
+        if not truncated:
+            logger.info("suggest_tags: 内容为空，跳过 LLM 推荐（将 fallback 到「其他」）")
+            return []
+        tags_desc = "\n".join(
+            f"- id={t['id']}: [{t['category']}] {t['name']}"
+            for t in tag_definitions
+        )
+
+        prompt = (
+            "你是一个智能标签推荐助手。请根据内容，从给定的标签列表中选择最匹配的标签。\n\n"
+            f"## 内容\n{truncated}\n\n"
+            f"## 可用标签\n{tags_desc}\n\n"
+            "## 要求\n"
+            "1. 必须从可用标签中选择至少一个与内容最相关的标签（可以选多个）\n"
+            "2. 每个选中的标签给出置信度分数（0.1-1.0）\n"
+            "3. 如果实在没有明确匹配的标签，选择名为「其他」的标签（如果存在）\n"
+            "4. 只输出 JSON 数组，不要输出其他内容\n\n"
+            '## 输出格式\n[{"tag_id": 1, "confidence": 0.9}]\n\n'
+            "注意：必须至少返回一个标签，不允许返回空数组。"
+        )
+
+        try:
+            response = await self.chat_client.chat.completions.create(
+                model=settings.llm_model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+            )
+            result_text = response.choices[0].message.content.strip()
+            # 处理 markdown 代码块包裹
+            if "```" in result_text:
+                result_text = result_text.split("```")[1]
+                if result_text.startswith("json"):
+                    result_text = result_text[4:]
+                result_text = result_text.strip()
+
+            suggestions = json.loads(result_text)
+            if not isinstance(suggestions, list):
+                return []
+
+            valid_ids = {t["id"] for t in tag_definitions}
+            return [
+                {"tag_id": s["tag_id"], "confidence": min(max(float(s.get("confidence", 0)), 0.0), 1.0)}
+                for s in suggestions
+                if isinstance(s, dict)
+                and s.get("tag_id") in valid_ids
+                and float(s.get("confidence", 0)) >= 0.1
+            ]
+        except Exception as e:
+            logger.warning("LLM 自动标签推荐失败: %s", e)
+            return []
+
     # ── Embedding 生成 ───────────────────────────────────
 
     async def generate_embedding(self, text: str) -> list[float]:
@@ -594,3 +702,167 @@ class LLMError(Exception):
 
 # 模块级单例
 llm_client = LLMClient()
+
+
+import re as _re  # noqa: E402
+
+def looks_like_filename(title: str | None) -> bool:
+    """检测标题是否看起来像一个文件名（而非有意义的标题）。"""
+    if not title or not title.strip():
+        return True  # 空标题也需要生成
+    t = title.strip()
+    # 有文件扩展名
+    if _re.search(r"\.\w{2,5}$", t):
+        return True
+    # 纯数字或数字+下划线+少量字母（如 7611375083722148824_re...）
+    if _re.match(r"^[\d_]+[a-zA-Z_]{0,5}$", t):
+        return True
+    # 超过一半是数字
+    digits = sum(1 for c in t if c.isdigit())
+    if len(t) > 5 and digits / len(t) > 0.5:
+        return True
+    return False
+
+
+# ── 自动标签推荐：完整流程（查标签 → 调 LLM → 写入 DB） ────────
+
+
+async def _get_or_create_other_tag(db, owner_id: str) -> int:
+    """获取或创建该用户的「其他」标签，返回 tag id。"""
+    from sqlalchemy import select
+
+    from app.models.tag import TagDefinition
+
+    result = await db.execute(
+        select(TagDefinition).where(
+            TagDefinition.owner_id == owner_id,
+            TagDefinition.name == "其他",
+        )
+    )
+    tag = result.scalar_one_or_none()
+    if tag:
+        return tag.id
+
+    new_tag = TagDefinition(
+        owner_id=owner_id,
+        category="custom",
+        name="其他",
+        color="#9ca3af",
+        is_shared=False,
+    )
+    db.add(new_tag)
+    await db.flush()
+    logger.info("为用户 %s 自动创建「其他」标签 (id=%d)", owner_id, new_tag.id)
+    return new_tag.id
+
+
+async def auto_tag_content(
+    db,  # AsyncSession
+    content_id: int,
+    content_type: str,
+    content_text: str,
+    owner_id: str,
+) -> int:
+    """LLM 自动标签推荐（硬性规定：必须至少打上一个标签）。
+
+    流程：查用户标签 → 调 LLM → 写入 content_tags → 失败则 fallback「其他」。
+    Returns: 新打上的标签数量。保证 >= 1。
+    """
+    from sqlalchemy import select, text
+
+    from app.models.tag import ContentTag, TagDefinition
+
+    # 2. 检查是否已有任何标签（有标签就跳过，节省 LLM 调用）
+    try:
+        existing = await db.execute(
+            text(
+                "SELECT COUNT(*) FROM content_tags "
+                "WHERE content_type = :ct AND content_id = :cid"
+            ),
+            {"ct": content_type, "cid": content_id},
+        )
+        if (existing.scalar() or 0) > 0:
+            logger.debug("跳过自动标签: %s id=%d 已有标签", content_type, content_id)
+            return 0
+    except Exception as e:
+        logger.error("自动标签-检查已有标签失败 (%s id=%d): %s", content_type, content_id, e)
+
+    try:
+        # 1. 查询用户可见的标签定义
+        result = await db.execute(
+            select(TagDefinition).where(
+                (TagDefinition.owner_id == owner_id)
+                | (TagDefinition.is_shared == True)  # noqa: E712
+                | (TagDefinition.owner_id.is_(None))
+            )
+        )
+        tags = result.scalars().all()
+
+        # 没有任何标签定义时，直接 fallback
+        if not tags:
+            logger.info("自动标签: 用户 %s 无标签定义, 将 fallback 到「其他」", owner_id)
+            return await _force_apply_other_tag(db, content_id, content_type, owner_id)
+
+        tag_defs = [{"id": t.id, "name": t.name, "category": t.category} for t in tags]
+
+        # 3. 调用 LLM 推荐
+        suggestions = []
+        try:
+            suggestions = await llm_client.suggest_tags(content_text, tag_defs)
+            if suggestions:
+                logger.info("自动标签: LLM 为 %s id=%d 推荐了 %d 个标签", content_type, content_id, len(suggestions))
+        except Exception as e_llm:
+            logger.warning("自动标签: LLM suggest_tags 调用失败 (%s id=%d): %s", content_type, content_id, e_llm)
+
+        # 4. LLM 未返回结果时，强制 fallback 到「其他」标签
+        if not suggestions:
+            other_tag_id = await _get_or_create_other_tag(db, owner_id)
+            suggestions = [{"tag_id": other_tag_id, "confidence": 0.1}]
+            logger.info("自动标签: LLM 未返回结果, fallback 到「其他」(tag_id=%d) for %s id=%d",
+                        other_tag_id, content_type, content_id)
+
+        # 5. 写入 content_tags（ON CONFLICT DO NOTHING 保证幂等）
+        count = 0
+        for s in suggestions:
+            await db.execute(
+                text(
+                    "INSERT INTO content_tags (tag_id, content_type, content_id, tagged_by, confidence) "
+                    "VALUES (:tag_id, :content_type, :content_id, 'ai_suggest', :confidence) "
+                    "ON CONFLICT (tag_id, content_type, content_id) DO NOTHING"
+                ),
+                {
+                    "tag_id": s["tag_id"],
+                    "content_type": content_type,
+                    "content_id": content_id,
+                    "confidence": s["confidence"],
+                },
+            )
+            count += 1
+
+        logger.info("自动标签: %s id=%d 成功写入 %d 个标签", content_type, content_id, count)
+        return count
+    except Exception as e:
+        logger.error("自动标签推荐主流程失败 (%s id=%d): %s", content_type, content_id, e, exc_info=True)
+        # 硬性规定：主流程失败也要尝试 fallback
+        try:
+            return await _force_apply_other_tag(db, content_id, content_type, owner_id)
+        except Exception as e2:
+            logger.error("自动标签 fallback 也失败 (%s id=%d): %s", content_type, content_id, e2, exc_info=True)
+            return 0
+
+
+async def _force_apply_other_tag(db, content_id: int, content_type: str, owner_id: str) -> int:
+    """强制打上「其他」标签，作为最终兜底。"""
+    from sqlalchemy import text
+
+    other_tag_id = await _get_or_create_other_tag(db, owner_id)
+    await db.execute(
+        text(
+            "INSERT INTO content_tags (tag_id, content_type, content_id, tagged_by, confidence) "
+            "VALUES (:tag_id, :content_type, :content_id, 'ai_suggest', 0.1) "
+            "ON CONFLICT (tag_id, content_type, content_id) DO NOTHING"
+        ),
+        {"tag_id": other_tag_id, "content_type": content_type, "content_id": content_id},
+    )
+    logger.info("自动标签 fallback: 已为 %s id=%d 打上「其他」标签 (tag_id=%d)", content_type, content_id, other_tag_id)
+    return 1

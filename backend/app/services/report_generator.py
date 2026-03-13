@@ -58,7 +58,14 @@ REPORT_SYSTEM_PROMPT = """你是一位资深的商业分析师，擅长从零散
 
 ## 业务域分析
 如果数据中包含 "business_domain_summary" 字段，这是用户知识图谱的业务域分析结果。
-请利用这些业务域维度来组织和分析数据，例如按域维度归纳工作重点、识别跨域协作等。"""
+请利用这些业务域维度来组织和分析数据，例如按域维度归纳工作重点、识别跨域协作等。
+
+## 阅读者画像优化（极其重要）
+如果 prompt 中包含"报告阅读者画像"信息，你**必须**在报告正文最开头用一段简短说明，点明本报告针对阅读者做了哪些内容侧重和呈现优化。
+格式示例：
+> **阅读者定制说明**：本报告面向 XXX，基于其关注的 A、B 领域，重点呈现了相关进展与决策，弱化了与其无关的细节。
+
+然后在后续各版块的内容取舍和详略中，切实体现这些优化——阅读者关注的领域多写细节，不关注的领域只保留摘要。"""
 
 # 预设系统模板
 SYSTEM_TEMPLATES = [
@@ -66,7 +73,7 @@ SYSTEM_TEMPLATES = [
         "name": "周报",
         "description": "自动汇总本周工作，生成标准周报",
         "prompt_template": """请根据以下数据，为用户生成一份周报。
-
+{reader_context}
 ## 数据内容
 {data}
 
@@ -97,7 +104,7 @@ SYSTEM_TEMPLATES = [
         "name": "月报",
         "description": "自动汇总月度工作，生成月度报告",
         "prompt_template": """请根据以下数据，为用户生成一份月度报告。
-
+{reader_context}
 ## 数据内容
 {data}
 
@@ -128,7 +135,7 @@ SYSTEM_TEMPLATES = [
         "name": "项目总结",
         "description": "自动汇总项目相关数据，生成项目总结报告",
         "prompt_template": """请根据以下数据，为用户生成一份项目总结报告。
-
+{reader_context}
 ## 数据内容
 {data}
 
@@ -293,10 +300,10 @@ async def gather_data(
                 "创建时间": _to_beijing_str(d.feishu_created_at),
                 "修改时间": _to_beijing_str(d.feishu_updated_at),
                 "tags": doc_tags.get(d.id, []),
-                "asset_owner": d.uploader_name or "",
+                "asset_owner": d.asset_owner_name or "",
             }
-            # 严格按资产所有人区分：只有 uploader_name 匹配当前用户才算"我的产出"
-            if d.uploader_name and d.uploader_name == current_user_name:
+            # 严格按资产所有人区分：只有 asset_owner_name 匹配当前用户才算"我的产出"
+            if d.asset_owner_name and d.asset_owner_name == current_user_name:
                 data["my_documents"].append(doc_item)
             else:
                 data["reference_documents"].append(doc_item)
@@ -444,7 +451,8 @@ async def generate_report(
     data_text = json.dumps(data, ensure_ascii=False, indent=2)
     prompt = template.prompt_template.format(
         data=data_text[:8000],
-        extra_instructions=(extra_instructions or "") + reader_context,
+        extra_instructions=extra_instructions or "",
+        reader_context=reader_context,
     )
 
     report = Report(
@@ -472,7 +480,7 @@ async def generate_report(
         agent_client = create_openai_client(
             api_key=settings.agent_llm_api_key,
             base_url=settings.agent_llm_base_url,
-            timeout=120.0,
+            timeout=300.0,
         )
         response = await agent_client.chat.completions.create(
             model=settings.agent_llm_model,
@@ -480,7 +488,7 @@ async def generate_report(
                 {"role": "system", "content": REPORT_SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
             ],
-            temperature=0.3,
+            # 不传 temperature — 让 GLM-5 等推理模型自动启用深度思考
         )
         content = response.choices[0].message.content
         report.content_markdown = content
@@ -520,7 +528,8 @@ async def _background_generate(
             data_text = json.dumps(data, ensure_ascii=False, indent=2)
             prompt = template_prompt.format(
                 data=data_text[:8000],
-                extra_instructions=(extra_instructions or "") + reader_context,
+                extra_instructions=extra_instructions or "",
+                reader_context=reader_context,
             )
 
             # 更新数据源统计
@@ -537,7 +546,7 @@ async def _background_generate(
             agent_client = create_openai_client(
                 api_key=settings.agent_llm_api_key,
                 base_url=settings.agent_llm_base_url,
-                timeout=120.0,
+                timeout=300.0,
             )
             response = await agent_client.chat.completions.create(
                 model=settings.agent_llm_model,
@@ -545,17 +554,25 @@ async def _background_generate(
                     {"role": "system", "content": REPORT_SYSTEM_PROMPT},
                     {"role": "user", "content": prompt},
                 ],
-                temperature=0.3,
+                # 不传 temperature — 让 GLM-5 等推理模型自动启用深度思考
             )
             content = response.choices[0].message.content
             report.content_markdown = content
             report.status = "completed"
-        except Exception as e:
+        except BaseException as e:
             logger.error("后台报告生成失败 (id=%s): %s", report_id, e)
-            report = await db.get(Report, report_id)
-            if report:
-                report.status = "failed"
-                report.content_markdown = f"生成失败: {e}"
+            try:
+                await db.rollback()
+                report = await db.get(Report, report_id)
+                if report:
+                    report.status = "failed"
+                    report.content_markdown = f"生成失败: {e}"
+                await db.commit()
+            except Exception:
+                logger.warning("保存报告失败状态时 DB 异常 (id=%s)", report_id)
+            if not isinstance(e, Exception):
+                return
+            return
         await db.commit()
 
 
@@ -640,7 +657,8 @@ async def prepare_report_stream(
     data_text = json.dumps(data, ensure_ascii=False, indent=2)
     prompt = template.prompt_template.format(
         data=data_text[:8000],
-        extra_instructions=(extra_instructions or "") + reader_context,
+        extra_instructions=extra_instructions or "",
+        reader_context=reader_context,
     )
 
     report = Report(
@@ -695,7 +713,8 @@ async def generate_report_stream(
     data_text = json.dumps(data, ensure_ascii=False, indent=2)
     prompt = template.prompt_template.format(
         data=data_text[:8000],
-        extra_instructions=(extra_instructions or "") + reader_context,
+        extra_instructions=extra_instructions or "",
+        reader_context=reader_context,
     )
 
     report = Report(
@@ -727,7 +746,7 @@ async def generate_report_stream(
         client = create_openai_client(
             api_key=settings.agent_llm_api_key,
             base_url=settings.agent_llm_base_url,
-            timeout=120.0,
+            timeout=300.0,
         )
         stream = await client.chat.completions.create(
             model=settings.agent_llm_model,
@@ -743,6 +762,9 @@ async def generate_report_stream(
             delta = chunk.choices[0].delta
             if not delta:
                 continue
+            # 推理模型的思考过程（reasoning_content）流式输出给前端
+            if delta.reasoning_content:
+                yield json.dumps({"type": "reasoning", "content": delta.reasoning_content}, ensure_ascii=False)
             if delta.content:
                 full_content.append(delta.content)
                 yield json.dumps({"type": "content", "content": delta.content}, ensure_ascii=False)

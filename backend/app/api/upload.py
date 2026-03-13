@@ -42,9 +42,8 @@ async def upload_file(
             file=file,
             owner_id=current_user.feishu_open_id,
             db=db,
-            uploader_name=current_user.name,
+            asset_owner_name=current_user.name,
         )
-        doc.uploaded_by = current_user.name
         await db.commit()
         await db.refresh(doc)
 
@@ -73,6 +72,32 @@ async def upload_file(
                         tagged_by="user_manual",
                     ))
             await db.commit()
+
+        # LLM 自动标签推荐（硬性规定：必须至少打上一个标签）
+        try:
+            from app.services.llm import auto_tag_content
+            content = doc.summary or (doc.content_text or "")[:2000]
+            tagged = await auto_tag_content(db, doc.id, "document", content, current_user.feishu_open_id)
+            if tagged:
+                await db.commit()
+                logger.info("自动标签推荐: doc_id=%d, 新增 %d 个标签", doc.id, tagged)
+        except Exception as e_tag:
+            logger.error("自动标签推荐失败 (doc_id=%d): %s", doc.id, e_tag, exc_info=True)
+
+        # 硬性保底：确认文档至少有一个标签，没有则强制打「其他」
+        try:
+            from sqlalchemy import text as sql_text
+            check = await db.execute(
+                sql_text("SELECT COUNT(*) FROM content_tags WHERE content_type = 'document' AND content_id = :cid"),
+                {"cid": doc.id},
+            )
+            if (check.scalar() or 0) == 0:
+                from app.services.llm import _force_apply_other_tag
+                await _force_apply_other_tag(db, doc.id, "document", current_user.feishu_open_id)
+                await db.commit()
+                logger.warning("硬性保底: doc_id=%d 无标签, 已强制打上「其他」", doc.id)
+        except Exception as e_fallback:
+            logger.error("硬性保底打标也失败 (doc_id=%d): %s", doc.id, e_fallback, exc_info=True)
 
         return DocumentOut.model_validate(doc)
     except FileUploadError as e:
@@ -108,10 +133,9 @@ async def upload_communication(
             file=file,
             owner_id=current_user.feishu_open_id,
             db=db,
-            uploader_name=current_user.name,
+            asset_owner_name=current_user.name,
             user_metadata=user_metadata,
         )
-        comm.uploaded_by = current_user.name
         await db.commit()
         await db.refresh(comm)
 
@@ -140,6 +164,32 @@ async def upload_communication(
                         tagged_by="user_manual",
                     ))
             await db.commit()
+
+        # LLM 自动标签推荐（硬性规定：必须至少打上一个标签）
+        try:
+            from app.services.llm import auto_tag_content
+            content = comm.summary or (comm.content_text or "")[:2000]
+            tagged = await auto_tag_content(db, comm.id, "communication", content, current_user.feishu_open_id)
+            if tagged:
+                await db.commit()
+                logger.info("自动标签推荐: comm_id=%d, 新增 %d 个标签", comm.id, tagged)
+        except Exception as e_tag:
+            logger.error("自动标签推荐失败 (comm_id=%d): %s", comm.id, e_tag, exc_info=True)
+
+        # 硬性保底：确认至少有一个标签
+        try:
+            from sqlalchemy import text as sql_text
+            check = await db.execute(
+                sql_text("SELECT COUNT(*) FROM content_tags WHERE content_type = 'communication' AND content_id = :cid"),
+                {"cid": comm.id},
+            )
+            if (check.scalar() or 0) == 0:
+                from app.services.llm import _force_apply_other_tag
+                await _force_apply_other_tag(db, comm.id, "communication", current_user.feishu_open_id)
+                await db.commit()
+                logger.warning("硬性保底: comm_id=%d 无标签, 已强制打上「其他」", comm.id)
+        except Exception as e_fallback:
+            logger.error("硬性保底打标也失败 (comm_id=%d): %s", comm.id, e_fallback, exc_info=True)
 
         return CommunicationOut.model_validate(comm)
     except FileUploadError as e:

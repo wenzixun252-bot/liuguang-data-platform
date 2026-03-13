@@ -114,12 +114,15 @@ class CloudDocImportService:
         owner_id: str,
         db: AsyncSession,
         user_access_token: str,
-        uploader_name: str | None = None,
+        asset_owner_name: str | None = None,
         force: bool = False,
         feishu_owner_id: str | None = None,
         source_platform: str = "feishu_cloud_doc",
     ) -> tuple[Document | None, str]:
         """导入飞书云文档（docx/doc 类型），通过 Block API 读取内容。
+
+        Args:
+            asset_owner_name: 资产所有人显示名（飞书文档原始作者） → 写入 DB asset_owner_name 列
 
         Returns:
             (Document, status) — status: "imported" | "skipped" | "failed"
@@ -128,16 +131,10 @@ class CloudDocImportService:
             # 1. 检查是否已导入
             existing = await self._find_existing(db, document_id, owner_id)
             if existing and not force:
-                # 回补 _original_owner（老数据可能缺失）
+                # 回补资产所有人显示名（老数据可能缺失）
                 changed = False
-                if feishu_owner_id and not (existing.extra_fields or {}).get("_original_owner"):
-                    ef = dict(existing.extra_fields or {})
-                    ef["_original_owner"] = {"id": feishu_owner_id}
-                    existing.extra_fields = ef
-                    changed = True
-                # 回补 uploader_name（老数据可能是导入者而非文档所有者）
-                if uploader_name and existing.uploader_name != uploader_name:
-                    existing.uploader_name = uploader_name
+                if asset_owner_name and existing.asset_owner_name != asset_owner_name:
+                    existing.asset_owner_name = asset_owner_name
                     changed = True
                 # 回补 feishu_created_at / feishu_updated_at（老数据可能缺失）
                 if not existing.feishu_created_at or not existing.feishu_updated_at:
@@ -230,9 +227,6 @@ class CloudDocImportService:
                 logger.info("云文档已更新: doc_id=%d, title=%s", existing.id, existing.title)
                 return existing, "imported"
             else:
-                extra = {}
-                if feishu_owner_id:
-                    extra["_original_owner"] = {"id": feishu_owner_id}
                 doc = Document(
                     owner_id=owner_id,
                     source_type="cloud",
@@ -246,12 +240,10 @@ class CloudDocImportService:
                     keywords=keywords_list,
                     file_type="docx",
                     source_url=source_url,
-                    uploader_name=uploader_name,
-                    uploaded_by=uploader_name,
+                    asset_owner_name=asset_owner_name,
                     feishu_created_at=feishu_created,
                     feishu_updated_at=feishu_updated,
                     synced_at=datetime.utcnow(),
-                    extra_fields=extra,
                 )
                 if embedding:
                     doc.content_vector = embedding
@@ -272,7 +264,7 @@ class CloudDocImportService:
         owner_id: str,
         db: AsyncSession,
         user_access_token: str,
-        uploader_name: str | None = None,
+        asset_owner_name: str | None = None,
         force: bool = False,
         feishu_owner_id: str | None = None,
         source_platform: str = "feishu_cloud_doc",
@@ -281,6 +273,9 @@ class CloudDocImportService:
     ) -> tuple[Document | None, str]:
         """导入飞书文件（PDF/PPT 等），先下载再本地提取文本。
 
+        Args:
+            asset_owner_name: 资产所有人显示名 → DB asset_owner_name 列
+
         Returns:
             (Document, status) — status: "imported" | "skipped" | "failed"
         """
@@ -288,15 +283,10 @@ class CloudDocImportService:
             # 1. 检查是否已导入
             existing = await self._find_existing(db, file_token, owner_id)
             if existing and not force:
-                # 回补 _original_owner 和 uploader_name（老数据可能缺失或不正确）
+                # 回补资产所有人显示名（老数据可能缺失）
                 changed = False
-                if feishu_owner_id and not (existing.extra_fields or {}).get("_original_owner"):
-                    ef = dict(existing.extra_fields or {})
-                    ef["_original_owner"] = {"id": feishu_owner_id}
-                    existing.extra_fields = ef
-                    changed = True
-                if uploader_name and existing.uploader_name != uploader_name:
-                    existing.uploader_name = uploader_name
+                if asset_owner_name and existing.asset_owner_name != asset_owner_name:
+                    existing.asset_owner_name = asset_owner_name
                     changed = True
                 # 回补 feishu_created_at / feishu_updated_at（老数据可能缺失）
                 if not existing.feishu_created_at or not existing.feishu_updated_at:
@@ -415,9 +405,6 @@ class CloudDocImportService:
                 logger.info("飞书文件已更新: doc_id=%d, title=%s", existing.id, existing.title)
                 return existing, "imported"
             else:
-                extra = {}
-                if feishu_owner_id:
-                    extra["_original_owner"] = {"id": feishu_owner_id}
                 doc = Document(
                     owner_id=owner_id,
                     source_type="cloud",
@@ -432,12 +419,10 @@ class CloudDocImportService:
                     file_type=ext,
                     file_size=file_size,
                     source_url=source_url,
-                    uploader_name=uploader_name,
-                    uploaded_by=uploader_name,
+                    asset_owner_name=asset_owner_name,
                     feishu_created_at=feishu_created,
                     feishu_updated_at=feishu_updated,
                     synced_at=datetime.utcnow(),
-                    extra_fields=extra,
                 )
                 if embedding:
                     doc.content_vector = embedding
@@ -457,21 +442,20 @@ class CloudDocImportService:
         owner_id: str,
         db: AsyncSession,
         user_access_token: str,
-        uploader_name: str | None = None,
         force: bool = False,
         source_platform: str = "feishu_cloud_doc",
     ) -> tuple[Document | None, str]:
         """路由方法 — 根据文件类型分发到不同处理逻辑。
 
         Args:
-            file_info: 飞书 Drive API 返回的文件信息，包含 token, name, type
+            file_info: 飞书 Drive API 返回的文件信息，包含 token, name, type, owner_name 等
         """
         file_type = file_info.get("type", "")
         token = file_info.get("token", "")
         name = file_info.get("name", "未命名")
         feishu_owner_id = file_info.get("owner_id", "") or None
-        # 飞书资产：优先使用文档原始所有者名称作为资产所有人
-        display_owner = file_info.get("owner_name", "") or uploader_name
+        # 资产所有人显示名：使用文档原始所有者
+        display_owner = file_info.get("owner_name", "") or None
         # 飞书文件的创建/修改时间（从 list API 获取）
         fi_created_time = file_info.get("created_time")
         fi_modified_time = file_info.get("modified_time")
@@ -495,7 +479,7 @@ class CloudDocImportService:
                 obj_token = node.get("obj_token", token)
 
                 # wiki 文档的 owner 信息经常缺失，用解析后的 obj_token 补充
-                if not feishu_owner_id or display_owner == uploader_name:
+                if not feishu_owner_id or not display_owner:
                     try:
                         meta_map = await feishu_client.batch_get_doc_meta(
                             [{"token": obj_token, "type": obj_type or "docx"}],
@@ -541,7 +525,6 @@ class CloudDocImportService:
         file_info: dict,
         owner_id: str,
         db: AsyncSession,
-        uploader_name: str | None = None,
         tag_ids: list[int] | None = None,
         source_platform: str = "feishu_cloud_doc",
     ) -> tuple[Document | None, str]:
@@ -554,8 +537,8 @@ class CloudDocImportService:
         doc_type = file_info.get("type", "docx")
         url = file_info.get("url", "")
         feishu_owner_id = file_info.get("owner_id", "") or None
-        # 飞书资产：优先使用文档原始所有者名称作为资产所有人
-        display_owner = file_info.get("owner_name", "") or uploader_name
+        # 资产所有人显示名：使用文档原始所有者
+        display_owner = file_info.get("owner_name", "") or None
         # 飞书文件的创建/修改时间
         fi_created_time = file_info.get("created_time")
         fi_modified_time = file_info.get("modified_time")
@@ -568,16 +551,9 @@ class CloudDocImportService:
         try:
             existing = await self._find_existing(db, token, owner_id)
             if existing:
-                # 回补 _original_owner（老数据可能缺失）
-                if feishu_owner_id and not (existing.extra_fields or {}).get("_original_owner"):
-                    ef = dict(existing.extra_fields or {})
-                    ef["_original_owner"] = {"id": feishu_owner_id}
-                    existing.extra_fields = ef
-                    await db.commit()
-                    await db.refresh(existing)
-                # 回补 uploader_name（老数据可能是导入者而非文档所有者）
-                if display_owner and existing.uploader_name != display_owner:
-                    existing.uploader_name = display_owner
+                # 回补资产所有人显示名（老数据可能缺失）
+                if display_owner and existing.asset_owner_name != display_owner:
+                    existing.asset_owner_name = display_owner
                     await db.commit()
                     await db.refresh(existing)
                 # 回补 feishu_created_at / feishu_updated_at（老数据可能缺失）
@@ -597,10 +573,6 @@ class CloudDocImportService:
                 domain = settings.feishu_base_domain or "feishu.cn"
                 url = f"https://{domain}/docx/{token}"
 
-            extra = {}
-            if feishu_owner_id:
-                extra["_original_owner"] = {"id": feishu_owner_id}
-
             doc = Document(
                 owner_id=owner_id,
                 source_type="cloud",
@@ -611,13 +583,11 @@ class CloudDocImportService:
                 content_text="",
                 file_type=doc_type,
                 source_url=url,
-                uploader_name=display_owner,
-                uploaded_by=display_owner,
+                asset_owner_name=display_owner,
                 feishu_created_at=feishu_created,
                 feishu_updated_at=feishu_updated,
                 parse_status="pending",
                 synced_at=datetime.utcnow(),
-                extra_fields=extra,
             )
             db.add(doc)
             await db.commit()
@@ -639,7 +609,6 @@ class CloudDocImportService:
         owner_id: str,
         db: AsyncSession,
         user_access_token: str,
-        uploader_name: str | None = None,
         tag_ids: list[int] | None = None,
         source_platform: str = "feishu_cloud_doc",
     ) -> ImportResult:
@@ -675,7 +644,7 @@ class CloudDocImportService:
             except Exception as e:
                 logger.warning("batch_get_doc_meta 补充 owner 信息失败: %s", e)
 
-        # 飞书 batch_query API 不返回 owner_display_name，通过 owner_id 查 User 表解析
+        # 飞书 batch_query API 不返回 asset_owner_name，通过 owner_id 查 User 表解析
         still_need_name = [f for f in file_infos if f.get("owner_id") and not f.get("owner_name")]
         if still_need_name:
             try:
@@ -702,7 +671,7 @@ class CloudDocImportService:
             try:
                 doc, status = await asyncio.wait_for(
                     self.import_item(
-                        info, owner_id, db, user_access_token, uploader_name,
+                        info, owner_id, db, user_access_token,
                         source_platform=source_platform,
                     ),
                     timeout=PER_FILE_TIMEOUT,
@@ -718,6 +687,15 @@ class CloudDocImportService:
                     result.documents.append(doc)
                     if tag_ids:
                         await self._apply_tags(doc.id, tag_ids, db)
+                    # LLM 自动标签推荐
+                    try:
+                        from app.services.llm import auto_tag_content
+                        content = doc.summary or (doc.content_text or "")[:2000]
+                        tagged = await auto_tag_content(db, doc.id, "document", content, owner_id)
+                        if tagged:
+                            await db.commit()
+                    except Exception:
+                        pass
             elif status == "skipped":
                 result.skipped += 1
                 if doc:
@@ -738,7 +716,7 @@ class CloudDocImportService:
         owner_id: str,
         db: AsyncSession,
         user_access_token: str,
-        uploader_name: str | None = None,
+        asset_owner_name: str | None = None,
         force: bool = False,
         feishu_owner_id: str | None = None,
     ) -> tuple[Communication | None, str]:
@@ -837,11 +815,12 @@ class CloudDocImportService:
                 await db.commit()
                 await db.refresh(existing)
                 logger.info("沟通资产已更新: id=%d, title=%s", existing.id, existing.title)
+
+                # LLM 自动标签推荐（硬性规定）
+                await self._auto_tag_communication(db, existing, owner_id)
+
                 return existing, "imported"
             else:
-                extra = {}
-                if feishu_owner_id:
-                    extra["_original_owner"] = {"id": feishu_owner_id}
                 comm = Communication(
                     owner_id=owner_id,
                     comm_type=comm_type,
@@ -858,14 +837,12 @@ class CloudDocImportService:
                     content_text=content_text,
                     summary=parsed.get("summary"),
                     source_url=source_url,
-                    uploader_name=uploader_name,
-                    uploaded_by=uploader_name,
+                    asset_owner_name=asset_owner_name,
                     keywords=keywords_list,
                     sentiment=parsed.get("sentiment"),
                     feishu_created_at=feishu_created,
                     feishu_updated_at=feishu_updated,
                     synced_at=datetime.utcnow(),
-                    extra_fields=extra,
                 )
                 if embedding:
                     comm.content_vector = embedding
@@ -873,6 +850,10 @@ class CloudDocImportService:
                 await db.commit()
                 await db.refresh(comm)
                 logger.info("沟通资产已导入: id=%d, title=%s", comm.id, comm.title)
+
+                # LLM 自动标签推荐（硬性规定）
+                await self._auto_tag_communication(db, comm, owner_id)
+
                 return comm, "imported"
 
         except Exception as e:
@@ -890,7 +871,7 @@ class CloudDocImportService:
         owner_id: str,
         db: AsyncSession,
         user_access_token: str,
-        uploader_name: str | None = None,
+        asset_owner_name: str | None = None,
         force: bool = False,
         feishu_owner_id: str | None = None,
     ) -> tuple[Communication | None, str]:
@@ -991,11 +972,12 @@ class CloudDocImportService:
                 await db.commit()
                 await db.refresh(existing)
                 logger.info("文件沟通资产已更新: id=%d, title=%s", existing.id, existing.title)
+
+                # LLM 自动标签推荐（硬性规定）
+                await self._auto_tag_communication(db, existing, owner_id)
+
                 return existing, "imported"
             else:
-                extra = {}
-                if feishu_owner_id:
-                    extra["_original_owner"] = {"id": feishu_owner_id}
                 comm = Communication(
                     owner_id=owner_id,
                     comm_type=comm_type,
@@ -1012,12 +994,10 @@ class CloudDocImportService:
                     content_text=content_text,
                     summary=parsed.get("summary"),
                     source_url=source_url,
-                    uploader_name=uploader_name,
-                    uploaded_by=uploader_name,
+                    asset_owner_name=asset_owner_name,
                     keywords=keywords_list,
                     sentiment=parsed.get("sentiment"),
                     synced_at=datetime.utcnow(),
-                    extra_fields=extra,
                 )
                 if embedding:
                     comm.content_vector = embedding
@@ -1025,6 +1005,10 @@ class CloudDocImportService:
                 await db.commit()
                 await db.refresh(comm)
                 logger.info("文件沟通资产已导入: id=%d, title=%s", comm.id, comm.title)
+
+                # LLM 自动标签推荐（硬性规定）
+                await self._auto_tag_communication(db, comm, owner_id)
+
                 return comm, "imported"
 
         except Exception as e:
@@ -1041,7 +1025,6 @@ class CloudDocImportService:
         owner_id: str,
         db: AsyncSession,
         user_access_token: str,
-        uploader_name: str | None = None,
     ) -> ImportResult:
         """批量导入云文档为沟通资产。
 
@@ -1060,8 +1043,8 @@ class CloudDocImportService:
             file_type = info.get("type", "docx")
             name = info.get("name", "未命名")
             feishu_owner_id = info.get("owner_id", "") or None
-            # 飞书资产：优先使用文档原始所有者名称作为资产所有人
-            display_owner = info.get("owner_name", "") or uploader_name
+            # 资产所有人显示名：使用文档原始所有者
+            display_owner = info.get("owner_name", "") or None
             if not token:
                 result.failed += 1
                 result.errors.append({"name": name, "reason": "文件token为空"})
@@ -1149,7 +1132,6 @@ class CloudDocImportService:
         owner_id: str,
         db: AsyncSession,
         user_access_token: str,
-        uploader_name: str | None = None,
     ) -> ImportResult:
         """同步飞书文件夹下所有文档/文件。"""
         # 1. 获取文件夹下的文件列表
@@ -1185,7 +1167,7 @@ class CloudDocImportService:
 
         # 4. 逐个导入
         return await self.batch_import(
-            files, owner_id, db, user_access_token, uploader_name,
+            files, owner_id, db, user_access_token,
             source_platform="feishu_folder",
         )
 
@@ -1212,6 +1194,32 @@ class CloudDocImportService:
             except Exception as e:
                 logger.warning("给文档 %d 打标签 %d 失败: %s", doc_id, tag_id, e)
         await db.commit()
+
+    @staticmethod
+    async def _auto_tag_communication(
+        db: AsyncSession, comm, owner_id: str,
+    ) -> None:
+        """为沟通资产执行 LLM 自动标签推荐（硬性规定：必须至少一个标签）。"""
+        try:
+            from app.services.llm import auto_tag_content, _force_apply_other_tag
+            content = comm.summary or (comm.content_text or "")[:2000]
+            tagged = await auto_tag_content(db, comm.id, "communication", content, owner_id)
+            if tagged:
+                await db.commit()
+                logger.info("沟通资产自动标签: comm_id=%d, 新增 %d 个标签", comm.id, tagged)
+            else:
+                # 硬性保底
+                from sqlalchemy import text as sql_text
+                check = await db.execute(
+                    sql_text("SELECT COUNT(*) FROM content_tags WHERE content_type = 'communication' AND content_id = :cid"),
+                    {"cid": comm.id},
+                )
+                if (check.scalar() or 0) == 0:
+                    await _force_apply_other_tag(db, comm.id, "communication", owner_id)
+                    await db.commit()
+                    logger.warning("沟通资产硬性保底: comm_id=%d 无标签, 已强制打上「其他」", comm.id)
+        except Exception as e:
+            logger.warning("沟通资产自动标签失败 (comm_id=%d): %s", comm.id, e)
 
     @staticmethod
     async def _find_existing_communication(db: AsyncSession, document_id: str, owner_id: str) -> Communication | None:

@@ -4,11 +4,11 @@ import logging
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_current_user, get_db, get_visible_owner_ids
 from app.models.structured_table import StructuredTable, StructuredTableRow
 from app.models.tag import ContentTag
 from app.models.user import User
@@ -69,13 +69,14 @@ async def import_bitable(
             body.table_id,
             user_access_token=current_user.feishu_access_token,
         )
-        table.uploaded_by = current_user.name
         await db.commit()
         await db.refresh(table)
         # 如果指定了清洗规则，导入完成后自动应用
         if body.cleaning_rule_id:
             await _apply_cleaning_after_import(db, table.id, body.cleaning_rule_id)
             await db.refresh(table)
+        # LLM 自动标签推荐
+        await _auto_tag_structured_table(db, table, current_user.feishu_open_id)
         return table
     except Exception as e:
         logger.error("导入多维表格失败: %s", e, exc_info=True)
@@ -98,13 +99,14 @@ async def import_spreadsheet(
             body.sheet_id,
             user_access_token=current_user.feishu_access_token,
         )
-        table.uploaded_by = current_user.name
         await db.commit()
         await db.refresh(table)
         # 如果指定了清洗规则，导入完成后自动应用
         if body.cleaning_rule_id:
             await _apply_cleaning_after_import(db, table.id, body.cleaning_rule_id)
             await db.refresh(table)
+        # LLM 自动标签推荐
+        await _auto_tag_structured_table(db, table, current_user.feishu_open_id)
         return table
     except Exception as e:
         logger.error("导入飞书表格失败: %s", e, exc_info=True)
@@ -134,17 +136,31 @@ async def import_upload(
             file.filename,
             content,
         )
-        table.uploaded_by = current_user.name
         await db.commit()
         await db.refresh(table)
         # 如果指定了清洗规则，导入完成后自动应用
         if cleaning_rule_id:
             await _apply_cleaning_after_import(db, table.id, cleaning_rule_id)
             await db.refresh(table)
+        # LLM 自动标签推荐
+        await _auto_tag_structured_table(db, table, current_user.feishu_open_id)
         return table
     except Exception as e:
         logger.error("导入本地文件失败: %s", e, exc_info=True)
         raise HTTPException(status_code=400, detail=f"导入失败: {e}")
+
+
+async def _auto_tag_structured_table(db: AsyncSession, table, owner_id: str) -> None:
+    """对结构化表格调用 LLM 自动标签推荐（静默失败）。"""
+    try:
+        from app.services.llm import auto_tag_content
+        content = f"{table.name} {table.description or ''} {getattr(table, 'summary', '') or ''}"
+        tagged = await auto_tag_content(db, table.id, "structured_table", content.strip(), owner_id)
+        if tagged:
+            await db.commit()
+            logger.info("自动标签推荐: structured_table_id=%d, 新增 %d 个标签", table.id, tagged)
+    except Exception as e:
+        logger.warning("自动标签推荐失败 (structured_table_id=%d): %s", table.id, e)
 
 
 # ── URL 解析 & 导入 ──────────────────────────────────────────────
@@ -332,7 +348,6 @@ async def import_from_url(
                 parsed["token"], table_id,
                 user_access_token=user_token,
             )
-            table.uploaded_by = current_user.name
             await db.commit()
             await db.refresh(table)
             if body.cleaning_rule_id:
@@ -354,7 +369,6 @@ async def import_from_url(
                 parsed["token"], sheet_id,
                 user_access_token=user_token,
             )
-            table.uploaded_by = current_user.name
             await db.commit()
             await db.refresh(table)
             if body.cleaning_rule_id:
@@ -444,12 +458,13 @@ async def discover_sheets(
 
 @router.get("", response_model=StructuredTableListResponse, summary="表格列表")
 async def list_tables(
+    request: Request,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     search: str = Query("", max_length=200),
     source_type: str = Query("", max_length=32),
     table_category: str | None = Query(None),
-    uploader_name: str | None = Query(None),
+    asset_owner_name: str | None = Query(None),
     tag_ids: list[int] = Query(default=[]),
     date_field: str | None = Query(None, description="时间筛选字段: synced_at, created_at, updated_at"),
     date_from: datetime | None = Query(None, description="时间范围开始"),
@@ -457,9 +472,11 @@ async def list_tables(
     current_user: Annotated[User, Depends(get_current_user)] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ):
-    owner_id = current_user.feishu_open_id
+    visible_ids = await get_visible_owner_ids(current_user, db, request)
 
-    conditions = [StructuredTable.owner_id == owner_id]
+    conditions = []
+    if visible_ids is not None:
+        conditions.append(StructuredTable.owner_id.in_(visible_ids))
     if search:
         conditions.append(StructuredTable.name.ilike(f"%{search}%"))
     if source_type:
@@ -487,30 +504,32 @@ async def list_tables(
             conditions.append(col <= date_to)
 
     # 总数
-    count_q = select(func.count()).select_from(StructuredTable).where(and_(*conditions))
+    count_q = select(func.count()).select_from(StructuredTable)
+    if conditions:
+        count_q = count_q.where(and_(*conditions))
     total = (await db.execute(count_q)).scalar() or 0
 
-    # uploader_name 过滤需要 join User 表
-    if uploader_name:
-        user_subq = select(User.feishu_open_id).where(User.name.ilike(f"%{uploader_name}%"))
+    # asset_owner_name 过滤需要 join User 表
+    if asset_owner_name:
+        user_subq = select(User.feishu_open_id).where(User.name.ilike(f"%{asset_owner_name}%"))
         conditions.append(StructuredTable.owner_id.in_(user_subq))
         # 重新计算总数
         count_q = select(func.count()).select_from(StructuredTable).where(and_(*conditions))
         total = (await db.execute(count_q)).scalar() or 0
 
-    # 分页（LEFT JOIN User 获取 uploader_name）
-    q = (
-        select(StructuredTable, User.name.label("uploader_name"))
-        .outerjoin(User, StructuredTable.owner_id == User.feishu_open_id)
-        .where(and_(*conditions))
-        .order_by(StructuredTable.updated_at.desc())
+    # 分页（LEFT JOIN User 获取 asset_owner_name）
+    q = select(StructuredTable, User.name.label("asset_owner_name")).outerjoin(User, StructuredTable.owner_id == User.feishu_open_id)
+    if conditions:
+        q = q.where(and_(*conditions))
+    q = (q
+        .order_by(func.coalesce(StructuredTable.synced_at, StructuredTable.created_at).desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
     result = await db.execute(q)
     rows = result.all()
 
-    # 统计每个 (source_app_token, source_table_id) 被多少人归档（一次批量查询）
+    # 统计每个 (source_app_token, source_table_id) 被多少人归档（按上传人去重）
     source_keys = [
         (r.StructuredTable.source_app_token, r.StructuredTable.source_table_id)
         for r in rows
@@ -552,8 +571,8 @@ async def list_tables(
         out = StructuredTableOut.model_validate(tbl)
         # 飞书资产：优先使用文档原始所有者名称，本地资产用导入者名称
         feishu_owner = (tbl.extra_fields or {}).get("_feishu_owner_name", "")
-        display_owner = feishu_owner or r.uploader_name
-        updates: dict = {"uploader_name": display_owner}
+        display_owner = feishu_owner or r.asset_owner_name
+        updates: dict = {"asset_owner_name": display_owner, "uploader_name": r.asset_owner_name}
         key = (tbl.source_app_token, tbl.source_table_id)
         if key[0] and key[1] and key in import_count_map:
             updates["import_count"] = import_count_map[key]
@@ -567,20 +586,18 @@ async def list_tables(
 
 @router.get("/categories", summary="获取表格分类列表")
 async def list_table_categories(
+    request: Request,
     current_user: Annotated[User, Depends(get_current_user)] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ):
-    """返回当前用户所有表格的 table_category 去重列表（动态，由 AI 识别）。"""
-    owner_id = current_user.feishu_open_id
-    stmt = (
-        select(StructuredTable.table_category)
-        .where(
-            StructuredTable.owner_id == owner_id,
-            StructuredTable.table_category.isnot(None),
-        )
-        .distinct()
-        .order_by(StructuredTable.table_category)
+    """返回可见范围内所有表格的 table_category 去重列表（动态，由 AI 识别）。"""
+    visible_ids = await get_visible_owner_ids(current_user, db, request)
+    stmt = select(StructuredTable.table_category).where(
+        StructuredTable.table_category.isnot(None),
     )
+    if visible_ids is not None:
+        stmt = stmt.where(StructuredTable.owner_id.in_(visible_ids))
+    stmt = stmt.distinct().order_by(StructuredTable.table_category)
     rows = (await db.execute(stmt)).scalars().all()
     return {"categories": rows}
 

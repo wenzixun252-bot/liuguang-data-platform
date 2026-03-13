@@ -49,7 +49,7 @@ export default function CategoryCard({ category, isActive = false, onClick }: Ca
 
       {/* 支持格式 */}
       <div className="flex flex-wrap gap-1.5">
-        {config.extensions.slice(0, 3).map((ext) => (
+        {config.extensions.slice(0, 4).map((ext) => (
           <span
             key={ext}
             className="px-2 py-0.5 text-xs rounded bg-gray-50 text-gray-600"

@@ -1,5 +1,6 @@
 """文档管理接口。"""
 
+import asyncio
 import logging
 import mimetypes
 import os
@@ -43,7 +44,7 @@ async def list_documents(
     source_type: str | None = Query(None),
     doc_category: str | None = Query(None),
     sentiment: str | None = Query(None),
-    uploader_name: str | None = Query(None),
+    asset_owner_name: str | None = Query(None),
     file_type: str | None = Query(None),
     extraction_rule_id: int | None = Query(None, description="按提取规则ID筛选"),
     tag_ids: list[int] = Query(default=[]),
@@ -66,7 +67,7 @@ async def list_documents(
             | Document.content_text.ilike(like)
             | Document.summary.ilike(like)
             | Document.original_filename.ilike(like)
-            | Document.uploader_name.ilike(like)
+            | Document.asset_owner_name.ilike(like)
             | cast(Document.keywords, String).ilike(like)
             | Document.file_type.ilike(like)
             | Document.author.ilike(like)
@@ -87,10 +88,10 @@ async def list_documents(
         base = base.where(Document.sentiment == sentiment)
         count_stmt = count_stmt.where(Document.sentiment == sentiment)
 
-    if uploader_name:
-        like = f"%{uploader_name}%"
-        base = base.where(Document.uploader_name.ilike(like))
-        count_stmt = count_stmt.where(Document.uploader_name.ilike(like))
+    if asset_owner_name:
+        like = f"%{asset_owner_name}%"
+        base = base.where(Document.asset_owner_name.ilike(like))
+        count_stmt = count_stmt.where(Document.asset_owner_name.ilike(like))
 
     if file_type:
         base = base.where(Document.file_type == file_type)
@@ -129,46 +130,43 @@ async def list_documents(
             count_stmt = count_stmt.where(col <= date_to)
 
     total = (await db.execute(count_stmt)).scalar() or 0
-    items_stmt = base.order_by(Document.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
-    rows = (await db.execute(items_stmt)).scalars().all()
+    items_stmt = (
+        select(Document, User.name.label("uploader_name"))
+        .outerjoin(User, Document.owner_id == User.feishu_open_id)
+        .where(Document.id.in_(
+            base.with_only_columns(Document.id)
+            .order_by(func.coalesce(Document.synced_at, Document.created_at).desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        ))
+        .order_by(func.coalesce(Document.synced_at, Document.created_at).desc())
+    )
+    result_rows = (await db.execute(items_stmt)).all()
 
-    # 统计每个 feishu_record_id 被多少人归档（一次批量查询）
+    rows = [row.Document for row in result_rows]
+    uploader_map: dict[int, str | None] = {row.Document.id: row.uploader_name for row in result_rows}
+
+    # 统计每个 feishu_record_id 被多少人归档（按上传人去重）
     frid_list = [r.feishu_record_id for r in rows if r.feishu_record_id]
     import_count_map: dict[str, int] = {}
     if frid_list:
         count_rows = (await db.execute(
-            select(Document.feishu_record_id, func.count(Document.owner_id.distinct()).label("cnt"))
+            select(
+                Document.feishu_record_id,
+                func.count(func.coalesce(Document.asset_owner_name, Document.owner_id).distinct()).label("cnt"),
+            )
             .where(Document.feishu_record_id.in_(frid_list))
             .group_by(Document.feishu_record_id)
         )).all()
         import_count_map = {row.feishu_record_id: row.cnt for row in count_rows}
 
-    # 回补缺失的飞书创建/修改时间（一次性批量查询，仅对当页缺失的云文档）
-    need_time = [r for r in rows if r.source_type == "cloud" and r.feishu_record_id
-                 and (not r.feishu_created_at or not r.feishu_updated_at)]
-    if need_time:
-        try:
-            from datetime import datetime
-            from app.api.deps import refresh_user_feishu_token
-            from app.services.feishu import feishu_client
-            user_token = current_user.feishu_access_token
-            if not user_token:
-                user_token = await refresh_user_feishu_token(current_user, db)
-            doc_tokens = [{"token": r.feishu_record_id, "type": r.file_type or "docx"} for r in need_time]
-            meta_map = await feishu_client.batch_get_doc_meta(doc_tokens, user_token)
-            changed = False
-            for r in need_time:
-                meta = meta_map.get(r.feishu_record_id, {})
-                if meta.get("create_time") and not r.feishu_created_at:
-                    r.feishu_created_at = datetime.utcfromtimestamp(int(meta["create_time"]))
-                    changed = True
-                if meta.get("latest_modify_time") and not r.feishu_updated_at:
-                    r.feishu_updated_at = datetime.utcfromtimestamp(int(meta["latest_modify_time"]))
-                    changed = True
-            if changed:
-                await db.commit()
-        except Exception as e:
-            logger.debug("回补文档时间戳失败: %s", e)
+    # 回补缺失的飞书创建/修改时间（后台异步执行，不阻塞列表响应）
+    need_time_ids = [r.id for r in rows if r.source_type == "cloud" and r.feishu_record_id
+                     and (not r.feishu_created_at or not r.feishu_updated_at)]
+    if need_time_ids:
+        user_token = current_user.feishu_access_token
+        user_id = current_user.id
+        asyncio.create_task(_backfill_feishu_time(need_time_ids, user_token, user_id))
 
     # 将 key_info 中的 field_xxx key 翻译为中文 label
     from app.services.etl.enricher import translate_key_info_batch
@@ -178,6 +176,9 @@ async def list_documents(
     search_lower = search.lower() if search else ""
     for r in rows:
         doc_out = DocumentOut.model_validate(r)
+        uname = uploader_map.get(r.id)
+        if uname:
+            doc_out = doc_out.model_copy(update={"uploader_name": uname})
         if r.feishu_record_id and r.feishu_record_id in import_count_map:
             doc_out = doc_out.model_copy(update={"import_count": import_count_map[r.feishu_record_id]})
         # 计算 matched_fields
@@ -188,7 +189,7 @@ async def list_documents(
                 "content_text": r.content_text,
                 "summary": r.summary,
                 "original_filename": r.original_filename,
-                "uploader_name": r.uploader_name,
+                "asset_owner_name": r.asset_owner_name,
                 "keywords": " ".join(r.keywords or []),
                 "key_info": " ".join(f"{k} {v}" for k, v in (r.key_info or {}).items() if v is not None),
             }
@@ -215,13 +216,20 @@ async def get_document(
 ) -> DocumentOut:
     visible_ids = await get_visible_owner_ids(current_user, db, request)
 
-    stmt = select(Document).where(Document.id == doc_id)
+    stmt = (
+        select(Document, User.name.label("uploader_name"))
+        .outerjoin(User, Document.owner_id == User.feishu_open_id)
+        .where(Document.id == doc_id)
+    )
     stmt = _apply_visibility(stmt, visible_ids)
-    row = (await db.execute(stmt)).scalar_one_or_none()
+    row = (await db.execute(stmt)).first()
 
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="文档不存在或无权访问")
-    return DocumentOut.model_validate(row)
+    doc_out = DocumentOut.model_validate(row.Document)
+    if row.uploader_name:
+        doc_out = doc_out.model_copy(update={"uploader_name": row.uploader_name})
+    return doc_out
 
 
 @router.get("/{doc_id}/download", summary="下载本地上传的文档")
@@ -305,3 +313,47 @@ async def batch_delete_documents(
 
     await db.commit()
     return {"deleted": len(rows)}
+
+
+async def _backfill_feishu_time(doc_ids: list[int], user_token: str | None, user_id: int) -> None:
+    """后台回补缺失的飞书文档创建/修改时间，不阻塞 API 响应。"""
+    try:
+        from app.database import async_session
+        from app.api.deps import refresh_user_feishu_token
+        from app.services.feishu import feishu_client
+        from app.models.user import User as UserModel
+
+        async with async_session() as db:
+            rows = (await db.execute(
+                select(Document).where(Document.id.in_(doc_ids))
+            )).scalars().all()
+            if not rows:
+                return
+
+            # 如果没有 user_token，尝试刷新
+            token = user_token
+            if not token:
+                user = (await db.execute(
+                    select(UserModel).where(UserModel.id == user_id)
+                )).scalar_one_or_none()
+                if user:
+                    token = await refresh_user_feishu_token(user, db)
+            if not token:
+                return
+
+            doc_tokens = [{"token": r.feishu_record_id, "type": r.file_type or "docx"} for r in rows]
+            meta_map = await feishu_client.batch_get_doc_meta(doc_tokens, token)
+
+            changed = False
+            for r in rows:
+                meta = meta_map.get(r.feishu_record_id, {})
+                if meta.get("create_time") and not r.feishu_created_at:
+                    r.feishu_created_at = datetime.utcfromtimestamp(int(meta["create_time"]))
+                    changed = True
+                if meta.get("latest_modify_time") and not r.feishu_updated_at:
+                    r.feishu_updated_at = datetime.utcfromtimestamp(int(meta["latest_modify_time"]))
+                    changed = True
+            if changed:
+                await db.commit()
+    except Exception as e:
+        logger.debug("后台回补文档时间戳失败: %s", e)

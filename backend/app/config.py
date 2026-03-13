@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     # ── 文件上传 ──
     upload_dir: str = "uploads"
     max_upload_size_mb: int = 50
-    allowed_file_types: str = "pdf,docx,txt,csv,xlsx,png,jpg,jpeg,mp3,wav,m4a,aac,ogg,flac"
+    allowed_file_types: str = "pdf,docx,txt,csv,xlsx,png,jpg,jpeg,pptx,ppt,mp3,wav,m4a,aac,ogg,flac"
 
 
 settings = Settings()

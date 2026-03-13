@@ -134,9 +134,22 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
     addTask(taskId, '智能提取待办', '/chat?tab=todos')
     updateTask(taskId, { message: '正在分析数据...' })
     try {
-      const res = await api.post('/todos/extract', { days })
-      updateTask(taskId, { status: 'done', progress: 100, message: `提取到 ${res.data.length} 条` })
-      toast.success(`提取到 ${res.data.length} 条待办`)
+      await api.post('/todos/extract', { days })
+      // 后端是异步任务，需要轮询 extract-status 等待完成
+      const poll = async (): Promise<number> => {
+        for (let i = 0; i < 120; i++) {
+          await new Promise(r => setTimeout(r, 2000))
+          const statusRes = await api.get('/todos/extract-status')
+          const st = statusRes.data
+          if (st.status === 'done') return st.count ?? 0
+          if (st.status === 'error') throw new Error(st.message || '提取失败')
+          updateTask(taskId, { message: st.message || '提取中...' })
+        }
+        throw new Error('提取超时')
+      }
+      const count = await poll()
+      updateTask(taskId, { status: 'done', progress: 100, message: `提取到 ${count} 条` })
+      toast.success(`提取到 ${count} 条待办`)
       setTab('pending_review')
       fetchTodos()
     } catch (err: any) {

@@ -99,9 +99,19 @@ async def gather_meeting_context(
             )
             entity = result.scalar_one_or_none()
             if entity:
-                # 查找该实体的关系
+                # 查找该实体的关系，JOIN 获取 source/target 实体名称
+                src = KGEntity.__table__.alias("src")
+                tgt = KGEntity.__table__.alias("tgt")
                 rel_result = await db.execute(
-                    select(KGRelation).where(
+                    select(
+                        src.c.name.label("src_name"),
+                        KGRelation.relation_type,
+                        tgt.c.name.label("tgt_name"),
+                    )
+                    .select_from(KGRelation.__table__)
+                    .join(src, KGRelation.source_entity_id == src.c.id)
+                    .join(tgt, KGRelation.target_entity_id == tgt.c.id)
+                    .where(
                         and_(
                             KGRelation.owner_id == owner_id,
                             or_(
@@ -111,10 +121,10 @@ async def gather_meeting_context(
                         )
                     ).limit(5)
                 )
-                rels = rel_result.scalars().all()
+                rels = rel_result.all()
                 rel_texts = []
                 for r in rels:
-                    rel_texts.append(f"  - {r.source_name} → {r.relation_type} → {r.target_name}")
+                    rel_texts.append(f"  - {r.src_name} → {r.relation_type} → {r.tgt_name}")
                 rel_str = "\n".join(rel_texts) if rel_texts else "  暂无关联信息"
                 profiles.append(f"**{name}** (类型: {entity.entity_type})\n{rel_str}")
             else:
@@ -159,8 +169,22 @@ async def gather_meeting_context(
         parts = []
         for m in meetings:
             time_str = m.comm_time.strftime("%Y-%m-%d %H:%M") if m.comm_time else "时间未知"
-            conclusions = (m.conclusions or "无结论")[:200]
-            parts.append(f"- **{m.title or '无标题'}** ({time_str})\n  结论: {conclusions}")
+            lines = [f"- **{m.title or '无标题'}** ({time_str})"]
+            # 摘要
+            if m.summary:
+                lines.append(f"  摘要: {m.summary[:200]}")
+            # 结论
+            conclusions = m.conclusions or (m.content_text[:200] if m.content_text and not m.summary else None)
+            if conclusions:
+                lines.append(f"  结论: {conclusions[:200]}")
+            # 待办事项
+            action_items = m.action_items or []
+            if action_items:
+                tasks = [ai.get("task", "未命名") + (f"（{ai['assignee']}）" if ai.get("assignee") else "") for ai in action_items[:5]]
+                lines.append(f"  待办: {'; '.join(tasks)}")
+            if len(lines) == 1:
+                lines.append("  暂无详细记录")
+            parts.append("\n".join(lines))
 
         return "\n".join(parts)
 
