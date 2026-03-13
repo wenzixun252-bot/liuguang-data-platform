@@ -461,6 +461,102 @@ class LLMClient:
 
         return {"content_text": "", "title": None, "summary": None, "author": None, "tags": [], "category": None}
 
+    # ── 智能路由：判断内容入哪张表 ──────────────────────
+
+    async def classify_content(
+        self,
+        content_preview: str,
+        file_name: str = "",
+        input_type: str = "text",
+        extraction_rules: list[dict] | None = None,
+        cleaning_rules: list[dict] | None = None,
+    ) -> dict:
+        """LLM 分析内容，判断应入哪张表 + 推荐提取/清洗规则。
+
+        extraction_rules / cleaning_rules: [{"id": 1, "name": "xxx", "description": "..."}, ...]
+
+        Returns:
+            {
+                "asset_type": "document" | "comm_meeting" | "comm_chat" | "comm_recording" | "structured",
+                "reason": "一句话说明判断理由",
+                "extraction_rule_id": 0,
+                "extraction_reason": "...",
+                "cleaning_rule_id": 0,
+                "cleaning_reason": "...",
+            }
+        """
+        # 构建规则描述
+        ext_rules_desc = "无可用规则"
+        if extraction_rules:
+            ext_rules_desc = "\n".join(
+                f"  - id={r['id']}: {r['name']}" + (f"（{r['description']}）" if r.get("description") else "")
+                for r in extraction_rules
+            )
+
+        cln_rules_desc = "无可用规则"
+        if cleaning_rules:
+            cln_rules_desc = "\n".join(
+                f"  - id={r['id']}: {r['name']}" + (f"（{r['description']}）" if r.get("description") else "")
+                for r in cleaning_rules
+            )
+
+        prompt = f"""你是一个企业数据分类助手。请根据以下信息：
+1. 判断这条数据最适合存入哪个数据表
+2. 推荐最合适的提取规则和清洗规则（如果有可用规则的话）
+
+可选的数据表：
+- document: 文档（报告、方案、制度、技术文档、笔记、通知、公告等书面材料）
+- comm_meeting: 沟通记录-会议（会议纪要、会议记录、讨论记录等）
+- comm_chat: 沟通记录-聊天（对话记录、即时消息、聊天内容等）
+- comm_recording: 沟通记录-录音/音频（语音文件、录音转写等）
+- structured: 结构化表格（Excel/CSV 表格数据、统计数据、清单等）
+
+可用的提取规则（id=0 表示不使用）：
+{ext_rules_desc}
+
+可用的清洗规则（id=0 表示不使用）：
+{cln_rules_desc}
+
+输入信息：
+- 内容类型: {input_type}
+- 文件名: {file_name or '无'}
+- 内容预览: {content_preview[:500]}
+
+请直接返回 JSON，不要返回其他内容：
+{{"asset_type": "选择数据表", "reason": "分类理由", "extraction_rule_id": 0, "extraction_reason": "提取规则理由", "cleaning_rule_id": 0, "cleaning_reason": "清洗规则理由"}}"""
+
+        try:
+            response = await self.chat_client.chat.completions.create(
+                model=settings.llm_model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+            )
+            result_text = response.choices[0].message.content.strip()
+            if "```" in result_text:
+                result_text = result_text.split("```")[1]
+                if result_text.startswith("json"):
+                    result_text = result_text[4:]
+                result_text = result_text.strip()
+            parsed = json.loads(result_text)
+            valid_types = {"document", "comm_meeting", "comm_chat", "comm_recording", "structured"}
+            if parsed.get("asset_type") not in valid_types:
+                parsed["asset_type"] = "document"
+            # 确保规则 ID 合法
+            valid_ext_ids = {r["id"] for r in (extraction_rules or [])} | {0}
+            valid_cln_ids = {r["id"] for r in (cleaning_rules or [])} | {0}
+            if parsed.get("extraction_rule_id") not in valid_ext_ids:
+                parsed["extraction_rule_id"] = 0
+            if parsed.get("cleaning_rule_id") not in valid_cln_ids:
+                parsed["cleaning_rule_id"] = 0
+            return parsed
+        except Exception as e:
+            logger.warning("LLM 内容分类失败: %s", e)
+            return {
+                "asset_type": "document", "reason": "默认分类为文档",
+                "extraction_rule_id": 0, "extraction_reason": "未使用",
+                "cleaning_rule_id": 0, "cleaning_reason": "未使用",
+            }
+
     # ── Embedding 生成 ───────────────────────────────────
 
     async def generate_embedding(self, text: str) -> list[float]:

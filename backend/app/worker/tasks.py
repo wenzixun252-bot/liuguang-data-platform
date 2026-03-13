@@ -282,9 +282,9 @@ async def etl_sync_job(triggered_by: str | None = None) -> None:
                     continue
 
                 # 3. Load — 附件下载提取 + Embedding + Upsert（按 target_table 路由）
-                _uploaded_by = triggered_by or "系统自动同步"
-                for _rec in transform_result.records:
-                    _rec.uploaded_by = _uploaded_by
+                if triggered_by:
+                    for _rec in transform_result.records:
+                        _rec.uploaded_by = triggered_by
                 loaded = await asset_loader.load(transform_result, db, user_access_token=user_token)
                 total_loaded += loaded
 
@@ -408,9 +408,9 @@ async def _do_single_source_sync(app_token: str, table_id: str, owner_id: str | 
             )
 
             if transform_result.records:
-                _uploaded_by = triggered_by or "系统自动同步"
-                for _rec in transform_result.records:
-                    _rec.uploaded_by = _uploaded_by
+                if triggered_by:
+                    for _rec in transform_result.records:
+                        _rec.uploaded_by = triggered_by
                 await asset_loader.load(transform_result, db, user_access_token=user_token)
             else:
                 # 转换后无有效记录，也要将状态标记为 success

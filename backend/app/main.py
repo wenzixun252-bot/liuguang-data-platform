@@ -30,6 +30,7 @@ from app.api.tags import router as tags_router
 from app.api.settings import router as settings_router
 from app.api.extraction_rules import router as extraction_rules_router
 from app.api.cleaning_rules import router as cleaning_rules_router
+from app.api.feishu_webhook import router as feishu_webhook_router
 from app.database import async_session, engine
 from app.worker.scheduler import init_scheduler, shutdown_scheduler
 
@@ -95,6 +96,7 @@ app.include_router(tags_router)
 app.include_router(settings_router)
 app.include_router(extraction_rules_router)
 app.include_router(cleaning_rules_router)
+app.include_router(feishu_webhook_router)
 
 
 @app.get("/health", summary="健康检查")

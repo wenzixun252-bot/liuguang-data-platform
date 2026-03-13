@@ -844,6 +844,29 @@ class FeishuClient:
             resp.raise_for_status()
             return resp.content
 
+    async def download_message_resource(
+        self, message_id: str, file_key: str, resource_type: str = "file"
+    ) -> bytes:
+        """下载飞书消息中的文件或图片资源。
+
+        调用: GET /im/v1/messages/{message_id}/resources/{file_key}?type={type}
+        适用于用户通过消息发送的文件、图片。
+
+        Args:
+            message_id: 消息 ID
+            file_key: 文件 key 或 image_key
+            resource_type: "file" 或 "image"
+        """
+        token = await self.get_tenant_access_token()
+        async with httpx.AsyncClient(proxy=None, timeout=60.0, verify=False) as client:
+            resp = await client.get(
+                f"{FEISHU_BASE_URL}/im/v1/messages/{message_id}/resources/{file_key}",
+                params={"type": resource_type},
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            resp.raise_for_status()
+            return resp.content
+
     async def download_drive_file(self, file_token: str, user_access_token: str | None = None) -> bytes:
         """下载飞书云空间中的文件（PDF/PPT/DOCX 等上传到 Drive 的文件）。
 

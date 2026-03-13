@@ -368,10 +368,12 @@ async def import_from_local_file(
 
     if lower_name.endswith(".csv"):
         headers, data_rows = _parse_csv(file_content)
+    elif lower_name.endswith(".tsv"):
+        headers, data_rows = _parse_csv(file_content, delimiter="\t")
     elif lower_name.endswith((".xlsx", ".xls")):
         headers, data_rows = _parse_excel(file_content)
     else:
-        raise ValueError(f"不支持的文件格式: {file_name}，请上传 .csv 或 .xlsx 文件")
+        raise ValueError(f"不支持的文件格式: {file_name}，请上传 .csv / .tsv / .xlsx 文件")
 
     if not headers:
         raise ValueError("文件为空或无法解析列名")
@@ -425,8 +427,8 @@ async def import_from_local_file(
     return table_obj
 
 
-def _parse_csv(content: bytes) -> tuple[list[str], list[list]]:
-    """解析 CSV 文件，返回 (列名列表, 数据行列表)。"""
+def _parse_csv(content: bytes, delimiter: str = ",") -> tuple[list[str], list[list]]:
+    """解析 CSV/TSV 文件，返回 (列名列表, 数据行列表)。"""
     # 尝试多种编码
     text = None
     for encoding in ("utf-8-sig", "utf-8", "gbk", "gb2312"):
@@ -438,7 +440,7 @@ def _parse_csv(content: bytes) -> tuple[list[str], list[list]]:
     if text is None:
         raise ValueError("CSV 文件编码无法识别，请使用 UTF-8 编码")
 
-    reader = csv.reader(io.StringIO(text))
+    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
     rows = list(reader)
     if not rows:
         return [], []

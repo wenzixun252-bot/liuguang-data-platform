@@ -19,6 +19,7 @@ from app.models.kg_profile import KGProfile
 from app.models.extraction_rule import ExtractionRule
 from app.models.cleaning_rule import CleaningRule
 from app.models.structured_table import StructuredTable, StructuredTableRow
+from app.models.bot_message_task import BotMessageTask
 
 __all__ = [
     "User",
@@ -53,4 +54,5 @@ __all__ = [
     "CleaningRule",
     "StructuredTable",
     "StructuredTableRow",
+    "BotMessageTask",
 ]

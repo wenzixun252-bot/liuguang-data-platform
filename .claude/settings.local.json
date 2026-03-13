@@ -77,7 +77,9 @@
       "Bash(find d:/CC/liuguang-data-platform -name *.conf -o -name nginx*)",
       "Read(//c/Users/ljadmin/**)",
       "Read(//c/Users/ljadmin/.claude/**)",
-      "mcp__feishu-mcp__docx_builtin_import"
+      "mcp__feishu-mcp__docx_builtin_import",
+      "Bash(choco install:*)",
+      "Bash(alembic current:*)"
     ]
   },
   "hooks": {

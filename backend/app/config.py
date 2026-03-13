@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     feishu_app_secret: str = ""
     feishu_webhook_url: str = ""
     feishu_base_domain: str = ""  # 如 "vzyjg03bu3.feishu.cn"，用于构建多维表格链接
+    feishu_verification_token: str = ""  # 飞书事件订阅 Verification Token
+    feishu_encrypt_key: str = ""  # 飞书事件订阅 Encrypt Key（留空表示不加密）
 
     # ── ETL 注册中心 ──
     etl_registry_app_token: str = ""
@@ -53,6 +55,9 @@ class Settings(BaseSettings):
     asr_api_key: str = ""
     asr_base_url: str = "https://newapi.web.azyinghu.com:2443/v1"
     asr_model: str = "funasr"
+
+    # ── 平台地址 ──
+    platform_url: str = "http://localhost"  # 流光数据中台前端地址，用于机器人消息中的跳转链接
 
     # ── 文件上传 ──
     upload_dir: str = "uploads"
