@@ -108,6 +108,19 @@ class CloudDocImportService:
             except Exception as e:
                 logger.warning("wiki 文档 User 表解析 owner_name 失败: %s", e)
 
+        # 4. User 表查不到的，通过飞书 Contact API 兜底
+        wiki_final = [f for f in wiki_files if f.get("owner_id") and not f.get("owner_name")]
+        if wiki_final:
+            try:
+                unique_oids = list({f["owner_id"] for f in wiki_final})
+                feishu_name_map = await feishu_client.batch_get_user_names(unique_oids)
+                for f in wiki_final:
+                    resolved_name = feishu_name_map.get(f["owner_id"])
+                    if resolved_name:
+                        f["owner_name"] = resolved_name
+            except Exception as e:
+                logger.warning("wiki 文档飞书 Contact API 解析 owner_name 失败: %s", e)
+
     async def import_cloud_doc(
         self,
         document_id: str,
@@ -220,6 +233,8 @@ class CloudDocImportService:
                 existing.feishu_created_at = feishu_created
                 existing.feishu_updated_at = feishu_updated
                 existing.synced_at = datetime.utcnow()
+                if asset_owner_name:
+                    existing.asset_owner_name = asset_owner_name
                 if embedding:
                     existing.content_vector = embedding
                 await db.commit()
@@ -398,6 +413,8 @@ class CloudDocImportService:
                 existing.feishu_created_at = feishu_created
                 existing.feishu_updated_at = feishu_updated
                 existing.synced_at = datetime.utcnow()
+                if asset_owner_name:
+                    existing.asset_owner_name = asset_owner_name
                 if embedding:
                     existing.content_vector = embedding
                 await db.commit()
@@ -455,6 +472,8 @@ class CloudDocImportService:
         name = file_info.get("name", "未命名")
         feishu_owner_id = file_info.get("owner_id", "") or None
         # 资产所有人显示名：使用文档原始所有者
+        logger.info("import_item [%s] feishu_owner_id=%s, owner_name=%s, importer=%s",
+                     name, feishu_owner_id, file_info.get("owner_name", ""), owner_id)
         display_owner = file_info.get("owner_name", "") or None
         # 飞书文件的创建/修改时间（从 list API 获取）
         fi_created_time = file_info.get("created_time")
@@ -663,6 +682,19 @@ class CloudDocImportService:
             except Exception as e:
                 logger.warning("User 表解析 owner_name 失败: %s", e)
 
+        # User 表查不到的，通过飞书 Contact API 兜底获取用户名
+        final_need = [f for f in file_infos if f.get("owner_id") and not f.get("owner_name")]
+        if final_need:
+            try:
+                unique_oids = list({f["owner_id"] for f in final_need})
+                feishu_name_map = await feishu_client.batch_get_user_names(unique_oids)
+                for f in final_need:
+                    resolved = feishu_name_map.get(f["owner_id"])
+                    if resolved:
+                        f["owner_name"] = resolved
+            except Exception as e:
+                logger.warning("飞书 Contact API 解析 owner_name 失败: %s", e)
+
         result = ImportResult()
 
         for info in file_infos:
@@ -810,6 +842,8 @@ class CloudDocImportService:
                 existing.comm_time = comm_time
                 existing.source_url = source_url
                 existing.synced_at = datetime.utcnow()
+                if asset_owner_name:
+                    existing.asset_owner_name = asset_owner_name
                 if embedding:
                     existing.content_vector = embedding
                 await db.commit()

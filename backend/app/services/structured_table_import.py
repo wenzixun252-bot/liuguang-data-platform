@@ -163,6 +163,16 @@ async def _get_feishu_doc_owner_info(
             else:
                 logger.warning("User 表未找到 feishu_open_id=%s", feishu_owner_id)
 
+        # User 表查不到的，通过飞书 Contact API 兜底
+        try:
+            feishu_name_map = await feishu_client.batch_get_user_names([feishu_owner_id])
+            resolved = feishu_name_map.get(feishu_owner_id, "")
+            if resolved:
+                logger.info("飞书 Contact API 解析 owner: owner_id=%s -> name=%s", feishu_owner_id, resolved)
+                return {"id": feishu_owner_id, "name": resolved}
+        except Exception as e2:
+            logger.warning("飞书 Contact API 解析 owner 失败: %s", e2)
+
         # 有 id 但没解析出名称
         return {"id": feishu_owner_id, "name": ""}
     except Exception as e:
@@ -236,6 +246,8 @@ async def import_from_bitable(
         ef["_original_owner"] = owner_info
         ef["_feishu_owner_name"] = owner_info.get("name", "")
         table_obj.extra_fields = ef
+        if owner_info.get("name"):
+            table_obj.asset_owner_name = owner_info["name"]
 
     await db.flush()  # 获取 table_obj.id
 
@@ -356,6 +368,8 @@ async def import_from_spreadsheet(
         ef["_original_owner"] = owner_info
         ef["_feishu_owner_name"] = owner_info.get("name", "")
         table_obj.extra_fields = ef
+        if owner_info.get("name"):
+            table_obj.asset_owner_name = owner_info["name"]
 
     await db.flush()
 

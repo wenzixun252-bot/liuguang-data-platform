@@ -20,20 +20,21 @@ logger = logging.getLogger(__name__)
 _LLM_SEMAPHORE = asyncio.Semaphore(5)
 
 EXTRACT_TODO_PROMPT = """你是一个待办事项提取专家。当前用户姓名为「{user_name}」。
-请从以下文本中**仅提取明确分配给「{user_name}」的待办事项**。
+请从以下内容中提取需要「{user_name}」去完成的待办事项。
 
-## 文本内容
+## 内容
 {content}
 
 ## 判断规则
-1. 只提取明确指向「{user_name}」的任务（如"{user_name}负责XX"、"@{user_name} 请完成XX"、"{user_name}跟进XX"）
-2. 如果文本中某个待办没有指定负责人，但「{user_name}」是发言者或会议组织者，则视为分配给自己
-3. 如果某个待办没有指定任何负责人且无法判断归属，**不要提取**
-4. 分配给其他人的待办，**完全忽略**
-5. 泛泛而谈的计划（如"团队后续要关注XX"、"大家注意XX"）**不算待办**
-6. 为每个待办设置合理的优先级 (low/medium/high)
-7. 如果能推断截止日期，请设置（ISO格式，如 "2026-03-10"）
-8. 如果没有任何属于「{user_name}」的待办，返回空数组 []
+1. **聊天消息中的请求/委托**：如果别人发消息让「{user_name}」做某事（如"帮我看下XX"、"请你这边帮走一下流程"、"你确认下XX"、"你跟进下XX"），这就是分配给「{user_name}」的待办
+2. **会议纪要中的任务分配**：如"{user_name}负责XX"、"@{user_name} 请完成XX"
+3. 如果用户名的一部分出现在文本中（如全名为"文梓旬"而消息中写"梓旬"），同样视为指向该用户
+4. 如果文本中某个待办没有指定负责人，但「{user_name}」是发言者或会议组织者，则视为分配给自己
+5. 分配给其他人的待办，**完全忽略**
+6. 纯闲聊、纯提问（没有要求行动的）、泛泛而谈的计划（如"大家注意XX"）**不算待办**
+7. 为每个待办设置合理的优先级 (low/medium/high)：有明确截止时间或"尽快"等字眼设为 high
+8. 如果能推断截止日期，请设置（ISO格式，如 "2026-03-10"）
+9. 如果没有任何属于「{user_name}」的待办，返回空数组 []
 
 ## 输出格式（严格 JSON 数组，不要输出任何解释文字）
 [{{"title": "待办标题", "description": "详细描述", "priority": "medium", "due_date": null}}]
@@ -90,7 +91,7 @@ async def extract_todos_from_communications(
     skipped_no_content = 0
 
     # 第一步：从 action_items 直接提取（无需 LLM，很快）
-    llm_tasks = []  # 收集需要 LLM 处理的记录
+    llm_comms = []  # 收集需要 LLM 处理的记录
     for comm in comms:
         if comm.id in processed_source_ids:
             skipped_processed += 1
@@ -118,40 +119,61 @@ async def extract_todos_from_communications(
                         "source_text": task_text,
                     })
 
-        # 收集需要 LLM 提取的记录（稍后并发处理）
-        # 中文信息密度高，10个中文字符即可表达完整任务指派
-        if comm.content_text and len(comm.content_text) > 10:
-            llm_tasks.append(comm)
+        # 收集需要 LLM 提取的记录（稍后按会话分组处理）
+        if comm.content_text and len(comm.content_text.strip()) > 0:
+            llm_comms.append(comm)
 
-    # 第二步：并发调用 LLM 提取（限制并发数，避免打爆 API）
-    # 最多处理 20 条最新记录，避免总耗时超过 nginx 代理超时
-    if len(llm_tasks) > 20:
-        logger.info("待办提取: LLM 任务 %d 条，截取最新 20 条处理", len(llm_tasks))
-        llm_tasks = llm_tasks[:20]
-    if llm_tasks:
-        logger.info("待办提取: 需要 LLM 处理 %d 条记录，并发提取中...", len(llm_tasks))
+    # 第二步：按会话（chat_id / 单条会议）分组，给 LLM 更完整的上下文
+    from collections import defaultdict
+    grouped: dict[str, list] = defaultdict(list)
+    for comm in llm_comms:
+        # 同一会话的消息合并处理；无 chat_id 的按单条处理
+        group_key = comm.chat_id or f"_single_{comm.id}"
+        grouped[group_key].append(comm)
 
-        async def _extract_one(comm):
+    # 最多处理 20 组，避免总耗时超过 nginx 代理超时
+    group_items = list(grouped.items())
+    if len(group_items) > 20:
+        logger.info("待办提取: LLM 分组 %d 个，截取最新 20 组处理", len(group_items))
+        group_items = group_items[:20]
+
+    if group_items:
+        logger.info("待办提取: 需要 LLM 处理 %d 组（共 %d 条记录），并发提取中...",
+                     len(group_items), sum(len(v) for _, v in group_items))
+
+        async def _extract_group(group_key: str, group_comms: list):
+            """将同一会话的消息合并后发给 LLM，并带上发送者信息。"""
             async with _LLM_SEMAPHORE:
-                return comm, await _llm_extract(comm.content_text[:4000], user_name)
+                # 构建带发送者上下文的文本
+                lines = []
+                for c in sorted(group_comms, key=lambda x: x.comm_time or x.created_at):
+                    sender = c.initiator or "未知发送者"
+                    chat_label = f"[{c.chat_name or '私聊'}]" if c.comm_type == "chat" else ""
+                    time_str = (c.comm_time or c.created_at).strftime("%m-%d %H:%M") if (c.comm_time or c.created_at) else ""
+                    lines.append(f"{chat_label} {sender} ({time_str}): {c.content_text}")
+                merged_text = "\n".join(lines)[:6000]
+                llm_todos = await _llm_extract(merged_text, user_name)
+                return group_comms, llm_todos
 
         results = await asyncio.gather(
-            *[_extract_one(c) for c in llm_tasks],
+            *[_extract_group(k, v) for k, v in group_items],
             return_exceptions=True,
         )
         for r in results:
             if isinstance(r, Exception):
-                logger.warning("待办提取单条异常: %s", r)
+                logger.warning("待办提取单组异常: %s", r)
                 continue
-            comm, llm_todos = r
+            group_comms, llm_todos = r
+            # 用最新一条 comm 作为 source
+            latest_comm = max(group_comms, key=lambda c: c.comm_time or c.created_at)
             for t in llm_todos:
                 if not isinstance(t, dict) or not t.get("title"):
                     continue
                 todos.append({
                     **t,
                     "source_type": "communication",
-                    "source_id": comm.id,
-                    "source_text": comm.content_text[:200],
+                    "source_id": latest_comm.id,
+                    "source_text": latest_comm.content_text[:200],
                 })
 
     logger.info("待办提取: 跳过已处理=%d, 跳过无内容=%d, 共提取原始待办=%d",

@@ -687,6 +687,16 @@ async def add_feishu_source_from_url(
         tm = re.search(r'[?&]table=([A-Za-z0-9_-]+)', url)
         table_id = tm.group(1) if tm else None
 
+    # 电子表格直链: /sheets/{spreadsheet_token}
+    if not parsed_type:
+        m = re.search(r'/sheets/([A-Za-z0-9_-]+)', url)
+        if m:
+            parsed_type = "spreadsheet"
+            token = m.group(1)
+            # sheet= 参数或 /sheets/xxx/yyy 中的子表ID
+            tm = re.search(r'[?&]sheet=([A-Za-z0-9_-]+)', url)
+            table_id = tm.group(1) if tm else None
+
     # Wiki 链接: /wiki/{node_token}
     if not parsed_type:
         m = re.search(r'/wiki/([A-Za-z0-9_-]+)', url)
@@ -697,7 +707,7 @@ async def add_feishu_source_from_url(
             table_id = tm.group(1) if tm else None
 
     if not parsed_type or not token:
-        raise HTTPException(400, "无法识别的链接格式，请粘贴飞书多维表格的链接")
+        raise HTTPException(400, "无法识别的链接格式，请粘贴飞书多维表格或电子表格的链接")
 
     user_token = await _get_user_token(current_user, db)
     if not user_token:
@@ -714,9 +724,14 @@ async def add_feishu_source_from_url(
                 node_info = await feishu_client.get_wiki_node_info(token)
             obj_type = node_info.get("obj_type", "")
             obj_token = node_info.get("obj_token", "")
-            if obj_type != "bitable":
-                raise HTTPException(400, f"该页面类型 {obj_type} 不支持，仅支持多维表格")
-            token = obj_token
+            if obj_type == "sheet":
+                parsed_type = "spreadsheet"
+                token = obj_token
+            elif obj_type == "bitable":
+                parsed_type = "bitable"
+                token = obj_token
+            else:
+                raise HTTPException(400, f"该页面类型 {obj_type} 不支持，仅支持多维表格和电子表格")
         except HTTPException:
             raise
         except Exception as e:
@@ -725,12 +740,20 @@ async def add_feishu_source_from_url(
     # 如果没有 table_id，取第一个子表
     if not table_id:
         try:
-            tables_raw = await feishu_client.get_bitable_tables(
-                token, user_access_token=user_token,
-            )
-            if not tables_raw:
-                raise HTTPException(400, "该多维表格下没有数据表")
-            table_id = tables_raw[0].get("table_id", "")
+            if parsed_type == "spreadsheet":
+                sheets_raw = await feishu_client.get_spreadsheet_sheets(
+                    token, user_access_token=user_token,
+                )
+                if not sheets_raw:
+                    raise HTTPException(400, "该电子表格下没有工作表")
+                table_id = sheets_raw[0].get("sheet_id", "")
+            else:
+                tables_raw = await feishu_client.get_bitable_tables(
+                    token, user_access_token=user_token,
+                )
+                if not tables_raw:
+                    raise HTTPException(400, "该多维表格下没有数据表")
+                table_id = tables_raw[0].get("table_id", "")
         except HTTPException:
             raise
         except Exception as e:
@@ -749,13 +772,22 @@ async def add_feishu_source_from_url(
     # 获取表名
     table_name = ""
     try:
-        tables_raw = await feishu_client.get_bitable_tables(
-            token, user_access_token=user_token,
-        )
-        for t in tables_raw:
-            if t.get("table_id") == table_id:
-                table_name = t.get("name", "")
-                break
+        if parsed_type == "spreadsheet":
+            sheets_raw = await feishu_client.get_spreadsheet_sheets(
+                token, user_access_token=user_token,
+            )
+            for s in sheets_raw:
+                if s.get("sheet_id") == table_id:
+                    table_name = s.get("title", "")
+                    break
+        else:
+            tables_raw = await feishu_client.get_bitable_tables(
+                token, user_access_token=user_token,
+            )
+            for t in tables_raw:
+                if t.get("table_id") == table_id:
+                    table_name = t.get("name", "")
+                    break
     except Exception:
         pass
 
@@ -936,13 +968,21 @@ async def discover_feishu_docs(
             all_owner_ids.add(oid)
     owner_name_map: dict[str, str] = {}
     if all_owner_ids:
-        from sqlalchemy import or_
         user_rows = (await db.execute(
             select(User.feishu_open_id, User.name).where(
                 User.feishu_open_id.in_(list(all_owner_ids))
             )
         )).all()
         owner_name_map = {row.feishu_open_id: row.name for row in user_rows if row.name}
+
+    # User 表查不到的，通过飞书 Contact API 兜底获取用户名
+    unresolved_ids = [oid for oid in all_owner_ids if oid not in owner_name_map]
+    if unresolved_ids:
+        try:
+            feishu_name_map = await feishu_client.batch_get_user_names(unresolved_ids)
+            owner_name_map.update(feishu_name_map)
+        except Exception as e:
+            logger.warning("飞书 Contact API 解析 owner_name 失败: %s", e)
 
     docs: list[CloudDocInfo] = []
     for f in files:
@@ -1212,17 +1252,40 @@ async def reimport_feishu_doc(
     doc = existing.scalar_one_or_none()
     file_type = doc.file_type if doc else "docx"
 
+    # 解析文档真实所有者
+    reimport_owner_name: str | None = None
+    try:
+        meta_map = await feishu_client.batch_get_doc_meta(
+            [{"token": document_token, "type": file_type if file_type in ("docx", "doc") else "file"}],
+            user_token,
+        )
+        meta = meta_map.get(document_token, {})
+        real_oid = meta.get("owner_id", "")
+        if real_oid:
+            # User 表查找
+            row = (await db.execute(
+                select(User.name).where(User.feishu_open_id == real_oid)
+            )).scalar_one_or_none()
+            if row:
+                reimport_owner_name = row
+            else:
+                # 飞书 Contact API 兜底
+                feishu_names = await feishu_client.batch_get_user_names([real_oid])
+                reimport_owner_name = feishu_names.get(real_oid)
+    except Exception as e:
+        logger.debug("reimport 解析文档所有者失败 [%s]: %s", document_token, e)
+
     if file_type in ("docx", "doc"):
         result_doc, status = await cloud_doc_import_service.import_cloud_doc(
             document_token, current_user.feishu_open_id, db,
-            user_token, force=True,
+            user_token, asset_owner_name=reimport_owner_name, force=True,
         )
     else:
         # 文件类型需要 name，从现有记录获取
         file_name = doc.title if doc else "unknown"
         result_doc, status = await cloud_doc_import_service.import_cloud_file(
             document_token, file_name, current_user.feishu_open_id, db,
-            user_token, force=True,
+            user_token, asset_owner_name=reimport_owner_name, force=True,
         )
 
     if status == "failed" or not result_doc:
@@ -1338,9 +1401,17 @@ async def import_feishu_doc_from_url(
         except Exception:
             pass
 
+    # User 表查不到的，通过飞书 Contact API 兜底
+    if real_owner_id and not real_owner_name:
+        try:
+            feishu_name_map = await feishu_client.batch_get_user_names([real_owner_id])
+            real_owner_name = feishu_name_map.get(real_owner_id, "")
+        except Exception:
+            pass
+
     owner_id = current_user.feishu_open_id
-    # 资产所有人优先使用文档真实所有者，fallback 到当前用户
-    display_owner_name = real_owner_name or current_user.name
+    # 资产所有人使用文档真实所有者（不回退到当前用户，cloud doc 的 owner 应是文档创建者）
+    display_owner_name = real_owner_name
     items = [{"token": token, "name": doc_name, "type": doc_type, "owner_id": real_owner_id or owner_id, "owner_name": display_owner_name}]
 
     # 根据 target 选择导入方式

@@ -325,7 +325,7 @@ class FeishuClient:
         async with self._client() as client:
             page_token: str | None = None
             while True:
-                params: dict = {"page_size": 50}
+                params: dict = {"page_size": 50, "user_id_type": "open_id"}
                 if page_token:
                     params["page_token"] = page_token
 
@@ -470,6 +470,7 @@ class FeishuClient:
                         f"{FEISHU_BASE_URL}/drive/v1/metas/batch_query",
                         headers={"Authorization": f"Bearer {access_token}"},
                         json={"request_docs": request_docs},
+                        params={"user_id_type": "open_id"},
                     )
                     if resp.status_code != 200:
                         logger.warning("batch_get_doc_meta HTTP %s", resp.status_code)
@@ -486,8 +487,12 @@ class FeishuClient:
 
                     for m in metas:
                         tok = m.get("doc_token", "")
+                        # 记录原始响应 keys 以便调试 owner 字段
+                        if metas and not result:
+                            logger.debug("batch_get_doc_meta 响应字段: %s", list(m.keys()))
                         result[tok] = {
                             "url": m.get("url", ""),
+                            "title": m.get("title", ""),
                             "create_time": m.get("create_time"),
                             "latest_modify_time": m.get("latest_modify_time"),
                             "owner_id": m.get("owner_id", ""),
@@ -527,6 +532,7 @@ class FeishuClient:
                 params: dict = {
                     "page_size": 50,
                     "folder_token": folder_token,
+                    "user_id_type": "open_id",
                 }
                 if page_token:
                     params["page_token"] = page_token
@@ -987,6 +993,53 @@ class FeishuClient:
 
         return all_users
 
+
+    # ── 用户名批量解析 ─────────────────────────────────────
+
+    async def batch_get_user_names(
+        self,
+        open_ids: list[str],
+    ) -> dict[str, str]:
+        """通过飞书 Contact API 批量获取用户显示名（用 tenant_access_token）。
+
+        Args:
+            open_ids: 用户 open_id 列表
+
+        Returns:
+            {open_id: display_name} 字典，查不到的不会出现在结果中
+        """
+        if not open_ids:
+            return {}
+
+        result: dict[str, str] = {}
+        tenant_token = await self.get_tenant_access_token()
+        if not tenant_token:
+            logger.warning("batch_get_user_names: 无法获取 tenant_access_token")
+            return result
+
+        async with self._client() as client:
+            for oid in open_ids:
+                try:
+                    resp = await client.get(
+                        f"{FEISHU_BASE_URL}/contact/v3/users/{oid}",
+                        headers={"Authorization": f"Bearer {tenant_token}"},
+                        params={"user_id_type": "open_id"},
+                    )
+                    if resp.status_code != 200:
+                        continue
+                    data = resp.json()
+                    if data.get("code") != 0:
+                        continue
+                    user_info = data.get("data", {}).get("user", {})
+                    name = user_info.get("name", "")
+                    if name:
+                        result[oid] = name
+                except Exception:
+                    continue
+                await asyncio.sleep(0.1)
+
+        logger.info("batch_get_user_names: 查询 %d, 解析 %d", len(open_ids), len(result))
+        return result
 
     # ── 任务 API ──────────────────────────────────────────
 

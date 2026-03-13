@@ -5,14 +5,13 @@ import logging
 from collections.abc import AsyncGenerator
 from datetime import datetime
 
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.communication import Communication
 from app.models.document import Document
 from app.models.leadership_insight import LeadershipInsight
-from app.models.user import User
 from app.services.llm import llm_client
 
 logger = logging.getLogger(__name__)
@@ -50,49 +49,29 @@ LEADERSHIP_ANALYSIS_PROMPT = """你是一位专业的员工画像分析师。请
 async def get_leadership_candidates(
     db: AsyncSession,
     owner_id: str,
+    limit: int = 10,
 ) -> list[dict]:
-    """获取可分析的领导候选人列表。"""
-    candidates: dict[str, dict] = {}
+    """从知识图谱中按 mention_count 获取提及次数最多的 person 实体作为候选人。"""
+    from app.models.knowledge_graph import KGEntity
 
-    # 从沟通记录中找发起人（initiator）
-    comm_result = await db.execute(
-        select(Communication.initiator, func.count(Communication.id)).where(
-            and_(Communication.owner_id == owner_id, Communication.initiator.isnot(None))
-        ).group_by(Communication.initiator)
+    result = await db.execute(
+        select(KGEntity).where(
+            and_(
+                KGEntity.owner_id == owner_id,
+                KGEntity.entity_type == "person",
+            )
+        ).order_by(KGEntity.mention_count.desc()).limit(limit)
     )
-    for name, count in comm_result.all():
-        if name:
-            if name not in candidates:
-                candidates[name] = {"name": name, "comm_count": 0, "document_count": 0}
-            candidates[name]["comm_count"] = count
+    entities = result.scalars().all()
 
-    # 从文档中找作者
-    doc_result = await db.execute(
-        select(Document.author, func.count(Document.id)).where(
-            and_(Document.owner_id == owner_id, Document.author.isnot(None))
-        ).group_by(Document.author)
-    )
-    for name, count in doc_result.all():
-        if name:
-            if name not in candidates:
-                candidates[name] = {"name": name, "comm_count": 0, "document_count": 0}
-            candidates[name]["document_count"] = count
-
-    # 获取所有内部用户名集合
-    user_result = await db.execute(select(User.name).where(User.name.isnot(None)))
-    internal_names = {row[0] for row in user_result.all() if row[0]}
-
-    # 标记内部/外部
-    for c in candidates.values():
-        c["is_internal"] = c["name"] in internal_names
-
-    # 按总数据量排序
-    result = sorted(
-        candidates.values(),
-        key=lambda x: x["comm_count"] + x["document_count"],
-        reverse=True,
-    )
-    return result[:50]
+    return [
+        {
+            "name": e.name,
+            "entity_id": e.id,
+            "mention_count": e.mention_count,
+        }
+        for e in entities
+    ]
 
 
 async def _query_content_tags(
@@ -125,15 +104,24 @@ async def gather_leader_data(
     owner_id: str,
     target_name: str,
 ) -> dict:
-    """收集目标领导的相关数据，附带标签信息。"""
-    data: dict = {"communications": [], "documents": []}
+    """收集目标人物的相关数据，附带标签信息。
 
-    # 沟通记录（作为发起人）
+    数据来源：
+    - 沟通记录：该人作为发起人 或 内容中提及该人名
+    - 文档：资产所有人(owner_id)名下、内容中提及该人名的文档
+    - 知识图谱关联：该人物实体的关联关系
+    """
+    data: dict = {"communications": [], "documents": [], "kg_relations": []}
+
+    # 沟通记录（作为发起人 或 内容包含该人名）
     comms = await db.execute(
         select(Communication).where(
             and_(
                 Communication.owner_id == owner_id,
-                Communication.initiator == target_name,
+                or_(
+                    Communication.initiator == target_name,
+                    Communication.content_text.ilike(f"%{target_name}%"),
+                ),
             )
         ).order_by(Communication.comm_time.desc().nullslast()).limit(100)
     )
@@ -151,12 +139,15 @@ async def gather_leader_data(
             "tags": comm_tags.get(c.id, []),
         })
 
-    # 文档
+    # 文档（资产所有人名下、内容提及该人名的文档）
     documents = await db.execute(
         select(Document).where(
             and_(
                 Document.owner_id == owner_id,
-                Document.author == target_name,
+                or_(
+                    Document.content_text.ilike(f"%{target_name}%"),
+                    Document.title.ilike(f"%{target_name}%"),
+                ),
             )
         ).order_by(Document.created_at.desc()).limit(20)
     )
@@ -170,6 +161,45 @@ async def gather_leader_data(
             "created": str(d.created_at),
             "tags": doc_tags.get(d.id, []),
         })
+
+    # 知识图谱关联关系
+    from app.models.knowledge_graph import KGEntity, KGRelation
+    entity_result = await db.execute(
+        select(KGEntity.id).where(
+            and_(KGEntity.owner_id == owner_id, KGEntity.name == target_name, KGEntity.entity_type == "person")
+        ).limit(1)
+    )
+    entity_row = entity_result.scalar_one_or_none()
+    if entity_row:
+        rels = await db.execute(
+            select(KGRelation).where(
+                and_(
+                    KGRelation.owner_id == owner_id,
+                    or_(KGRelation.source_entity_id == entity_row, KGRelation.target_entity_id == entity_row),
+                )
+            ).limit(50)
+        )
+        # 加载关联实体名称
+        entity_ids = set()
+        rel_list = rels.scalars().all()
+        for r in rel_list:
+            entity_ids.add(r.source_entity_id)
+            entity_ids.add(r.target_entity_id)
+        entity_ids.discard(entity_row)
+        if entity_ids:
+            name_result = await db.execute(
+                select(KGEntity.id, KGEntity.name).where(KGEntity.id.in_(entity_ids))
+            )
+            id_to_name = {row[0]: row[1] for row in name_result.all()}
+        else:
+            id_to_name = {}
+        for r in rel_list:
+            other_id = r.target_entity_id if r.source_entity_id == entity_row else r.source_entity_id
+            data["kg_relations"].append({
+                "relation_type": r.relation_type,
+                "related_to": id_to_name.get(other_id, ""),
+                "weight": r.weight,
+            })
 
     return data
 
@@ -203,7 +233,13 @@ async def generate_insight(
     await db.refresh(insight)
 
     try:
-        response = await llm_client.chat_client.chat.completions.create(
+        from app.services.llm import create_openai_client
+        client = create_openai_client(
+            api_key=settings.llm_api_key,
+            base_url=settings.llm_base_url,
+            timeout=180.0,
+        )
+        response = await client.chat.completions.create(
             model=settings.llm_model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
@@ -216,8 +252,8 @@ async def generate_insight(
         insight.dimensions = dimensions
         insight.generated_at = datetime.utcnow()
     except Exception as e:
-        logger.error("领导洞察生成失败: %s", e)
-        insight.report_markdown = f"分析失败: {e}"
+        logger.error("领导洞察生成失败: %s — %s", type(e).__name__, e)
+        insight.report_markdown = f"分析失败: {type(e).__name__}: {e}" if str(e) else f"分析失败: {type(e).__name__}"
 
     await db.commit()
     await db.refresh(insight)

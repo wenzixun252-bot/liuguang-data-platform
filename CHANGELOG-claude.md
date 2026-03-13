@@ -539,3 +539,11 @@
 - **2026-03-13 19:43:02** [前端页面] `frontend/src/pages/CalendarAssistant.tsx` — 新建文件 `CalendarAssistant`，包含 d, d, d, today, tomorrow
 - **2026-03-13 22:12:32** [前端组件] `frontend/src/components/DataTable/useTableViews.ts` — 新增 saveSort, raw, loadSort, sortKey
 - **2026-03-13 22:12:36** [前端组件] `frontend/src/components/DataTable/useTableViews.ts` — 新增 2 行代码
+- **2026-03-13 23:01:35** [其他] `CLAUDE.md` — 修改逻辑 (+5/-4行)
+- **2026-03-13 23:01:41** [其他] `CLAUDE.md` — 修改逻辑 (+2/-2行)
+- **2026-03-13 23:13:20** [项目配置] `.env` — 新建文件 `` (3行)
+- **2026-03-13 23:47:10** [项目配置] `backend/.env` — 修改逻辑 (+3/-3行)
+- **2026-03-13 23:58:07** [项目配置] `backend/.env` — 新增 1 行代码
+- **2026-03-13 23:59:58** [项目配置] `backend/.env` — 删除 1 行代码
+- **2026-03-14 00:07:23** [项目配置] `backend/.env` — 新增 1 行代码
+- **2026-03-14 00:15:28** [项目配置] `backend/.env` — 修改逻辑 (+1/-1行)

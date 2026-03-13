@@ -24,7 +24,14 @@ if %errorlevel% neq 0 (
 )
 echo       Docker Desktop 已就绪。
 
-REM 2. 启动所有容器
+REM 2. 加载前端飞书配置（供 docker compose 构建参数使用）
+if exist "frontend\.env" (
+    for /f "usebackq eol=# tokens=1,* delims==" %%a in ("frontend\.env") do (
+        if not "%%a"=="" set "%%a=%%b"
+    )
+)
+
+REM 3. 启动所有容器
 echo.
 echo [2/3] 启动容器 (docker compose up --build -d) ...
 echo       首次构建可能需要几分钟，请耐心等待...
@@ -38,7 +45,7 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-REM 3. 等待后端就绪
+REM 4. 等待后端就绪
 echo.
 echo [3/3] 等待后端服务就绪 ...
 

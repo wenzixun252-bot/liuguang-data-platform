@@ -161,7 +161,8 @@ class FileUploadService:
                 import io
                 reader = PdfReader(io.BytesIO(content))
                 pages = [page.extract_text() or "" for page in reader.pages]
-                return "\n".join(pages)
+                text = "\n".join(pages)
+                return text.replace("\x00", "")
             except Exception as e:
                 logger.warning("PDF 文本提取失败: %s", e)
                 return ""

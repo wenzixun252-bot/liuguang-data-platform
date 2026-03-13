@@ -569,8 +569,8 @@ async def list_tables(
     for r in rows:
         tbl = r.StructuredTable
         out = StructuredTableOut.model_validate(tbl)
-        # 飞书资产：优先使用文档原始所有者名称，本地资产用导入者名称
-        feishu_owner = (tbl.extra_fields or {}).get("_feishu_owner_name", "")
+        # 飞书资产：优先使用 asset_owner_name 字段（真实所有者），其次 extra_fields，最后 User 表 join（导入者）
+        feishu_owner = tbl.asset_owner_name or (tbl.extra_fields or {}).get("_feishu_owner_name", "")
         display_owner = feishu_owner or r.asset_owner_name
         updates: dict = {"asset_owner_name": display_owner, "uploader_name": r.asset_owner_name}
         key = (tbl.source_app_token, tbl.source_table_id)

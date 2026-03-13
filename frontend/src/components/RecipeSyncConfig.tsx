@@ -545,7 +545,7 @@ export default function RecipeSyncConfig({
               <div className="mt-3 flex gap-2">
                 <input
                   type="text"
-                  placeholder="https://xxx.feishu.cn/base/... 或 /wiki/..."
+                  placeholder="https://xxx.feishu.cn/base/... 或 /sheets/... 或 /wiki/..."
                   className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
                   value={pasteUrl}
                   onChange={(e) => setPasteUrl(e.target.value)}

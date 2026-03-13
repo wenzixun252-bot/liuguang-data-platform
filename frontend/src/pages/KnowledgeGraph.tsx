@@ -264,6 +264,8 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
   const [selectedProfileData, setSelectedProfileData] = useState<ProfileData | null>(null)
   const [selectedProfileLoading, setSelectedProfileLoading] = useState(false)
   const [generatingProfile, setGeneratingProfile] = useState(false)
+  const [generatingAllProfiles, setGeneratingAllProfiles] = useState(false)
+  const [generatingAllProgress, setGeneratingAllProgress] = useState('')
   const [showReportModal, setShowReportModal] = useState(false)
   const [showAssetModal, setShowAssetModal] = useState(false)
   const [assetDetail, setAssetDetail] = useState<DocumentDetail | null>(null)
@@ -891,16 +893,45 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
         target_user_name: name,
       })
       toast.success('画像生成完成')
-      // 刷新画像
+      // 刷新左侧面板画像
       if (selectedNode) {
         const res = await api.get(`/profile/by-entity/${selectedNode.id}`)
         setProfileData(res.data)
+      }
+      // 刷新右侧面板画像详情
+      if (selectedProfileName === name) {
+        const res = await api.get('/profile/by-name', { params: { name } })
+        setSelectedProfileData(res.data)
       }
     } catch {
       toast.error('画像生成失败')
     } finally {
       setGeneratingProfile(false)
     }
+  }
+
+  // 一键生成所有人物画像
+  const handleGenerateAllProfiles = async () => {
+    if (personProfiles.length === 0) return
+    setGeneratingAllProfiles(true)
+    let success = 0
+    let fail = 0
+    for (let i = 0; i < personProfiles.length; i++) {
+      const person = personProfiles[i]
+      setGeneratingAllProgress(`${i + 1}/${personProfiles.length} ${person.name}`)
+      try {
+        await api.post('/insights/leadership/generate', {
+          target_user_id: person.name,
+          target_user_name: person.name,
+        })
+        success++
+      } catch {
+        fail++
+      }
+    }
+    setGeneratingAllProfiles(false)
+    setGeneratingAllProgress('')
+    toast.success(`画像生成完成：成功 ${success} 个${fail > 0 ? `，失败 ${fail} 个` : ''}`)
   }
 
   // 获取社群选项：过滤掉成员数 < 2 的小社群
@@ -1532,7 +1563,7 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
                   )}
 
                   {/* 领导力洞察 */}
-                  {selectedProfileData.leadership_insight?.report_markdown ? (
+                  {selectedProfileData.leadership_insight?.report_markdown && !selectedProfileData.leadership_insight.report_markdown.startsWith('分析失败') ? (
                     <div>
                       <p className="text-xs text-gray-500 mb-1">人物画像分析</p>
                       {/* 六维雷达图 */}
@@ -1544,8 +1575,23 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
                       </div>
                     </div>
                   ) : (
-                    <p className="text-xs text-gray-400 text-center py-2">暂无人物画像分析数据</p>
+                    <p className="text-xs text-gray-400 text-center py-2">
+                      {selectedProfileData.leadership_insight?.report_markdown?.startsWith('分析失败') ? '分析失败，请重试' : '暂无人物画像分析数据'}
+                    </p>
                   )}
+                  {/* 生成/更新画像按钮 */}
+                  <button
+                    onClick={() => handleGenerateProfile(selectedProfileData.name)}
+                    disabled={generatingProfile}
+                    className="w-full mt-2 py-2 bg-indigo-50 text-indigo-600 rounded-lg text-sm font-medium hover:bg-indigo-100 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+                  >
+                    {generatingProfile ? (
+                      <><Loader2 size={14} className="animate-spin" /> 生成中...</>
+                    ) : (
+                      selectedProfileData.leadership_insight?.report_markdown && !selectedProfileData.leadership_insight.report_markdown.startsWith('分析失败')
+                        ? '更新画像' : '生成画像'
+                    )}
+                  </button>
                 </div>
               ) : selectedProfileLoading ? (
                 <div className="flex items-center justify-center py-12 text-gray-400">
@@ -1554,6 +1600,17 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
               ) : personProfiles.length > 0 ? (
                 /* 人物列表 */
                 <div className="space-y-1.5">
+                  <button
+                    onClick={handleGenerateAllProfiles}
+                    disabled={generatingAllProfiles}
+                    className="w-full py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+                  >
+                    {generatingAllProfiles ? (
+                      <><Loader2 size={14} className="animate-spin" /> {generatingAllProgress}</>
+                    ) : (
+                      '一键生成所有画像'
+                    )}
+                  </button>
                   {personProfiles.map((person) => (
                     <button
                       type="button"

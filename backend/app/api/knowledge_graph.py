@@ -121,31 +121,31 @@ async def _run_build_task(owner_id: str):
             )
             await _save_analysis(db, owner_id, analysis_result)
 
-            # 自动生成人物画像（为尚无画像的候选人生成）
+            # 自动生成人物画像（按知识图谱提及次数 top10 person 生成）
             _build_tasks[owner_id].update(progress=90, message="正在生成人物画像...")
             personas_generated = 0
             try:
-                candidates = await get_leadership_candidates(db, owner_id)
-                existing_result = await db.execute(
-                    select(LeadershipInsight.target_user_name).where(
+                # 清理旧画像（重新生成）
+                await db.execute(
+                    delete(LeadershipInsight).where(
                         LeadershipInsight.analyst_user_id == owner_id,
                     )
                 )
-                existing_names = {row[0] for row in existing_result.all()}
+                await db.commit()
 
-                for c in candidates[:10]:  # 最多处理 10 个候选人
-                    if c["name"] not in existing_names:
-                        try:
-                            await generate_insight(
-                                db=db,
-                                analyst_user_id=owner_id,
-                                target_user_id=c.get("user_id", ""),
-                                target_user_name=c["name"],
-                            )
-                            personas_generated += 1
-                        except Exception as e:
-                            logger.warning("人物画像生成失败 (%s): %s", c["name"], e)
-                logger.info("人物画像生成完成: 新增 %d 个", personas_generated)
+                candidates = await get_leadership_candidates(db, owner_id, limit=10)
+                for c in candidates:
+                    try:
+                        await generate_insight(
+                            db=db,
+                            analyst_user_id=owner_id,
+                            target_user_id=str(c.get("entity_id", "")),
+                            target_user_name=c["name"],
+                        )
+                        personas_generated += 1
+                    except Exception as e:
+                        logger.warning("人物画像生成失败 (%s): %s — %s", c["name"], type(e).__name__, e)
+                logger.info("人物画像生成完成: %d 个", personas_generated)
             except Exception as e:
                 logger.warning("人物画像批量生成异常: %s", e)
 
