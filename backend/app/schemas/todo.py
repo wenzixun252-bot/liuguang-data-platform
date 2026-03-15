@@ -23,6 +23,7 @@ class TodoOut(BaseModel):
     source_type: str
     source_id: int | None = None
     source_text: str | None = None
+    source_time: UTCDatetimeOpt = None
     status: str
     feishu_task_id: str | None = None
     pushed_at: UTCDatetimeOpt = None

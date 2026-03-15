@@ -30,9 +30,10 @@ cd backend && uvicorn app.main:app --reload
 # Start frontend dev server
 cd frontend && npm run dev
 
-# Run backend tests
+# Run backend tests (uses SQLite in-memory, no PostgreSQL needed)
 cd backend && pytest tests/
 cd backend && pytest tests/test_something.py -v
+cd backend && pytest tests/test_something.py::test_function_name -v
 
 # Frontend lint
 cd frontend && npm run lint
@@ -46,13 +47,13 @@ cd frontend && npm run build
 ### Backend (backend/app/)
 
 ```
-main.py              -> FastAPI app entry (24 routers, CORS, lifespan scheduler)
+main.py              -> FastAPI app entry (26 routers, CORS, lifespan scheduler)
 config.py            -> Pydantic Settings from .env (DB, Feishu, LLM, embedding configs)
 database.py          -> AsyncEngine + AsyncSession (pool_size=10, max_overflow=20)
 logging_config.py    -> JSON structured logging + ETL daily rotation
-api/          -> FastAPI route handlers (24 routers + deps.py)
+api/          -> FastAPI route handlers (26 routers + deps.py)
   deps.py     -> Dependency injection: get_db, get_current_user, get_visible_owner_ids, require_role
-models/       -> SQLAlchemy 2.0 async ORM (23 model files)
+models/       -> SQLAlchemy 2.0 async ORM (25 model files)
 schemas/      -> Pydantic request/response models
 services/     -> Business logic (feishu.py, llm.py, rag.py, kg_builder.py, graph_rag.py, todo_extractor.py, kg_analyzer.py, leadership_analyzer.py, report_generator.py...)
   etl/        -> ETL pipeline: preprocessor -> extractor -> transformer -> enricher -> postprocessor -> loader (+ recording_matcher, hardcoded_comm)
@@ -82,6 +83,14 @@ hooks/        -> Custom hooks (useAuth, useWidgetConfig, useColumnSettings, useT
 - **Tag System**: TagDefinition (project|priority|topic|custom) linked to content via ContentTag. ETL auto-tags via default_tag_ids.
 - **Extraction/Cleaning Rules**: ExtractionRule and CleaningRule as persistent entities with dedicated API routers, configurable per ETL data source.
 - **Auth**: Feishu OAuth 2.0 SSO -> JWT (HS256, 24h). Roles: employee, admin.
+- **Admin Mode Toggle**: Admin users send `X-Admin-Mode: true` header to see all data; without it, admins see only their own + shared data (same as employees).
+
+### Testing Architecture
+
+- Tests use **SQLite in-memory** (`aiosqlite`) — no PostgreSQL required. Only `User` and `ETLSyncState` tables are created (pgvector/JSONB-dependent tables are skipped).
+- `pytest.ini` sets `asyncio_mode = auto` — all async test functions run automatically without `@pytest.mark.asyncio`.
+- `conftest.py` provides key fixtures: `db_session` (async SQLAlchemy session), `client` (httpx AsyncClient via ASGI transport), with FastAPI dependency overrides for `get_db` and `get_current_user`.
+- Test client uses `httpx.AsyncClient` with `ASGITransport` (not TestClient).
 
 ### Frontend Tech Stack
 
@@ -138,7 +147,7 @@ Three-service stack in `docker-compose.yml`:
 - **frontend** (Nginx) — port 80, serves React SPA with `/api` proxy to backend
 
 Deployment scripts: `build-and-deploy.sh` and `deploy.sh` for automated build and deploy.
-53 Alembic migrations as of latest.
+52 Alembic migrations as of latest.
 
 ---
 

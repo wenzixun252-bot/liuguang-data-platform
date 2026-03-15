@@ -29,6 +29,7 @@ interface TodoItem {
   source_type: string
   source_id: number | null
   source_text: string | null
+  source_time: string | null
   status: string
   feishu_task_id: string | null
   pushed_at: string | null
@@ -417,6 +418,12 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
                   ) : (
                     <span className="text-xs text-gray-400">
                       来源: 沟通记录
+                    </span>
+                  )}
+                  {item.source_time && (
+                    <span className="text-xs text-gray-400 flex items-center gap-1">
+                      <Clock size={12} />
+                      {new Date(item.source_time).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
                     </span>
                   )}
                   {item.due_date && (

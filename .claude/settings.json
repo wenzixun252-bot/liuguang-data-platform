@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "WebFetch(domain:vzyjg03bu3.feishu.cn)"
+      "WebFetch(domain:vzyjg03bu3.feishu.cn)",
+      "Bash(npx skills:*)"
     ]
   }
 }

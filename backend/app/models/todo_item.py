@@ -36,6 +36,7 @@ class TodoItem(Base):
     source_type: Mapped[str] = mapped_column(String(32), nullable=False)
     source_id: Mapped[int | None] = mapped_column(Integer)
     source_text: Mapped[str | None] = mapped_column(Text)
+    source_time: Mapped[datetime | None] = mapped_column(comment="来源内容的时间（聊天发送时间/会议时间）")
     status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="pending_review")
     feishu_task_id: Mapped[str | None] = mapped_column(String(128))
     pushed_at: Mapped[datetime | None] = mapped_column()

@@ -97,6 +97,7 @@ async def extract_todos_from_communications(
             skipped_processed += 1
             continue
         # 会议类：从 action_items JSONB 直接提取，按 assignee 过滤
+        extracted_from_action_items = False
         if comm.comm_type in ("meeting", "recording") and comm.action_items:
             for item in comm.action_items:
                 assignee = item.get("assignee") or ""
@@ -117,10 +118,13 @@ async def extract_todos_from_communications(
                         "source_type": "communication",
                         "source_id": comm.id,
                         "source_text": task_text,
+                        "source_time": comm.comm_time or comm.created_at,
                     })
+                    extracted_from_action_items = True
 
         # 收集需要 LLM 提取的记录（稍后按会话分组处理）
-        if comm.content_text and len(comm.content_text.strip()) > 0:
+        # 已从 action_items 提取过的会议/录制件不再走 LLM，避免重复
+        if not extracted_from_action_items and comm.content_text and len(comm.content_text.strip()) > 0:
             llm_comms.append(comm)
 
     # 第二步：按会话（chat_id / 单条会议）分组，给 LLM 更完整的上下文
@@ -174,6 +178,7 @@ async def extract_todos_from_communications(
                     "source_type": "communication",
                     "source_id": latest_comm.id,
                     "source_text": latest_comm.content_text[:200],
+                    "source_time": latest_comm.comm_time or latest_comm.created_at,
                 })
 
     logger.info("待办提取: 跳过已处理=%d, 跳过无内容=%d, 共提取原始待办=%d",
@@ -202,22 +207,24 @@ async def extract_and_save(
             seen_titles.add(title_key)
             unique_todos.append(t)
 
-    # 用 content_hash 去重（hash = source_type + source_id + title，精确到来源）
-    # 不同沟通记录产生的同名待办允许重复创建（因为是不同场景下的任务）
+    # 去重：按标题去重（同一用户的活跃待办中，相同标题视为重复）
     # 已驳回(dismissed)的待办不参与去重，允许重新提取
     active_filter = and_(
         TodoItem.owner_id == owner_id,
         TodoItem.status != "dismissed",
     )
-    existing_hash_result = await db.execute(
-        select(TodoItem.content_hash).where(
-            and_(active_filter, TodoItem.content_hash.isnot(None))
+    # 同时查询已有的 content_hash 和 title（用于双重去重）
+    existing_result = await db.execute(
+        select(TodoItem.content_hash, TodoItem.title).where(
+            active_filter
         )
     )
-    existing_hashes = {r for r in existing_hash_result.scalars().all()}
+    existing_rows = existing_result.all()
+    existing_hashes = {r[0] for r in existing_rows if r[0]}
+    existing_titles = {r[1].strip().lower() for r in existing_rows if r[1]}
 
-    logger.info("待办保存: 原始待办=%d, 去重后=%d, 已有hash=%d",
-                len(all_todos), len(unique_todos), len(existing_hashes))
+    logger.info("待办保存: 原始待办=%d, 去重后=%d, 已有hash=%d, 已有title=%d",
+                len(all_todos), len(unique_todos), len(existing_hashes), len(existing_titles))
 
     saved = []
     skipped_dedup = 0
@@ -227,7 +234,7 @@ async def extract_and_save(
             f"{t['source_type']}:{t.get('source_id', '')}:{title_lower}".encode()
         ).hexdigest()
 
-        if content_hash in existing_hashes:
+        if content_hash in existing_hashes or title_lower in existing_titles:
             skipped_dedup += 1
             continue
 
@@ -247,6 +254,7 @@ async def extract_and_save(
             source_type=t["source_type"],
             source_id=t.get("source_id"),
             source_text=t.get("source_text"),
+            source_time=t.get("source_time"),
             status="pending_review",
             content_hash=content_hash,
         )
