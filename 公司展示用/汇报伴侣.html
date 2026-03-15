@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>流光·办公副驾 | 汇报伴侣</title>
+<style>
+  :root {
+    --primary: #4f46e5;
+    --primary-light: #e0e7ff;
+    --accent: #7c3aed;
+    --success: #059669;
+    --warning: #d97706;
+    --danger: #dc2626;
+    --gray-50: #f9fafb;
+    --gray-100: #f3f4f6;
+    --gray-200: #e5e7eb;
+    --gray-300: #d1d5db;
+    --gray-400: #9ca3af;
+    --gray-500: #6b7280;
+    --gray-600: #4b5563;
+    --gray-700: #374151;
+    --gray-800: #1f2937;
+    --gray-900: #111827;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--gray-900);
+    color: var(--gray-100);
+    height: 100vh;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  /* Top Bar */
+  .top-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 24px;
+    background: var(--gray-800);
+    border-bottom: 1px solid var(--gray-700);
+    height: 56px;
+  }
+
+  .top-bar-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .logo {
+    font-size: 18px;
+    font-weight: 700;
+    background: linear-gradient(135deg, #818cf8, #a78bfa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .progress-section {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--gray-400);
+  }
+
+  .step-dots {
+    display: flex;
+    gap: 4px;
+  }
+
+  .step-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--gray-600);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .step-dot.active { background: var(--primary); transform: scale(1.3); }
+  .step-dot.done { background: var(--success); }
+
+  .timer-section {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .timer {
+    font-size: 28px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 1px;
+    color: var(--gray-100);
+  }
+
+  .timer.warning { color: var(--warning); }
+  .timer.danger { color: var(--danger); animation: pulse 1s infinite; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  .timer-btn {
+    padding: 6px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--gray-600);
+    background: transparent;
+    color: var(--gray-300);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .timer-btn:hover { background: var(--gray-700); border-color: var(--gray-500); }
+  .timer-btn.running { border-color: var(--success); color: var(--success); }
+
+  /* Main Layout */
+  .main {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    height: calc(100vh - 56px);
+  }
+
+  /* Left Panel - Current Section */
+  .left-panel {
+    padding: 32px 40px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .section-number {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, var(--primary), var(--accent));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    font-weight: 800;
+    flex-shrink: 0;
+  }
+
+  .section-meta {
+    flex: 1;
+  }
+
+  .section-title {
+    font-size: 26px;
+    font-weight: 700;
+    color: #fff;
+    line-height: 1.3;
+  }
+
+  .section-subtitle {
+    font-size: 14px;
+    color: var(--gray-400);
+    margin-top: 2px;
+  }
+
+  .section-time-badge {
+    padding: 4px 12px;
+    border-radius: 20px;
+    background: var(--gray-700);
+    font-size: 13px;
+    color: var(--gray-300);
+    white-space: nowrap;
+  }
+
+  /* Talking Points */
+  .talk-card {
+    background: var(--gray-800);
+    border: 1px solid var(--gray-700);
+    border-radius: 12px;
+    padding: 20px 24px;
+  }
+
+  .talk-card-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--gray-400);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 14px;
+  }
+
+  .talk-points {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .talk-point {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    font-size: 16px;
+    line-height: 1.6;
+    color: var(--gray-200);
+    cursor: pointer;
+    padding: 6px 8px;
+    border-radius: 8px;
+    transition: background 0.15s;
+  }
+
+  .talk-point:hover { background: var(--gray-700); }
+  .talk-point.spoken { opacity: 0.35; }
+
+  .talk-point .bullet {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    border: 2px solid var(--gray-500);
+    margin-top: 2px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    transition: all 0.15s;
+  }
+
+  .talk-point.spoken .bullet {
+    background: var(--success);
+    border-color: var(--success);
+  }
+
+  .talk-point .bullet::after {
+    content: '';
+  }
+
+  .talk-point.spoken .bullet::after {
+    content: '\2713';
+    color: #fff;
+    font-weight: 700;
+  }
+
+  .highlight {
+    background: rgba(79, 70, 229, 0.2);
+    color: #a5b4fc;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+  }
+
+  .keyword {
+    color: #fbbf24;
+    font-weight: 600;
+  }
+
+  /* Script Box */
+  .script-box {
+    background: linear-gradient(135deg, rgba(79, 70, 229, 0.1), rgba(124, 58, 237, 0.1));
+    border: 1px solid rgba(79, 70, 229, 0.3);
+    border-radius: 12px;
+    padding: 20px 24px;
+  }
+
+  .script-box-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #818cf8;
+    letter-spacing: 1px;
+    margin-bottom: 10px;
+  }
+
+  .script-text {
+    font-size: 17px;
+    line-height: 1.8;
+    color: var(--gray-200);
+    font-style: italic;
+  }
+
+  /* Transition Box */
+  .transition-box {
+    background: rgba(5, 150, 105, 0.1);
+    border: 1px solid rgba(5, 150, 105, 0.3);
+    border-radius: 12px;
+    padding: 16px 24px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .transition-arrow {
+    font-size: 20px;
+    color: var(--success);
+  }
+
+  .transition-text {
+    font-size: 15px;
+    color: #6ee7b7;
+    line-height: 1.5;
+  }
+
+  /* Right Panel */
+  .right-panel {
+    background: var(--gray-800);
+    border-left: 1px solid var(--gray-700);
+    padding: 20px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .right-card {
+    background: var(--gray-900);
+    border: 1px solid var(--gray-700);
+    border-radius: 10px;
+    padding: 16px;
+  }
+
+  .right-card-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--gray-400);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  /* Data Cards */
+  .data-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .data-item {
+    background: var(--gray-800);
+    border-radius: 8px;
+    padding: 10px 12px;
+    text-align: center;
+  }
+
+  .data-value {
+    font-size: 20px;
+    font-weight: 800;
+    color: #fff;
+  }
+
+  .data-value.accent { color: #818cf8; }
+  .data-value.green { color: #34d399; }
+  .data-value.yellow { color: #fbbf24; }
+
+  .data-label {
+    font-size: 11px;
+    color: var(--gray-400);
+    margin-top: 2px;
+  }
+
+  /* QA List */
+  .qa-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .qa-item {
+    padding: 10px 12px;
+    background: var(--gray-800);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .qa-item:hover { background: var(--gray-700); }
+
+  .qa-question {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--gray-200);
+    margin-bottom: 4px;
+  }
+
+  .qa-answer {
+    font-size: 12px;
+    color: var(--gray-400);
+    line-height: 1.5;
+    display: none;
+  }
+
+  .qa-item.open .qa-answer { display: block; }
+
+  /* Nav buttons */
+  .nav-row {
+    display: flex;
+    gap: 10px;
+    padding-top: 8px;
+    margin-top: auto;
+  }
+
+  .nav-btn {
+    flex: 1;
+    padding: 12px;
+    border-radius: 10px;
+    border: 1px solid var(--gray-600);
+    background: var(--gray-800);
+    color: var(--gray-200);
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: center;
+  }
+
+  .nav-btn:hover { background: var(--gray-700); }
+
+  .nav-btn.primary {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: #fff;
+  }
+
+  .nav-btn.primary:hover { background: #4338ca; }
+
+  /* Keyboard hints */
+  .kb-hints {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+    padding: 8px;
+    font-size: 11px;
+    color: var(--gray-500);
+  }
+
+  kbd {
+    padding: 2px 6px;
+    background: var(--gray-700);
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 11px;
+    color: var(--gray-300);
+  }
+
+  /* Outline in right panel */
+  .outline-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .outline-item {
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--gray-400);
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .outline-item:hover { background: var(--gray-800); color: var(--gray-200); }
+  .outline-item.active { background: rgba(79,70,229,0.15); color: #a5b4fc; font-weight: 600; }
+  .outline-item.done { color: var(--gray-500); }
+  .outline-item .o-num {
+    width: 20px;
+    height: 20px;
+    border-radius: 5px;
+    background: var(--gray-700);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .outline-item.active .o-num { background: var(--primary); color: #fff; }
+  .outline-item.done .o-num { background: var(--success); color: #fff; }
+</style>
+</head>
+<body>
+
+<!-- Top Bar -->
+<div class="top-bar">
+  <div class="top-bar-left">
+    <div class="logo">LIUGUANG Presenter</div>
+    <div class="progress-section">
+      <div class="step-dots" id="stepDots"></div>
+      <span id="progressText">1 / 9</span>
+    </div>
+  </div>
+  <div class="timer-section">
+    <button class="timer-btn" id="timerBtn" onclick="toggleTimer()">Start</button>
+    <div class="timer" id="timerDisplay">00:00</div>
+  </div>
+</div>
+
+<!-- Main -->
+<div class="main">
+  <div class="left-panel" id="leftPanel"></div>
+  <div class="right-panel" id="rightPanel"></div>
+</div>
+
+<script>
+// ============ SECTIONS DATA ============
+const sections = [
+  {
+    num: "0",
+    title: "PRD\u5e7b\u706f\u7247\u8bb2\u89e3",
+    subtitle: "\u6295\u5f71\u5c55\u793a\u8bc4\u5ba1\u6f14\u793a.html\uff0c3\u5206\u949f\u8bb2\u5b8c5\u9875",
+    time: "3min",
+    script: "\u201c\u6211\u662f\u6587\u68a8\u65ec\uff0c\u6d41\u5149 \u00B7 \u529e\u516c\u526f\u9a7e\u7684\u4ea7\u54c1\u8d1f\u8d23\u4eba\u517c\u5168\u6808\u7814\u53d1\u3002\u6d41\u5149\u662f\u4e00\u4e2a\u4f01\u4e1a\u7ea7\u667a\u80fd\u6570\u636e\u4e2d\u67a2\u2014\u2014\u81ea\u52a8\u5f52\u96c6\u98de\u4e66\u6570\u636e\u3001AI\u52a0\u5de5\u3001\u667a\u80fd\u95ee\u7b54\uff0c\u8ba9\u6bcf\u4e2a\u5458\u5de5\u6bcf\u5929\u7701\u4e0b1.5\u5c0f\u65f6\u7ffb\u627e\u65f6\u95f4\u3002\u201d",
+    points: [
+      "\u6253\u5f00<span class='highlight'>\u8bc4\u5ba1\u6f14\u793a.html</span>\uff0c\u5168\u5c4f\u6295\u5f71\uff08\u6309F\u952e\u5168\u5c4f\uff09",
+      "<span class='keyword'>\u7b2c1\u9875 \u6807\u9898\u9875</span>\uff1a\u81ea\u6211\u4ecb\u7ecd + \u4e00\u53e5\u8bdd\u5b9a\u4f4d\uff0c\u505c\u987f2\u79d2",
+      "<span class='keyword'>\u7b2c2\u9875 \u75db\u70b9</span>\uff1a\u53ea\u8bf4\u6bcf\u4e2a\u75db\u70b9\u7684\u6807\u9898+\u5173\u952e\u6570\u5b57\uff0c\u4e0d\u5ff5\u63cf\u8ff0",
+      "<span class='keyword'>\u7b2c3\u9875 \u7528\u6237\u6545\u4e8b</span>\uff1a3\u4e2a\u6545\u4e8b\u5404\u4e00\u53e5\u8bdd\u5e26\u8fc7",
+      "<span class='keyword'>\u7b2c4\u9875 \u67b6\u6784</span>\uff1a\u6307\u7740\u56db\u5c42\u67b6\u6784\u56fe\u8bf4\u201c\u6570\u636e\u4ece\u4e0a\u5f80\u4e0b\u6d41\u201d\uff0c\u91cd\u70b9\u63d0\u63d0\u53d6\u89c4\u5219+\u6e05\u6d17\u89c4\u5219",
+      "<span class='keyword'>\u7b2c5\u9875 \u8fc7\u6e21</span>\uff1a\u201c\u63a5\u4e0b\u6765\u6309\u7528\u6237\u5b9e\u9645\u4f7f\u7528\u6d41\u7a0b\u6f14\u793a\u4ea7\u54c1\u201d \u2192 \u5207\u6362\u5230\u4ea7\u54c1\u6d4f\u89c8\u5668"
+    ],
+    transition: "\"\u5e7b\u706f\u7247\u8bb2\u5b8c\u540e\uff0c\u5207\u6362\u5230\u6d4f\u89c8\u5668\u505a\u4ea7\u54c1\u6f14\u793a\"",
+    qa: []
+  },
+  {
+    num: "1",
+    title: "飞书一键登录",
+    subtitle: "演示入口 \u2014 零门槛进入系统",
+    time: "15s",
+    script: "",
+    points: [
+      "点击<span class='highlight'>飞书一键登录</span>\uff0c跳转授权页\u2192回跳\u2192自动进入首页",
+      "强调\uff1a\u201c企业飞书SSO\uff0c不需要额外注册\uff0cJWT 24小时有效\u201d",
+      "\u201c员工打开浏览器\uff0c一键就能用\u201d"
+    ],
+    transition: "\"登录进来后，第一件事不是急着导数据，而是先定好加工配方\"",
+    qa: []
+  },
+  {
+    num: "2",
+    title: "配置数据加工配方",
+    subtitle: "核心差异化 \u2014 提取规则 + 清洗规则",
+    time: "90s",
+    script: "在导入数据之前，我们先告诉系统两件事：第一，我关注什么信息（提取规则）；第二，数据怎么清洗（清洗规则）。这就像做菜前先备好菜谱。",
+    points: [
+      "<span class='keyword'>演示提取规则</span>\uff1a点击新建 \u2192 选\u201c能源\u201d板块 \u2192 自动填充装机容量、投资金额等推荐字段 \u2192 保存",
+      "强调\uff1a\u201c<span class='highlight'>4种行业模板</span>（能源/城乡/不良资产/通用）\uff0c选一个就自动填字段\uff0c也可以自定义\u201d",
+      "<span class='keyword'>演示清洗规则</span>\uff1a点击新建 \u2192 展示8个开关选项 \u2192 重点展示日期统一、数字去千分位、AI合并相似列",
+      "强调\uff1a\u201c<span class='highlight'>5种规则化清洗 + 3种AI智能清洗</span>\uff0c规则化保底\u3001LLM增强\uff0c分层执行\u201d",
+      "一句话总结\uff1a\u201c配方配一次\uff0c后续所有数据自动按配方加工\u201d"
+    ],
+    transition: "\"配方定好了，现在把数据源接进来\"",
+    qa: [
+      { q: "为什么不用通用模板就好？", a: "不同行业关注的字段完全不同。能源看装机容量和并网日期，城建看用地面积和容积率，通用模板无法覆盖。" },
+      { q: "LLM清洗成本高吗？", a: "分层设计——5种规则化清洗零成本先跑完，LLM只处理需要语义理解的操作（合并相似列、修正表述），按需调用。" }
+    ]
+  },
+  {
+    num: "3",
+    title: "添加数据源 + 触发同步",
+    subtitle: "数据从飞书进入流光",
+    time: "60s",
+    script: "",
+    points: [
+      "<span class='keyword'>演示</span>\uff1a粘贴飞书多维表格URL \u2192 系统自动识别表格结构 \u2192 关联刚才创建的提取/清洗规则",
+      "展示<span class='highlight'>AI自动字段映射</span>\uff1a系统推荐映射关系\uff0c用户可微调",
+      "点击\u201c立即同步\u201d\u2192 展示实时进度条",
+      "补充说明\uff1a\u201c首次配置后\uff0c<span class='highlight'>每30分钟自动增量同步</span>\uff0c无需人工干预\u201d",
+      "提一句工作配方\uff1a\u201c会议纪要和聊天记录通过飞书工作配方自动写入多维表格\uff0c流光从表格同步\u201d"
+    ],
+    transition: "\"数据正在同步，我们看看后台发生了什么\"",
+    qa: [
+      { q: "为什么不直接调飞书会议API？", a: "利用飞书原生工作配方能力，员工一次配置永久自动化，无需额外开发和授权，维护成本最低。" },
+      { q: "Schema映射每次都调LLM吗？", a: "MD5缓存机制。相同表结构只调一次LLM，后续全部命中缓存，成本可控。" }
+    ]
+  },
+  {
+    num: "4",
+    title: "ETL六步流水线 + 结果查看",
+    subtitle: "数据加工过程可视化",
+    time: "60s",
+    script: "",
+    points: [
+      "简要说明六步\uff1a<span class='highlight'>预处理 \u2192 提取 \u2192 转换 \u2192 增强 \u2192 后处理 \u2192 加载</span>",
+      "<span class='keyword'>展示清洗前后对比</span>\uff1a切到结构化表格页 \u2192 展示日期统一、重复行消除、数字标准化的效果",
+      "<span class='keyword'>展示提取结果</span>\uff1a切到文档详情 \u2192 展示key_info字段（项目名称、装机容量等已自动提取）",
+      "强调\uff1a\u201c整个过程全自动\uff0c从原始数据到可检索的数据资产\uff0c通常<span class='highlight'>1-3分钟</span>\u201d"
+    ],
+    transition: "\"数据加工完了，现在到了最激动人心的环节——直接用自然语言问它一个问题\"",
+    qa: [
+      { q: "向量模型用的什么？", a: "BAAI/bge-m3，1024维，中文语义理解效果优秀，开源可控，无API依赖风险。" }
+    ]
+  },
+  {
+    num: "5",
+    title: "AI智能问答",
+    subtitle: "Aha Moment \u2014 产品核心价值",
+    time: "90s",
+    script: "现在我问它一个真实的业务问题\u2014\u2014\u201cXX项目最近有什么进展？\u201d\u2014\u2014注意看，它是从多个数据源综合找到答案的。",
+    points: [
+      "<span class='keyword'>提一个真实业务问题</span>\uff08提前准备好\uff0c确保有数据能命中\uff09",
+      "等待SSE流式输出\u2014\u2014<span class='highlight'>逐字出现的效果本身就是演示亮点</span>",
+      "回答出来后\uff0c指向来源引用\uff1a\u201c每条回答都标注了出处\uff0c<span class='keyword'>点击可以直接跳转到原始文档</span>\u201d",
+      "强调技术原理\uff1a\u201c背后是<span class='highlight'>混合检索</span>\u2014\u2014向量语义搜索 + BM25关键词搜索 + RRF融合排序\u201d",
+      "强调权限\uff1a\u201c<span class='highlight'>不同人问同一个问题\uff0c可能得到不同答案</span>\u2014\u2014因为AI也经过了权限过滤\u201d",
+      "\u2605 这里停顿2-3秒\uff0c让评审感受冲击力"
+    ],
+    transition: "\"AI不仅能回答问题，它在加工数据的过程中还做了一件事——自动发现了实体之间的关系\"",
+    qa: [
+      { q: "LLM幻觉怎么控制？", a: "RAG强制基于检索结果生成，Prompt明确要求'无资料时回复不知道'，每条回答附来源引用，用户可核实。" },
+      { q: "检索没结果怎么办？", a: "AI回答'暂未找到相关信息'，不编造内容，并建议调整提问或补充数据源。" },
+      { q: "LLM API挂了呢？", a: "降级为仅关键词搜索模式，跳过LLM生成，提示用户'AI暂不可用，已切换关键词搜索'。" }
+    ]
+  },
+  {
+    num: "6",
+    title: "知识图谱",
+    subtitle: "自动发现隐藏的关联关系",
+    time: "45s",
+    script: "",
+    points: [
+      "展示D3力导向图\uff0c<span class='keyword'>点一个人物节点</span> \u2192 展示关联项目和协作关系",
+      "\u201c这张图是AI自动构建的\uff0c不需要任何人工维护\u201d",
+      "双击节点展开二级关系\uff0c展示\u201c发现隐藏关联\u201d的能力",
+      "点击右侧详情面板\uff0c展示该人物关联的文档和会议列表"
+    ],
+    transition: "\"有了这些数据积累，管理层最需要的报告也能一键生成了\"",
+    qa: []
+  },
+  {
+    num: "7",
+    title: "报告一键生成",
+    subtitle: "2小时 \u2192 5分钟",
+    time: "30s",
+    script: "",
+    points: [
+      "点击<span class='highlight'>生成新报告</span> \u2192 选周报 \u2192 选时间范围 \u2192 确认",
+      "展示SSE流式生成过程\uff08前端实时渲染Markdown\uff09",
+      "\u201c生成完还可以<span class='keyword'>一键发布到飞书云文档</span>\u201d"
+    ],
+    transition: "",
+    qa: []
+  },
+  {
+    num: "8",
+    title: "收尾：商业价值 + 总结",
+    subtitle: "让CEO拍板",
+    time: "2min",
+    script: "流光不是又一个搜索工具，它是企业的第二个大脑\u2014\u2014自动记忆、智能检索、主动提醒。核心功能已开发完成，可以立即投入试点。",
+    points: [
+      "<span class='keyword'>ROI一句话</span>\uff1a30人团队试点\uff0c年化节省 <span class='highlight'>9,250工时 \u2248 92.5万元</span>",
+      "三个北极星指标\uff1a",
+      "\u2003\u2003\u2022 信息检索\uff1a15min/次 \u2192 6min/次\uff08<span class='highlight'>提升60%</span>\uff09",
+      "\u2003\u2003\u2022 报告生成\uff1a2小时 \u2192 <span class='highlight'>5分钟</span>",
+      "\u2003\u2003\u2022 待办遗漏率\uff1a40% \u2192 <span class='highlight'>10%以下</span>",
+      "技术可控\uff1a私有化部署\uff0cDocker一键启动\uff0c数据不出企业",
+      "结尾\uff1a\u201c核心功能已完成\uff0c<span class='keyword'>随时可以启动试点</span>\uff0c谢谢各位评审\u201d"
+    ],
+    transition: "",
+    qa: [
+      { q: "一个人能维护吗？", a: "Docker三容器一键部署（前端+后端+数据库），alembic自动迁移，APScheduler定时任务自运转。日常运维工作量极小。" },
+      { q: "数据安全怎么保障？", a: "四层防护：飞书SSO企业域限制 + JWT 24h过期 + RLS行级权限隔离 + AI权限感知。私有化部署，数据不出企业。" },
+      { q: "后续扩展方向？", a: "接入更多数据源（企业微信/钉钉/邮件）、模型可无缝替换升级、具备SaaS产品化潜力。" }
+    ]
+  }
+];
+
+// ============ STATE ============
+let currentIdx = 0;
+let timerRunning = false;
+let timerSeconds = 0;
+let timerInterval = null;
+let spokenPoints = {};
+
+// ============ RENDER ============
+function render() {
+  const s = sections[currentIdx];
+
+  // Step dots
+  const dotsHtml = sections.map((_, i) => {
+    let cls = 'step-dot';
+    if (i === currentIdx) cls += ' active';
+    else if (i < currentIdx) cls += ' done';
+    return `<div class="${cls}" onclick="goTo(${i})"></div>`;
+  }).join('');
+  document.getElementById('stepDots').innerHTML = dotsHtml;
+  document.getElementById('progressText').textContent = `${currentIdx + 1} / ${sections.length}`;
+
+  // Left panel
+  let leftHtml = '';
+
+  // Section header
+  leftHtml += `
+    <div class="section-header">
+      <div class="section-number">${s.num}</div>
+      <div class="section-meta">
+        <div class="section-title">${s.title}</div>
+        <div class="section-subtitle">${s.subtitle}</div>
+      </div>
+      <div class="section-time-badge">${s.time}</div>
+    </div>
+  `;
+
+  // Script
+  if (s.script) {
+    leftHtml += `
+      <div class="script-box">
+        <div class="script-box-title">OPENING SCRIPT</div>
+        <div class="script-text">\u201c${s.script}\u201d</div>
+      </div>
+    `;
+  }
+
+  // Talking points
+  if (s.points.length > 0) {
+    const key = currentIdx;
+    if (!spokenPoints[key]) spokenPoints[key] = {};
+    const pointsHtml = s.points.map((p, i) => {
+      const spoken = spokenPoints[key][i] ? 'spoken' : '';
+      return `<li class="talk-point ${spoken}" onclick="toggleSpoken(${key},${i})">
+        <div class="bullet"></div>
+        <div>${p}</div>
+      </li>`;
+    }).join('');
+    leftHtml += `
+      <div class="talk-card">
+        <div class="talk-card-title">TALKING POINTS</div>
+        <ul class="talk-points">${pointsHtml}</ul>
+      </div>
+    `;
+  }
+
+  // Transition
+  if (s.transition) {
+    leftHtml += `
+      <div class="transition-box">
+        <div class="transition-arrow">\u2192</div>
+        <div class="transition-text"><strong>过渡到下一节\uff1a</strong>${s.transition}</div>
+      </div>
+    `;
+  }
+
+  // Nav
+  leftHtml += `
+    <div class="nav-row">
+      <button class="nav-btn" onclick="prev()" ${currentIdx === 0 ? 'disabled style="opacity:0.3;cursor:default"' : ''}>\u2190 \u4e0a\u4e00\u6b65</button>
+      <button class="nav-btn primary" onclick="next()" ${currentIdx === sections.length - 1 ? 'disabled style="opacity:0.3;cursor:default"' : ''}>\u4e0b\u4e00\u6b65 \u2192</button>
+    </div>
+    <div class="kb-hints">
+      <span><kbd>\u2190</kbd> <kbd>\u2192</kbd> \u7ffb\u9875</span>
+      <span><kbd>Space</kbd> \u8ba1\u65f6</span>
+      <span><kbd>R</kbd> \u91cd\u7f6e\u8ba1\u65f6</span>
+    </div>
+  `;
+
+  document.getElementById('leftPanel').innerHTML = leftHtml;
+
+  // Right panel
+  let rightHtml = '';
+
+  // Outline
+  rightHtml += `<div class="right-card">
+    <div class="right-card-title">\u{1F4CB} \u6c47\u62a5\u5927\u7eb2</div>
+    <div class="outline-list">
+      ${sections.map((sec, i) => {
+        let cls = 'outline-item';
+        if (i === currentIdx) cls += ' active';
+        else if (i < currentIdx) cls += ' done';
+        return `<div class="${cls}" onclick="goTo(${i})">
+          <div class="o-num">${i < currentIdx ? '\u2713' : sec.num}</div>
+          <span>${sec.title}</span>
+        </div>`;
+      }).join('')}
+    </div>
+  </div>`;
+
+  // Key data (always visible)
+  rightHtml += `<div class="right-card">
+    <div class="right-card-title">\u{1F4CA} \u6838\u5fc3\u6570\u636e\uff08\u968f\u65f6\u53ef\u5f15\u7528\uff09</div>
+    <div class="data-grid">
+      <div class="data-item"><div class="data-value accent">9,250</div><div class="data-label">\u5e74\u5316\u8282\u7701\u5de5\u65f6</div></div>
+      <div class="data-item"><div class="data-value green">92.5\u4e07</div><div class="data-label">\u5e74\u5316\u8282\u7701\u91d1\u989d</div></div>
+      <div class="data-item"><div class="data-value yellow">60%</div><div class="data-label">\u68c0\u7d22\u6548\u7387\u63d0\u5347</div></div>
+      <div class="data-item"><div class="data-value accent">6\u6b65</div><div class="data-label">ETL\u6d41\u6c34\u7ebf</div></div>
+      <div class="data-item"><div class="data-value green">4\u79cd</div><div class="data-label">\u884c\u4e1a\u63d0\u53d6\u6a21\u677f</div></div>
+      <div class="data-item"><div class="data-value yellow">8\u79cd</div><div class="data-label">\u6e05\u6d17\u9009\u9879</div></div>
+    </div>
+  </div>`;
+
+  // QA for current section
+  if (s.qa.length > 0) {
+    const qaHtml = s.qa.map((item, i) => `
+      <div class="qa-item" onclick="this.classList.toggle('open')">
+        <div class="qa-question">\u{1F4AC} ${item.q}</div>
+        <div class="qa-answer">${item.a}</div>
+      </div>
+    `).join('');
+    rightHtml += `<div class="right-card">
+      <div class="right-card-title">\u26A1 \u53ef\u80fd\u88ab\u8ffd\u95ee</div>
+      <div class="qa-list">${qaHtml}</div>
+    </div>`;
+  }
+
+  document.getElementById('rightPanel').innerHTML = rightHtml;
+}
+
+function toggleSpoken(section, point) {
+  if (!spokenPoints[section]) spokenPoints[section] = {};
+  spokenPoints[section][point] = !spokenPoints[section][point];
+  render();
+}
+
+function goTo(idx) {
+  currentIdx = Math.max(0, Math.min(sections.length - 1, idx));
+  render();
+}
+
+function next() { goTo(currentIdx + 1); }
+function prev() { goTo(currentIdx - 1); }
+
+// Timer
+function toggleTimer() {
+  timerRunning = !timerRunning;
+  const btn = document.getElementById('timerBtn');
+  if (timerRunning) {
+    btn.textContent = 'Pause';
+    btn.classList.add('running');
+    timerInterval = setInterval(() => {
+      timerSeconds++;
+      updateTimerDisplay();
+    }, 1000);
+  } else {
+    btn.textContent = 'Resume';
+    btn.classList.remove('running');
+    clearInterval(timerInterval);
+  }
+}
+
+function resetTimer() {
+  timerRunning = false;
+  timerSeconds = 0;
+  clearInterval(timerInterval);
+  document.getElementById('timerBtn').textContent = 'Start';
+  document.getElementById('timerBtn').classList.remove('running');
+  updateTimerDisplay();
+}
+
+function updateTimerDisplay() {
+  const m = String(Math.floor(timerSeconds / 60)).padStart(2, '0');
+  const s = String(timerSeconds % 60).padStart(2, '0');
+  const el = document.getElementById('timerDisplay');
+  el.textContent = `${m}:${s}`;
+  el.classList.remove('warning', 'danger');
+  if (timerSeconds >= 20 * 60) el.classList.add('danger');
+  else if (timerSeconds >= 15 * 60) el.classList.add('warning');
+}
+
+// Keyboard
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); next(); }
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); prev(); }
+  if (e.key === ' ') { e.preventDefault(); toggleTimer(); }
+  if (e.key === 'r' || e.key === 'R') { e.preventDefault(); resetTimer(); }
+});
+
+// Init
+render();
+</script>
+</body>
+</html>

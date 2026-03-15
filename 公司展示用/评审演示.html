@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>流光·办公副驾 | 立项评审</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap');
+
+  :root {
+    --bg: #0f0f1a;
+    --surface: #1a1a2e;
+    --border: #2a2a40;
+    --text: #e2e8f0;
+    --text-muted: #94a3b8;
+    --primary: #818cf8;
+    --primary-bright: #a5b4fc;
+    --accent: #c084fc;
+    --gradient-start: #6366f1;
+    --gradient-end: #a855f7;
+    --success: #34d399;
+    --warning: #fbbf24;
+    --danger: #f87171;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+    cursor: none;
+  }
+
+  body.show-cursor { cursor: default; }
+
+  /* ====== SLIDE CONTAINER ====== */
+  .slides-wrapper {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+  }
+
+  .slide {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 60px 80px;
+    opacity: 0;
+    transform: translateX(40px);
+    transition: opacity 0.5s ease, transform 0.5s ease;
+    pointer-events: none;
+    will-change: opacity, transform;
+  }
+
+  .slide.active {
+    opacity: 1;
+    transform: translateX(0);
+    pointer-events: auto;
+  }
+
+  .slide.exit-left {
+    opacity: 0;
+    transform: translateX(-40px);
+  }
+
+  /* ====== PAGE INDICATOR ====== */
+  .page-indicator {
+    position: fixed;
+    bottom: 32px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 10px;
+    z-index: 100;
+  }
+
+  .page-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--border);
+    transition: all 0.3s;
+    cursor: pointer;
+  }
+
+  .page-dot.active {
+    background: var(--primary);
+    transform: scale(1.3);
+    box-shadow: 0 0 12px rgba(129, 140, 248, 0.5);
+  }
+
+  .page-dot.done { background: var(--success); }
+
+  /* ====== SLIDE 1: TITLE ====== */
+  .title-slide {
+    text-align: center;
+    gap: 24px;
+  }
+
+  .title-logo {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 6px;
+    text-transform: uppercase;
+    background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 8px;
+  }
+
+  .title-main {
+    font-size: 72px;
+    font-weight: 900;
+    line-height: 1.1;
+    letter-spacing: -2px;
+  }
+
+  .title-main .highlight {
+    background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .title-tagline {
+    font-size: 28px;
+    color: var(--text-muted);
+    font-weight: 400;
+    max-width: 800px;
+    line-height: 1.5;
+  }
+
+  .title-divider {
+    width: 80px;
+    height: 3px;
+    background: linear-gradient(90deg, var(--gradient-start), var(--gradient-end));
+    border-radius: 2px;
+    margin: 8px 0;
+  }
+
+  .title-meta {
+    font-size: 18px;
+    color: var(--text-muted);
+    display: flex;
+    gap: 32px;
+  }
+
+  .title-meta span {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* ====== SLIDE 2: PAIN POINTS ====== */
+  .pain-slide {
+    align-items: flex-start;
+    gap: 40px;
+  }
+
+  .slide-heading {
+    font-size: 44px;
+    font-weight: 800;
+    letter-spacing: -1px;
+  }
+
+  .slide-heading .accent {
+    background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .pain-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 16px;
+    width: 100%;
+  }
+
+  .pain-row {
+    display: grid;
+    grid-template-columns: 48px 1fr auto;
+    align-items: center;
+    gap: 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px 28px;
+    transition: border-color 0.2s;
+  }
+
+  .pain-num {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    font-weight: 800;
+    flex-shrink: 0;
+  }
+
+  .pain-text {
+    font-size: 22px;
+    font-weight: 600;
+    line-height: 1.4;
+  }
+
+  .pain-stat {
+    font-size: 28px;
+    font-weight: 800;
+    white-space: nowrap;
+    padding-left: 16px;
+  }
+
+  .pain-stat.red { color: var(--danger); }
+  .pain-stat.yellow { color: var(--warning); }
+  .pain-stat.purple { color: var(--accent); }
+
+  /* ====== SLIDE 3: USER STORIES ====== */
+  .stories-slide {
+    align-items: flex-start;
+    gap: 40px;
+  }
+
+  .story-cards {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+    width: 100%;
+  }
+
+  .story-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    transition: border-color 0.2s, transform 0.2s;
+  }
+
+  .story-card:hover {
+    border-color: var(--primary);
+    transform: translateY(-4px);
+  }
+
+  .story-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+  }
+
+  .story-icon.blue { background: rgba(99, 102, 241, 0.15); }
+  .story-icon.green { background: rgba(52, 211, 153, 0.15); }
+  .story-icon.purple { background: rgba(192, 132, 252, 0.15); }
+
+  .story-role {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--primary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .story-want {
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.4;
+  }
+
+  .story-benefit {
+    font-size: 16px;
+    color: var(--text-muted);
+    line-height: 1.5;
+    margin-top: auto;
+  }
+
+  .story-benefit strong {
+    color: var(--success);
+    font-weight: 700;
+  }
+
+  /* ====== SLIDE 4: ARCHITECTURE ====== */
+  .arch-slide {
+    align-items: center;
+    gap: 36px;
+  }
+
+  .arch-layers {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+    max-width: 1000px;
+  }
+
+  .arch-connector {
+    display: flex;
+    justify-content: center;
+    color: var(--text-muted);
+    font-size: 20px;
+  }
+
+  .arch-layer {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 22px 32px;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+
+  .arch-layer-label {
+    font-size: 16px;
+    font-weight: 800;
+    white-space: nowrap;
+    min-width: 140px;
+    padding: 8px 16px;
+    border-radius: 10px;
+    text-align: center;
+  }
+
+  .arch-layer-label.l1 { background: linear-gradient(135deg, #1e3a5f, #1e40af); color: #93c5fd; }
+  .arch-layer-label.l2 { background: linear-gradient(135deg, #3b1f6e, #6d28d9); color: #c4b5fd; }
+  .arch-layer-label.l3 { background: linear-gradient(135deg, #064e3b, #059669); color: #6ee7b7; }
+  .arch-layer-label.l4 { background: linear-gradient(135deg, #78350f, #d97706); color: #fde68a; }
+
+  .arch-layer-items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    flex: 1;
+  }
+
+  .arch-item {
+    padding: 6px 14px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-muted);
+  }
+
+  .arch-highlights {
+    display: flex;
+    gap: 32px;
+    margin-top: 8px;
+  }
+
+  .arch-highlight {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 20px;
+    background: rgba(99, 102, 241, 0.1);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    border-radius: 12px;
+  }
+
+  .arch-highlight-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--primary);
+  }
+
+  .arch-highlight-text {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--primary-bright);
+  }
+
+  /* ====== SLIDE 5: TRANSITION ====== */
+  .transition-slide {
+    text-align: center;
+    gap: 32px;
+  }
+
+  .transition-main {
+    font-size: 48px;
+    font-weight: 800;
+    line-height: 1.3;
+  }
+
+  .transition-flow {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .flow-step {
+    padding: 10px 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+
+  .flow-arrow {
+    color: var(--primary);
+    font-size: 18px;
+  }
+
+  .transition-hint {
+    font-size: 16px;
+    color: var(--text-muted);
+    margin-top: 16px;
+  }
+
+  /* ====== KEYBOARD HINT ====== */
+  .kb-hint {
+    position: fixed;
+    bottom: 32px;
+    right: 40px;
+    font-size: 12px;
+    color: var(--border);
+    z-index: 100;
+    transition: opacity 0.3s;
+  }
+
+  body:not(.show-cursor) .kb-hint { opacity: 0; }
+  body.show-cursor .kb-hint { opacity: 1; }
+</style>
+</head>
+<body class="show-cursor">
+
+<div class="slides-wrapper">
+
+  <!-- SLIDE 1: TITLE -->
+  <div class="slide title-slide active" data-index="0">
+    <div class="title-logo">LIUGUANG</div>
+    <h1 class="title-main">
+      <span class="highlight">流光</span> · 办公副驾
+    </h1>
+    <p class="title-tagline">
+      企业级智能数据中枢<br>
+      自动归集飞书数据 · AI加工 · 智能问答
+    </p>
+    <div class="title-divider"></div>
+    <div class="title-meta">
+      <span>文梓旬 | 产品负责人 / 全栈研发</span>
+      <span>十大重点数字员工孵化立项评审</span>
+      <span>2026.03.16</span>
+    </div>
+  </div>
+
+  <!-- SLIDE 2: PAIN POINTS -->
+  <div class="slide pain-slide" data-index="1">
+    <h2 class="slide-heading">核心<span class="accent">痛点</span></h2>
+    <div class="pain-grid">
+      <div class="pain-row">
+        <div class="pain-num">P1</div>
+        <div class="pain-text">信息碎片化，检索效率低——文档、会议、聊天散落各处，缺乏统一归档和语义检索</div>
+        <div class="pain-stat red">1.5h/天 翻找</div>
+      </div>
+      <div class="pain-row">
+        <div class="pain-num">P2</div>
+        <div class="pain-text">数据质量差，加工全靠人工——格式不统一、重复冗余、关键信息依赖人工阅读提取</div>
+        <div class="pain-stat yellow">4种行业 各不相同</div>
+      </div>
+      <div class="pain-row">
+        <div class="pain-num">P3</div>
+        <div class="pain-text">知识断层，协作信息难追溯——跨部门信息遗漏，会议待办缺乏自动跟踪</div>
+        <div class="pain-stat red">30% 信息遗漏</div>
+      </div>
+      <div class="pain-row">
+        <div class="pain-num">P4</div>
+        <div class="pain-text">决策支撑慢，报告依赖人工——管理层汇总周报/月报耗时长，缺乏全局数据视图</div>
+        <div class="pain-stat yellow">2-3h/份 报告</div>
+      </div>
+      <div class="pain-row">
+        <div class="pain-num">P5</div>
+        <div class="pain-text">权限管控粗放——缺乏按部门/个人灵活配置可见范围的机制，AI也无法感知权限</div>
+        <div class="pain-stat purple">无行级隔离</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 3: USER STORIES -->
+  <div class="slide stories-slide" data-index="2">
+    <h2 class="slide-heading">用户<span class="accent">故事</span></h2>
+    <div class="story-cards">
+      <div class="story-card">
+        <div class="story-icon blue">?</div>
+        <div class="story-role">普通员工</div>
+        <div class="story-want">用自然语言提问，<br>从多源数据中找到答案</div>
+        <div class="story-benefit">
+          "上周XX项目有什么进展？"<br>
+          系统从文档+会议+聊天综合检索，<br>
+          <strong>每条回答标注来源出处</strong>
+        </div>
+      </div>
+      <div class="story-card">
+        <div class="story-icon green">@</div>
+        <div class="story-role">普通员工</div>
+        <div class="story-want">给机器人发消息即归档，<br>事后轻松追溯</div>
+        <div class="story-benefit">
+          直接给流光机器人发消息或转发内容，<br>
+          AI自动分类归档，<br>
+          <strong>从此群聊信息不再转瞬即逝</strong>
+        </div>
+      </div>
+      <div class="story-card">
+        <div class="story-icon purple">&#10003;</div>
+        <div class="story-role">普通员工</div>
+        <div class="story-want">AI自动从会议纪要<br>提取待办事项</div>
+        <div class="story-benefit">
+          "下周三前，李四完成接口文档"<br>
+          AI自动识别负责人+截止日期，<br>
+          <strong>待办遗漏率从40%降至10%</strong>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 4: ARCHITECTURE -->
+  <div class="slide arch-slide" data-index="3">
+    <h2 class="slide-heading">产品<span class="accent">架构</span></h2>
+    <div class="arch-layers">
+      <div class="arch-layer">
+        <div class="arch-layer-label l1">数据采集层</div>
+        <div class="arch-layer-items">
+          <div class="arch-item">飞书多维表格同步</div>
+          <div class="arch-item">飞书云文件夹</div>
+          <div class="arch-item">飞书工作配方</div>
+          <div class="arch-item">机器人归档</div>
+          <div class="arch-item">手动上传</div>
+        </div>
+      </div>
+      <div class="arch-connector">&darr;</div>
+      <div class="arch-layer">
+        <div class="arch-layer-label l2">ETL处理层</div>
+        <div class="arch-layer-items">
+          <div class="arch-item">预处理</div>
+          <div class="arch-item">提取</div>
+          <div class="arch-item">AI字段映射</div>
+          <div class="arch-item">增强(标签/摘要)</div>
+          <div class="arch-item">向量化</div>
+          <div class="arch-item">加载</div>
+          <div class="arch-item" style="border-color:var(--accent);color:var(--accent)">提取规则(4模板)</div>
+          <div class="arch-item" style="border-color:var(--accent);color:var(--accent)">清洗规则(8选项)</div>
+        </div>
+      </div>
+      <div class="arch-connector">&darr;</div>
+      <div class="arch-layer">
+        <div class="arch-layer-label l3">数据资产层</div>
+        <div class="arch-layer-items">
+          <div class="arch-item">文档</div>
+          <div class="arch-item">通信(会议+聊天)</div>
+          <div class="arch-item">结构化表格</div>
+          <div class="arch-item">知识图谱</div>
+          <div class="arch-item">标签体系</div>
+          <div class="arch-item">1024维语义向量</div>
+        </div>
+      </div>
+      <div class="arch-connector">&darr;</div>
+      <div class="arch-layer">
+        <div class="arch-layer-label l4">智能应用层</div>
+        <div class="arch-layer-items">
+          <div class="arch-item">AI智能问答(RAG)</div>
+          <div class="arch-item">知识图谱可视化</div>
+          <div class="arch-item">报告自动生成</div>
+          <div class="arch-item">自动待办</div>
+          <div class="arch-item">人物洞察</div>
+          <div class="arch-item">数据洞察看板</div>
+          <div class="arch-item">全局搜索</div>
+        </div>
+      </div>
+    </div>
+    <div class="arch-highlights">
+      <div class="arch-highlight">
+        <div class="arch-highlight-dot"></div>
+        <div class="arch-highlight-text">混合检索 RAG</div>
+      </div>
+      <div class="arch-highlight">
+        <div class="arch-highlight-dot" style="background:var(--success)"></div>
+        <div class="arch-highlight-text">知识图谱自动构建</div>
+      </div>
+      <div class="arch-highlight">
+        <div class="arch-highlight-dot" style="background:var(--warning)"></div>
+        <div class="arch-highlight-text">行级权限 RLS</div>
+      </div>
+      <div class="arch-highlight">
+        <div class="arch-highlight-dot" style="background:var(--accent)"></div>
+        <div class="arch-highlight-text">4模板 + 8清洗选项</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 5: TRANSITION -->
+  <div class="slide transition-slide" data-index="4">
+    <h2 class="transition-main">
+      接下来<br>
+      按<span class="highlight">用户实际使用流程</span><br>
+      演示产品
+    </h2>
+    <div class="title-divider"></div>
+    <div class="transition-flow">
+      <div class="flow-step">登录</div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-step">配置加工配方</div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-step">接入数据源</div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-step">ETL加工</div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-step" style="border-color:var(--primary);color:var(--primary)">AI问答</div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-step">知识图谱</div>
+      <div class="flow-arrow">&rarr;</div>
+      <div class="flow-step">报告生成</div>
+    </div>
+    <p class="transition-hint">请切换到产品演示环境</p>
+  </div>
+
+</div>
+
+<!-- PAGE INDICATOR -->
+<div class="page-indicator" id="pageIndicator"></div>
+
+<div class="kb-hint">
+  &larr; &rarr; \u7FFB\u9875
+</div>
+
+<script>
+  const slides = document.querySelectorAll('.slide');
+  const total = slides.length;
+  let current = 0;
+
+  function renderDots() {
+    const container = document.getElementById('pageIndicator');
+    container.innerHTML = Array.from({length: total}, (_, i) => {
+      let cls = 'page-dot';
+      if (i === current) cls += ' active';
+      else if (i < current) cls += ' done';
+      return `<div class="${cls}" onclick="goTo(${i})"></div>`;
+    }).join('');
+  }
+
+  function goTo(idx) {
+    if (idx === current || idx < 0 || idx >= total) return;
+    const dir = idx > current ? 1 : -1;
+    slides[current].classList.remove('active');
+    slides[current].classList.add(dir > 0 ? 'exit-left' : '');
+    setTimeout(() => {
+      slides[current].classList.remove('exit-left');
+    }, 500);
+    current = idx;
+    slides[current].style.transform = dir > 0 ? 'translateX(40px)' : 'translateX(-40px)';
+    requestAnimationFrame(() => {
+      slides[current].classList.add('active');
+    });
+    renderDots();
+  }
+
+  function next() { goTo(current + 1); }
+  function prev() { goTo(current - 1); }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') { e.preventDefault(); next(); }
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); prev(); }
+    if (e.key === 'f' || e.key === 'F') {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+      else document.exitFullscreen();
+    }
+  });
+
+  // Hide cursor after 3s of no movement
+  let cursorTimer;
+  document.addEventListener('mousemove', () => {
+    document.body.classList.add('show-cursor');
+    clearTimeout(cursorTimer);
+    cursorTimer = setTimeout(() => document.body.classList.remove('show-cursor'), 3000);
+  });
+
+  renderDots();
+</script>
+</body>
+</html>

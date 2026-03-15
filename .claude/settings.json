@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "WebFetch(domain:vzyjg03bu3.feishu.cn)",
-      "Bash(npx skills:*)"
+      "Bash(npx skills:*)",
+      "mcp__feishu-mcp__drive_v1_permissionMember_create",
+      "mcp__feishu-mcp__wiki_v2_space_getNode"
     ]
   }
 }
