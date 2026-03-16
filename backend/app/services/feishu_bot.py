@@ -539,6 +539,8 @@ class FeishuBotService:
         """用户调整：删除旧记录 → 按新选择重新入库。"""
         form_value = callback.get("action", {}).get("form_value", {})
         new_asset_type = form_value.get("asset_type", "document")
+        new_ext_rule_id = int(form_value.get("extraction_rule_id", "0") or "0")
+        new_cln_rule_id = int(form_value.get("cleaning_rule_id", "0") or "0")
 
         async with async_session() as db:
             task = await self._get_task(db, task_id)
@@ -564,13 +566,19 @@ class FeishuBotService:
 
             # ── 更新任务状态 ──
             task.selected_asset_type = new_asset_type
+            task.selected_extraction_rule_id = new_ext_rule_id if new_ext_rule_id else None
+            task.selected_cleaning_rule_id = new_cln_rule_id if new_cln_rule_id else None
             task.status = "processing"
             task.ingested_record_id = None
             task.ingested_record_type = None
             await db.commit()
 
         # 异步重新入库
-        asyncio.create_task(self._re_ingest_and_report(task_id, open_id, new_asset_type))
+        asyncio.create_task(self._re_ingest_and_report(
+            task_id, open_id, new_asset_type,
+            extraction_rule_id=new_ext_rule_id,
+            cleaning_rule_id=new_cln_rule_id,
+        ))
 
         return self._build_status_card(
             "正在重新入库",
@@ -578,7 +586,10 @@ class FeishuBotService:
             "blue",
         )
 
-    async def _re_ingest_and_report(self, task_id: str, open_id: str, asset_type: str) -> None:
+    async def _re_ingest_and_report(
+        self, task_id: str, open_id: str, asset_type: str,
+        extraction_rule_id: int = 0, cleaning_rule_id: int = 0,
+    ) -> None:
         """重新入库并发送新的结果卡片。"""
         # 立即发送文字反馈，缓解等待焦虑
         asset_label = ASSET_TYPE_LABELS.get(asset_type, asset_type)
@@ -618,6 +629,56 @@ class FeishuBotService:
                 task.result_message = result_msg
                 await db.commit()
 
+                # 应用用户选择的提取规则
+                ext_rule_applied = False
+                ext_rule_name = "未使用"
+                if extraction_rule_id and record_id and record_type in ("document", "communication"):
+                    try:
+                        from app.services.etl.enricher import extract_key_info
+                        content_text = await self._get_record_content(db, record_id, record_type)
+                        if content_text:
+                            key_info = await extract_key_info(
+                                content_text, extraction_rule_id, db,
+                                title=result_msg,
+                            )
+                            if key_info is not None:
+                                from sqlalchemy import text as sql_text
+                                table_name = "documents" if record_type == "document" else "communications"
+                                await db.execute(
+                                    sql_text(
+                                        f"UPDATE {table_name} SET extraction_rule_id = :rule_id, "
+                                        f"key_info = CAST(:key_info AS jsonb) WHERE id = :id"
+                                    ),
+                                    {
+                                        "rule_id": extraction_rule_id,
+                                        "key_info": json.dumps(key_info, ensure_ascii=False),
+                                        "id": record_id,
+                                    },
+                                )
+                                await db.commit()
+                                ext_rule_applied = True
+                                logger.info("重新入库已应用提取规则 id=%d, record=%s/%d", extraction_rule_id, record_type, record_id)
+                    except Exception as e:
+                        logger.warning("重新入库应用提取规则失败 (rule_id=%d): %s", extraction_rule_id, e)
+
+                # 查找规则名称（用于反馈）
+                if extraction_rule_id:
+                    ext_rule_obj = await db.execute(
+                        select(ExtractionRule).where(ExtractionRule.id == extraction_rule_id)
+                    )
+                    ext_rule_obj = ext_rule_obj.scalar_one_or_none()
+                    if ext_rule_obj:
+                        ext_rule_name = ext_rule_obj.name
+
+                cln_rule_name = "未使用"
+                if cleaning_rule_id:
+                    cln_rule_obj = await db.execute(
+                        select(CleaningRule).where(CleaningRule.id == cleaning_rule_id)
+                    )
+                    cln_rule_obj = cln_rule_obj.scalar_one_or_none()
+                    if cln_rule_obj:
+                        cln_rule_name = cln_rule_obj.name
+
                 # 自动打标签（硬性规定：必须至少一个标签）
                 if record_id and record_type:
                     try:
@@ -655,13 +716,18 @@ class FeishuBotService:
                     )
                 )).scalars().all()
 
-            # 先发送文字反馈
+            # 先发送文字反馈（包含规则使用情况）
             asset_label = ASSET_TYPE_LABELS.get(asset_type, asset_type)
             if record_id:
-                await self._reply_text(
-                    open_id,
-                    f"已删除旧数据并重新入库为「{asset_label}」。\n{result_msg}",
-                )
+                feedback_parts = [f"已删除旧数据并重新入库为「{asset_label}」。\n{result_msg}"]
+                if extraction_rule_id:
+                    if ext_rule_applied:
+                        feedback_parts.append(f"提取规则「{ext_rule_name}」已应用")
+                    else:
+                        feedback_parts.append(f"提取规则「{ext_rule_name}」未能应用（内容为空或规则不适用）")
+                if cleaning_rule_id:
+                    feedback_parts.append(f"清洗规则「{cln_rule_name}」已记录")
+                await self._reply_text(open_id, "\n".join(feedback_parts))
             else:
                 await self._reply_text(open_id, f"重新入库失败：{result_msg}")
 
@@ -674,6 +740,12 @@ class FeishuBotService:
                 result_msg=result_msg,
                 extraction_rules=extraction_rules,
                 cleaning_rules=cleaning_rules,
+                rec_ext_id=extraction_rule_id,
+                rec_ext_name=ext_rule_name,
+                rec_ext_reason="用户手动选择" if extraction_rule_id else "",
+                rec_cln_id=cleaning_rule_id,
+                rec_cln_name=cln_rule_name,
+                rec_cln_reason="用户手动选择" if cleaning_rule_id else "",
             )
             await self._send_card(open_id, card)
 
