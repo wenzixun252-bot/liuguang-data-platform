@@ -82,7 +82,8 @@
       "Bash(alembic current:*)",
       "Bash(find d:CCliuguang-data-platformbackendappapi -name *todo* -o -name *task*)",
       "Bash(ngrok version:*)",
-      "Bash(ngrok http:*)"
+      "Bash(ngrok http:*)",
+      "Bash(find /d/CC/liuguang-data-platform/backend -name *log* -type f)"
     ]
   },
   "hooks": {

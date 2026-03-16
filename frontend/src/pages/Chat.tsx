@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback, lazy, Suspense } from 'react'
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Bot, Loader2 } from 'lucide-react'
 import { motion } from 'framer-motion'
 import { getToken } from '../lib/auth'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
+import { useTaskProgress } from '../hooks/useTaskProgress'
 import ChatSidebar from '../components/ChatSidebar'
 import type { ConversationItem } from '../components/ChatSidebar'
 import ChatMessages from '../components/ChatMessages'
@@ -40,6 +41,8 @@ type SceneTab = 'chat' | 'report' | 'graph' | 'calendar' | 'todos'
 
 export default function Chat() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const { addTask, updateTask } = useTaskProgress()
+  const chatAbortRef = useRef<AbortController | null>(null)
 
   // 会话相关
   const [conversations, setConversations] = useState<ConversationItem[]>([])
@@ -126,6 +129,18 @@ export default function Chat() {
     fetchReports()
     setTimeout(() => fetchReports(), 1000)
   }
+
+  // ── 监听任务中心的取消事件 ────────────────────────────
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail
+      if (detail?.taskId && chatAbortRef.current) {
+        chatAbortRef.current.abort()
+      }
+    }
+    window.addEventListener('cancel-chat-task', handler)
+    return () => window.removeEventListener('cancel-chat-task', handler)
+  }, [])
 
   // ── 加载会话列表 ──────────────────────────────────────
   const fetchConversations = useCallback(async () => {
@@ -224,6 +239,15 @@ export default function Chat() {
       body.attachment_context = attachmentContext
     }
 
+    // 注册任务到右上角任务中心
+    const taskId = `chat-${Date.now()}`
+    const taskLabel = `问答: ${question.slice(0, 15)}${question.length > 15 ? '...' : ''}`
+    addTask(taskId, taskLabel, '/chat')
+
+    // 支持取消
+    const abortController = new AbortController()
+    chatAbortRef.current = abortController
+
     try {
       const res = await fetch('/api/chat/stream', {
         method: 'POST',
@@ -232,6 +256,7 @@ export default function Chat() {
           Authorization: `Bearer ${getToken()}`,
         },
         body: JSON.stringify(body),
+        signal: abortController.signal,
       })
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -308,13 +333,30 @@ export default function Chat() {
           // 静默
         }
       }
-    } catch {
-      setMessages((prev) => [
-        ...prev.slice(0, -1),
-        { role: 'assistant', content: '请求失败，请稍后重试。' },
-      ])
+
+      // 标记任务完成并通知
+      updateTask(taskId, { status: 'done', progress: 100, message: '已完成' })
+      toast.success('AI 回复已完成', { id: taskId })
+    } catch (err) {
+      // 用户主动取消时不显示错误
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        updateTask(taskId, { status: 'error', message: '已取消' })
+        // 移除未完成的 assistant 占位消息
+        setMessages((prev) => prev.length > 0 && prev[prev.length - 1].role === 'assistant' && !prev[prev.length - 1].content
+          ? prev.slice(0, -1)
+          : prev
+        )
+      } else {
+        setMessages((prev) => [
+          ...prev.slice(0, -1),
+          { role: 'assistant', content: '请求失败，请稍后重试。' },
+        ])
+        updateTask(taskId, { status: 'error', message: '失败' })
+        toast.error('AI 回复失败')
+      }
     } finally {
       setStreaming(false)
+      chatAbortRef.current = null
     }
   }
 

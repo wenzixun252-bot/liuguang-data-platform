@@ -92,6 +92,7 @@ async def create_report(
         data_sources=body.data_sources,
         extra_instructions=body.extra_instructions,
         target_reader_ids=body.target_reader_ids,
+        custom_prompt=body.custom_prompt,
     )
     return report
 
@@ -121,6 +122,7 @@ async def create_report_stream(
         data_sources=body.data_sources,
         extra_instructions=body.extra_instructions,
         target_reader_ids=body.target_reader_ids,
+        custom_prompt=body.custom_prompt,
     )
 
     # ── 2. generator 只负责 LLM 流式 + 保存结果 ──
@@ -222,6 +224,7 @@ async def create_report_background(
         data_sources=body.data_sources,
         extra_instructions=body.extra_instructions,
         target_reader_ids=body.target_reader_ids,
+        custom_prompt=body.custom_prompt,
     )
     return report
 

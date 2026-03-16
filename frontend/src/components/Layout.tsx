@@ -237,7 +237,7 @@ export default function Layout() {
   useEffect(() => {
     if (todoExtractRunning === prevTodoExtractRunningRef.current) return
     if (todoExtractRunning) {
-      addTask('todo-extract', '待办提取', '/todos')
+      addTask('todo-extract', '智能提取待办', '/chat?tab=todos')
     } else if (prevTodoExtractRunningRef.current === true) {
       updateTask('todo-extract', { status: 'done', progress: 100, message: '已完成' })
     }

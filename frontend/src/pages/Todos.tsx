@@ -130,8 +130,9 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
   }, [tab, search, dateFilters, page])
 
   const handleExtract = async () => {
+    if (extracting) return
     setExtracting(true)
-    const taskId = `todo-extract-${Date.now()}`
+    const taskId = 'todo-extract'
     addTask(taskId, '智能提取待办', '/chat?tab=todos')
     updateTask(taskId, { message: '正在分析数据...' })
     try {

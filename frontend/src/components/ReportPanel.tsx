@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { FileText, Loader2, Send, Download, UserSearch, X, ChevronDown, ChevronUp, Database, ExternalLink, Brain, ChevronRight } from 'lucide-react'
+import { FileText, Loader2, Send, Download, UserSearch, X, ChevronDown, ChevronUp, Database, ExternalLink, Brain, ChevronRight, Pencil } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import api from '../lib/api'
@@ -71,6 +71,8 @@ export default function ReportPanel({ activeReport, onReportCreated, onClearActi
   const [dataSelection, setDataSelection] = useState<DataSelection>({ mode: 'all', label: '全部' })
   const [showDataPicker, setShowDataPicker] = useState(false)
   const [extraInstructions, setExtraInstructions] = useState('')
+  const [isCustomMode, setIsCustomMode] = useState(false)
+  const [customPrompt, setCustomPrompt] = useState('')
   const [generating, setGenerating] = useState(false)
 
   // 流式输出状态
@@ -200,7 +202,15 @@ export default function ReportPanel({ activeReport, onReportCreated, onClearActi
 
   // 流式生成报告
   const handleGenerate = async () => {
-    if (!selectedTemplate || !title.trim() || !timeStart || !timeEnd) {
+    if (isCustomMode && !customPrompt.trim()) {
+      toast.error('请填写报告描述')
+      return
+    }
+    if (!isCustomMode && !selectedTemplate) {
+      toast.error('请选择报告模板')
+      return
+    }
+    if (!title.trim() || !timeStart || !timeEnd) {
       toast.error('请填写完整信息')
       return
     }
@@ -218,7 +228,7 @@ export default function ReportPanel({ activeReport, onReportCreated, onClearActi
           Authorization: `Bearer ${getToken()}`,
         },
         body: JSON.stringify({
-          template_id: selectedTemplate,
+          template_id: isCustomMode ? null : selectedTemplate,
           title: title.trim(),
           time_range_start: new Date(timeStart).toISOString(),
           time_range_end: new Date(timeEnd).toISOString(),
@@ -227,6 +237,7 @@ export default function ReportPanel({ activeReport, onReportCreated, onClearActi
           target_reader_ids: selectedReaders.length > 0
             ? selectedReaders.map((r) => r.name)
             : null,
+          custom_prompt: isCustomMode ? customPrompt.trim() : null,
         }),
       })
 
@@ -445,11 +456,12 @@ export default function ReportPanel({ activeReport, onReportCreated, onClearActi
               <button
                 key={t.id}
                 onClick={() => {
+                  setIsCustomMode(false)
                   setSelectedTemplate(t.id)
                   applyTemplateDefaults(t.name)
                 }}
                 className={`p-2.5 text-left border rounded-lg text-sm transition-colors ${
-                  selectedTemplate === t.id
+                  !isCustomMode && selectedTemplate === t.id
                     ? 'border-indigo-400 bg-indigo-50 text-indigo-700'
                     : 'border-gray-200 text-gray-600 hover:border-gray-300'
                 }`}
@@ -460,8 +472,38 @@ export default function ReportPanel({ activeReport, onReportCreated, onClearActi
                 )}
               </button>
             ))}
+            <button
+              onClick={() => {
+                setIsCustomMode(true)
+                setSelectedTemplate(null)
+                setTitle('')
+                setExtraInstructions('')
+              }}
+              className={`p-2.5 text-left border rounded-lg text-sm transition-colors ${
+                isCustomMode
+                  ? 'border-indigo-400 bg-indigo-50 text-indigo-700'
+                  : 'border-gray-200 text-gray-600 hover:border-gray-300'
+              }`}
+            >
+              <p className="font-medium text-xs flex items-center gap-1"><Pencil size={12} />自定义</p>
+              <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">自由描述你想要的报告</p>
+            </button>
           </div>
         </div>
+
+        {/* 自定义报告描述 */}
+        {isCustomMode && (
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">报告描述 <span className="text-red-400">*</span></label>
+            <textarea
+              className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:border-indigo-400 resize-none"
+              rows={4}
+              value={customPrompt}
+              onChange={(e) => setCustomPrompt(e.target.value)}
+              placeholder={"描述你想生成什么样的报告，例如：\n• 按项目维度汇总本周各项目的进展和阻塞\n• 生成一份面向客户的项目交付报告\n• 分析团队沟通频率和协作模式"}
+            />
+          </div>
+        )}
 
         {/* 标题 */}
         <div>
@@ -604,7 +646,7 @@ export default function ReportPanel({ activeReport, onReportCreated, onClearActi
         {/* 生成按钮 */}
         <button
           onClick={handleGenerate}
-          disabled={generating || !selectedTemplate || !title.trim()}
+          disabled={generating || (!isCustomMode && !selectedTemplate) || (isCustomMode && !customPrompt.trim()) || !title.trim()}
           className="w-full flex items-center justify-center gap-2 py-2.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
         >
           <FileText size={16} />

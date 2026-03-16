@@ -31,13 +31,14 @@ class ReportTemplateCreate(BaseModel):
 
 class ReportGenerateRequest(BaseModel):
     """生成报告请求。"""
-    template_id: int
+    template_id: int | None = None
     title: str
     time_range_start: datetime
     time_range_end: datetime
     data_sources: list[str] = ["document", "communication"]
     extra_instructions: str | None = None
     target_reader_ids: list[str] | None = None
+    custom_prompt: str | None = None
 
 
 class ReportOut(BaseModel):

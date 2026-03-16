@@ -67,6 +67,21 @@ REPORT_SYSTEM_PROMPT = """你是一位资深的商业分析师，擅长从零散
 
 然后在后续各版块的内容取舍和详略中，切实体现这些优化——阅读者关注的领域多写细节，不关注的领域只保留摘要。"""
 
+CUSTOM_PROMPT_TEMPLATE = """请根据以下数据和用户的自定义要求，生成一份报告。
+{reader_context}
+## 用户要求
+{custom_prompt}
+
+## 数据内容
+{data}
+
+## 写作要求
+- 每个结论必须引用具体数据（日期、人名、事件）
+- 如果某版块数据不足，写"本周期无相关数据"，不要编造内容
+- 最重要的内容放在最前面
+{extra_instructions}
+"""
+
 # 预设系统模板
 SYSTEM_TEMPLATES = [
     {
@@ -427,13 +442,14 @@ async def _build_reader_context(db: AsyncSession, owner_id: str, reader_ids: lis
 async def generate_report(
     db: AsyncSession,
     owner_id: str,
-    template_id: int,
+    template_id: int | None,
     title: str,
     time_start: datetime,
     time_end: datetime,
     data_sources: list[str],
     extra_instructions: str | None = None,
     target_reader_ids: list[str] | None = None,
+    custom_prompt: str | None = None,
 ) -> Report:
     """生成报告（非流式）。"""
     if time_start.tzinfo is not None:
@@ -441,19 +457,28 @@ async def generate_report(
     if time_end.tzinfo is not None:
         time_end = time_end.astimezone(timezone.utc).replace(tzinfo=None)
 
-    template = await db.get(ReportTemplate, template_id)
-    if not template:
-        raise ValueError("模板不存在")
+    if custom_prompt:
+        template_prompt = CUSTOM_PROMPT_TEMPLATE
+    else:
+        if not template_id:
+            raise ValueError("请选择模板或提供自定义要求")
+        template = await db.get(ReportTemplate, template_id)
+        if not template:
+            raise ValueError("模板不存在")
+        template_prompt = template.prompt_template
 
     data = await gather_data(db, owner_id, time_start, time_end, data_sources)
     reader_context = await _build_reader_context(db, owner_id, target_reader_ids or [])
 
     data_text = json.dumps(data, ensure_ascii=False, indent=2)
-    prompt = template.prompt_template.format(
-        data=data_text[:8000],
-        extra_instructions=extra_instructions or "",
-        reader_context=reader_context,
-    )
+    format_kwargs: dict = {
+        "data": data_text[:8000],
+        "extra_instructions": extra_instructions or "",
+        "reader_context": reader_context,
+    }
+    if custom_prompt:
+        format_kwargs["custom_prompt"] = custom_prompt
+    prompt = template_prompt.format(**format_kwargs)
 
     report = Report(
         owner_id=owner_id,
@@ -512,6 +537,7 @@ async def _background_generate(
     data_sources: list[str],
     extra_instructions: str | None,
     target_reader_ids: list[str] | None,
+    custom_prompt: str | None = None,
 ) -> None:
     """后台异步生成报告（不阻塞前端请求）。"""
     from app.database import async_session
@@ -526,11 +552,14 @@ async def _background_generate(
             reader_context = await _build_reader_context(db, owner_id, target_reader_ids or [])
 
             data_text = json.dumps(data, ensure_ascii=False, indent=2)
-            prompt = template_prompt.format(
-                data=data_text[:8000],
-                extra_instructions=extra_instructions or "",
-                reader_context=reader_context,
-            )
+            format_kwargs: dict = {
+                "data": data_text[:8000],
+                "extra_instructions": extra_instructions or "",
+                "reader_context": reader_context,
+            }
+            if custom_prompt:
+                format_kwargs["custom_prompt"] = custom_prompt
+            prompt = template_prompt.format(**format_kwargs)
 
             # 更新数据源统计
             report.data_sources_used = {
@@ -579,13 +608,14 @@ async def _background_generate(
 async def start_report_background(
     db: AsyncSession,
     owner_id: str,
-    template_id: int,
+    template_id: int | None,
     title: str,
     time_start: datetime,
     time_end: datetime,
     data_sources: list[str],
     extra_instructions: str | None = None,
     target_reader_ids: list[str] | None = None,
+    custom_prompt: str | None = None,
 ) -> Report:
     """创建报告记录，然后在后台异步生成（立即返回报告ID）。"""
     if time_start.tzinfo is not None:
@@ -593,9 +623,15 @@ async def start_report_background(
     if time_end.tzinfo is not None:
         time_end = time_end.replace(tzinfo=None)
 
-    template = await db.get(ReportTemplate, template_id)
-    if not template:
-        raise ValueError("模板不存在")
+    if custom_prompt:
+        template_prompt = CUSTOM_PROMPT_TEMPLATE
+    else:
+        if not template_id:
+            raise ValueError("请选择模板或提供自定义要求")
+        template = await db.get(ReportTemplate, template_id)
+        if not template:
+            raise ValueError("模板不存在")
+        template_prompt = template.prompt_template
 
     report = Report(
         owner_id=owner_id,
@@ -615,12 +651,13 @@ async def start_report_background(
     asyncio.create_task(_background_generate(
         report_id=report.id,
         owner_id=owner_id,
-        template_prompt=template.prompt_template,
+        template_prompt=template_prompt,
         time_start=time_start,
         time_end=time_end,
         data_sources=data_sources,
         extra_instructions=extra_instructions,
         target_reader_ids=target_reader_ids,
+        custom_prompt=custom_prompt,
     ))
 
     return report
@@ -629,13 +666,14 @@ async def start_report_background(
 async def prepare_report_stream(
     db: AsyncSession,
     owner_id: str,
-    template_id: int,
+    template_id: int | None,
     title: str,
     time_start: datetime,
     time_end: datetime,
     data_sources: list[str],
     extra_instructions: str | None = None,
     target_reader_ids: list[str] | None = None,
+    custom_prompt: str | None = None,
 ) -> tuple["Report", str]:
     """在 endpoint 函数体内完成所有 DB 查询，返回 (report, prompt)。
 
@@ -647,19 +685,28 @@ async def prepare_report_stream(
     if time_end.tzinfo is not None:
         time_end = time_end.astimezone(timezone.utc).replace(tzinfo=None)
 
-    template = await db.get(ReportTemplate, template_id)
-    if not template:
-        raise ValueError("模板不存在")
+    if custom_prompt:
+        template_prompt = CUSTOM_PROMPT_TEMPLATE
+    else:
+        if not template_id:
+            raise ValueError("请选择模板或提供自定义要求")
+        template = await db.get(ReportTemplate, template_id)
+        if not template:
+            raise ValueError("模板不存在")
+        template_prompt = template.prompt_template
 
     data = await gather_data(db, owner_id, time_start, time_end, data_sources)
     reader_context = await _build_reader_context(db, owner_id, target_reader_ids or [])
 
     data_text = json.dumps(data, ensure_ascii=False, indent=2)
-    prompt = template.prompt_template.format(
-        data=data_text[:8000],
-        extra_instructions=extra_instructions or "",
-        reader_context=reader_context,
-    )
+    format_kwargs: dict = {
+        "data": data_text[:8000],
+        "extra_instructions": extra_instructions or "",
+        "reader_context": reader_context,
+    }
+    if custom_prompt:
+        format_kwargs["custom_prompt"] = custom_prompt
+    prompt = template_prompt.format(**format_kwargs)
 
     report = Report(
         owner_id=owner_id,
@@ -688,13 +735,14 @@ async def prepare_report_stream(
 async def generate_report_stream(
     db: AsyncSession,
     owner_id: str,
-    template_id: int,
+    template_id: int | None,
     title: str,
     time_start: datetime,
     time_end: datetime,
     data_sources: list[str],
     extra_instructions: str | None = None,
     target_reader_ids: list[str] | None = None,
+    custom_prompt: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """流式生成报告（SSE）— 保留兼容。"""
     if time_start.tzinfo is not None:
@@ -702,20 +750,30 @@ async def generate_report_stream(
     if time_end.tzinfo is not None:
         time_end = time_end.astimezone(timezone.utc).replace(tzinfo=None)
 
-    template = await db.get(ReportTemplate, template_id)
-    if not template:
-        yield json.dumps({"type": "error", "content": "模板不存在"}, ensure_ascii=False)
-        return
+    if custom_prompt:
+        template_prompt = CUSTOM_PROMPT_TEMPLATE
+    else:
+        if not template_id:
+            yield json.dumps({"type": "error", "content": "请选择模板或提供自定义要求"}, ensure_ascii=False)
+            return
+        template = await db.get(ReportTemplate, template_id)
+        if not template:
+            yield json.dumps({"type": "error", "content": "模板不存在"}, ensure_ascii=False)
+            return
+        template_prompt = template.prompt_template
 
     data = await gather_data(db, owner_id, time_start, time_end, data_sources)
     reader_context = await _build_reader_context(db, owner_id, target_reader_ids or [])
 
     data_text = json.dumps(data, ensure_ascii=False, indent=2)
-    prompt = template.prompt_template.format(
-        data=data_text[:8000],
-        extra_instructions=extra_instructions or "",
-        reader_context=reader_context,
-    )
+    format_kwargs: dict = {
+        "data": data_text[:8000],
+        "extra_instructions": extra_instructions or "",
+        "reader_context": reader_context,
+    }
+    if custom_prompt:
+        format_kwargs["custom_prompt"] = custom_prompt
+    prompt = template_prompt.format(**format_kwargs)
 
     report = Report(
         owner_id=owner_id,

@@ -550,3 +550,9 @@
 - **2026-03-15 11:34:35** [其他] `C:/Users/42437/.claude/plans/kind-imagining-harp.md` — 新建文件 `kind-imagining-harp` (73行)
 - **2026-03-16 09:39:40** [数据库迁移] `backend/alembic/versions/a7q8r9s0t1u2_fix_todo_source_type_constraint.py` — 修改逻辑 (+1/-1行)
 - **2026-03-16 09:39:47** [数据库迁移] `backend/alembic/versions/a7q8r9s0t1u2_fix_todo_source_type_constraint.py` — 修改逻辑 (+1/-1行)
+- **2026-03-16 10:03:09** [前端页面] `frontend/src/pages/Chat.tsx` — 添加依赖引用
+- **2026-03-16 10:03:17** [前端页面] `frontend/src/pages/Chat.tsx` — 新增 chatAbortRef
+- **2026-03-16 10:03:27** [前端页面] `frontend/src/pages/Chat.tsx` — 新增 taskLabel, taskId, abortController
+- **2026-03-16 10:03:43** [前端页面] `frontend/src/pages/Chat.tsx` — 修改逻辑 (+20/-5行)
+- **2026-03-16 10:04:10** [前端] `frontend/src/hooks/useTaskProgress.tsx` — 新增 3 行代码
+- **2026-03-16 10:04:17** [前端页面] `frontend/src/pages/Chat.tsx` — 新增 detail, handler
