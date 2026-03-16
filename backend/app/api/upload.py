@@ -7,12 +7,12 @@ import mimetypes
 import os
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, UploadFile, File
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db
+from app.api.deps import get_current_user, get_db, get_visible_owner_ids
 from app.models.document import Document
 from app.models.tag import ContentTag
 from app.models.user import User
@@ -199,20 +199,22 @@ async def upload_communication(
         raise HTTPException(status_code=500, detail=f"音频处理失败: {e}")
 
 
-@router.delete("/file/{doc_id}", summary="删除当前用户上传的文件")
+@router.delete("/file/{doc_id}", summary="删除上传的文件")
 async def delete_uploaded_file(
+    request: Request,
     doc_id: int,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
-    """删除用户自己上传的文件（数据库记录 + 磁盘文件）。"""
-    result = await db.execute(
-        select(Document).where(
-            Document.id == doc_id,
-            Document.owner_id == current_user.feishu_open_id,
-            Document.source_type == "local",
-        )
+    """删除上传的文件（个人模式仅限自己的，管理模式可删任何人的）。"""
+    visible_ids = await get_visible_owner_ids(current_user, db, request)
+    stmt = select(Document).where(
+        Document.id == doc_id,
+        Document.source_type == "local",
     )
+    if visible_ids is not None:
+        stmt = stmt.where(Document.owner_id.in_(visible_ids))
+    result = await db.execute(stmt)
     doc = result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="文件不存在或无权删除")

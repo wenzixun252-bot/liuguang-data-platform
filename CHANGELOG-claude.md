@@ -556,3 +556,4 @@
 - **2026-03-16 10:03:43** [前端页面] `frontend/src/pages/Chat.tsx` — 修改逻辑 (+20/-5行)
 - **2026-03-16 10:04:10** [前端] `frontend/src/hooks/useTaskProgress.tsx` — 新增 3 行代码
 - **2026-03-16 10:04:17** [前端页面] `frontend/src/pages/Chat.tsx` — 新增 detail, handler
+- **2026-03-16 11:37:54** [项目配置] `backend/requirements.txt` — 新增 1 行代码

@@ -187,14 +187,15 @@ async def get_communication(
 
 @router.delete("/{comm_id}", summary="删除沟通记录")
 async def delete_communication(
+    request: Request,
     comm_id: int,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
-    """删除用户自己的沟通记录（仅限 owner 或 admin）。"""
+    """删除沟通记录（个人模式仅限自己的，管理模式可删任何人的）。"""
+    visible_ids = await get_visible_owner_ids(current_user, db, request)
     stmt = select(Communication).where(Communication.id == comm_id)
-    if current_user.role != "admin":
-        stmt = stmt.where(Communication.owner_id == current_user.feishu_open_id)
+    stmt = _apply_visibility(stmt, visible_ids)
     row = (await db.execute(stmt)).scalar_one_or_none()
 
     if not row:
@@ -211,14 +212,15 @@ class BatchDeleteRequest(BaseModel):
 
 @router.post("/batch-delete", summary="批量删除沟通记录")
 async def batch_delete_communications(
+    request: Request,
     body: BatchDeleteRequest,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
-    """批量删除沟通记录（仅限 owner 或 admin）。"""
+    """批量删除沟通记录（个人模式仅限自己的，管理模式可删任何人的）。"""
+    visible_ids = await get_visible_owner_ids(current_user, db, request)
     stmt = select(Communication).where(Communication.id.in_(body.ids))
-    if current_user.role != "admin":
-        stmt = stmt.where(Communication.owner_id == current_user.feishu_open_id)
+    stmt = _apply_visibility(stmt, visible_ids)
     rows = (await db.execute(stmt)).scalars().all()
 
     for row in rows:

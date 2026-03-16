@@ -65,7 +65,9 @@ class FileUploadService:
         original_filename = file.filename or "unknown"
         parsed = {"title": file.filename, "summary": None, "author": None, "tags": [], "category": None}
 
-        if is_image and settings.llm_api_key and not settings.llm_api_key.startswith("sk-xxx"):
+        has_llm = settings.llm_api_key and not settings.llm_api_key.startswith("sk-xxx")
+
+        if is_image and has_llm:
             # 图片文件：用视觉模型识别内容
             try:
                 from app.services.llm import llm_client
@@ -77,9 +79,19 @@ class FileUploadService:
         else:
             # 非图片文件：提取文本后用 LLM 解析
             text_content = self._extract_text(content_bytes, ext)
+
+            # PDF 特殊处理：pypdf 提取为空说明是扫描件/纯图片 PDF，用视觉模型 OCR
+            if ext == "pdf" and not text_content.strip() and has_llm:
+                try:
+                    from app.services.llm import llm_client
+                    logger.info("检测到纯图片 PDF，启动视觉模型 OCR: %s", file.filename)
+                    text_content = await llm_client.ocr_pdf_pages(content_bytes)
+                except Exception as e:
+                    logger.warning("PDF OCR 失败: %s", e)
+
             if not text_content.strip():
                 text_content = f"[{ext} 文件] {file.filename}"
-            if settings.llm_api_key and not settings.llm_api_key.startswith("sk-xxx"):
+            if has_llm:
                 try:
                     from app.services.llm import llm_client
                     parsed = await llm_client.parse_uploaded_file(text_content, ext)

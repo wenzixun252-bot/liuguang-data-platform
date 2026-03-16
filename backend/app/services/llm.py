@@ -494,6 +494,74 @@ class LLMClient:
 
         return {"content_text": "", "title": None, "summary": None, "author": None, "tags": [], "category": None}
 
+    # ── PDF 图片页面 OCR ──────────────────────────────────
+
+    async def ocr_pdf_pages(self, pdf_bytes: bytes, max_pages: int = 20) -> str:
+        """将纯图片 PDF 的每一页转为图片，调用视觉模型 OCR 识别文字。
+
+        Args:
+            pdf_bytes: PDF 文件二进制内容
+            max_pages: 最多处理的页数（避免超长 PDF 耗时过久）
+
+        Returns:
+            所有页面识别出的文字拼接结果
+        """
+        try:
+            import fitz  # pymupdf
+        except ImportError:
+            logger.warning("pymupdf 未安装，无法对图片型 PDF 进行 OCR")
+            return ""
+
+        try:
+            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        except Exception as e:
+            logger.warning("PDF 打开失败: %s", e)
+            return ""
+
+        total_pages = min(len(doc), max_pages)
+        if total_pages == 0:
+            doc.close()
+            return ""
+
+        logger.info("开始 OCR 识别 PDF，共 %d 页（最多处理 %d 页）", len(doc), total_pages)
+
+        page_texts = []
+        for i in range(total_pages):
+            try:
+                page = doc[i]
+                # 渲染为 PNG 图片（150 DPI 平衡清晰度和大小）
+                pix = page.get_pixmap(dpi=150)
+                img_bytes = pix.tobytes("png")
+
+                # 调用视觉模型识别单页
+                b64 = base64.b64encode(img_bytes).decode("utf-8")
+                response = await self.chat_client.chat.completions.create(
+                    model=settings.vision_llm_model,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                                {"type": "text", "text": "请完整提取这张图片中的所有文字内容，保留原始格式和换行。只输出识别到的文字，不要添加任何解释。"},
+                            ],
+                        }
+                    ],
+                    temperature=0.0,
+                    max_tokens=4096,
+                )
+                text = response.choices[0].message.content.strip()
+                if text:
+                    page_texts.append(text)
+                    logger.info("PDF 第 %d/%d 页 OCR 完成，识别 %d 字", i + 1, total_pages, len(text))
+            except Exception as e:
+                logger.warning("PDF 第 %d 页 OCR 失败: %s", i + 1, e)
+
+        doc.close()
+
+        result = "\n\n".join(page_texts)
+        logger.info("PDF OCR 完成，共识别 %d 字", len(result))
+        return result
+
     # ── 智能路由：判断内容入哪张表 ──────────────────────
 
     async def classify_content(

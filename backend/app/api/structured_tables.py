@@ -676,19 +676,19 @@ async def search_rows(
 
 @router.get("/{table_id}", response_model=StructuredTableDetail, summary="表格详情")
 async def get_table(
+    request: Request,
     table_id: int,
     current_user: Annotated[User, Depends(get_current_user)] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ):
-    result = await db.execute(
-        select(StructuredTable).where(
-            StructuredTable.id == table_id,
-            StructuredTable.owner_id == current_user.feishu_open_id,
-        )
-    )
+    visible_ids = await get_visible_owner_ids(current_user, db, request)
+    stmt = select(StructuredTable).where(StructuredTable.id == table_id)
+    if visible_ids is not None:
+        stmt = stmt.where(StructuredTable.owner_id.in_(visible_ids))
+    result = await db.execute(stmt)
     table = result.scalar_one_or_none()
     if not table:
-        raise HTTPException(status_code=404, detail="表格不存在")
+        raise HTTPException(status_code=404, detail="表格不存在或无权访问")
     out = StructuredTableDetail.model_validate(table)
     if table.cleaning_rule_id:
         from app.models.cleaning_rule import CleaningRule
@@ -700,6 +700,7 @@ async def get_table(
 
 @router.get("/{table_id}/rows", response_model=StructuredTableRowListResponse, summary="行数据预览")
 async def get_table_rows(
+    request: Request,
     table_id: int,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -708,14 +709,13 @@ async def get_table_rows(
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ):
     # 校验归属
-    table_result = await db.execute(
-        select(StructuredTable).where(
-            StructuredTable.id == table_id,
-            StructuredTable.owner_id == current_user.feishu_open_id,
-        )
-    )
+    visible_ids = await get_visible_owner_ids(current_user, db, request)
+    chk_stmt = select(StructuredTable).where(StructuredTable.id == table_id)
+    if visible_ids is not None:
+        chk_stmt = chk_stmt.where(StructuredTable.owner_id.in_(visible_ids))
+    table_result = await db.execute(chk_stmt)
     if not table_result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="表格不存在")
+        raise HTTPException(status_code=404, detail="表格不存在或无权访问")
 
     conditions = [StructuredTableRow.table_id == table_id]
     if search:
@@ -742,6 +742,7 @@ async def get_table_rows(
 
 @router.post("/{table_id}/sync", summary="重新同步飞书源")
 async def sync_table(
+    request: Request,
     table_id: int,
     current_user: Annotated[User, Depends(get_current_user)] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
@@ -749,14 +750,13 @@ async def sync_table(
     from app.services.structured_table_import import sync_table as do_sync
 
     # 校验归属
-    table_result = await db.execute(
-        select(StructuredTable).where(
-            StructuredTable.id == table_id,
-            StructuredTable.owner_id == current_user.feishu_open_id,
-        )
-    )
+    visible_ids = await get_visible_owner_ids(current_user, db, request)
+    chk_stmt = select(StructuredTable).where(StructuredTable.id == table_id)
+    if visible_ids is not None:
+        chk_stmt = chk_stmt.where(StructuredTable.owner_id.in_(visible_ids))
+    table_result = await db.execute(chk_stmt)
     if not table_result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="表格不存在")
+        raise HTTPException(status_code=404, detail="表格不存在或无权访问")
 
     try:
         result = await do_sync(db, table_id, user_access_token=current_user.feishu_access_token)
@@ -774,19 +774,19 @@ async def sync_table(
 
 @router.delete("/{table_id}", summary="删除表格")
 async def delete_table(
+    request: Request,
     table_id: int,
     current_user: Annotated[User, Depends(get_current_user)] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ):
-    result = await db.execute(
-        select(StructuredTable).where(
-            StructuredTable.id == table_id,
-            StructuredTable.owner_id == current_user.feishu_open_id,
-        )
-    )
+    visible_ids = await get_visible_owner_ids(current_user, db, request)
+    stmt = select(StructuredTable).where(StructuredTable.id == table_id)
+    if visible_ids is not None:
+        stmt = stmt.where(StructuredTable.owner_id.in_(visible_ids))
+    result = await db.execute(stmt)
     table = result.scalar_one_or_none()
     if not table:
-        raise HTTPException(status_code=404, detail="表格不存在")
+        raise HTTPException(status_code=404, detail="表格不存在或无权删除")
 
     # 清理原始文件
     if table.file_path:
@@ -808,6 +808,7 @@ async def delete_table(
 
 @router.post("/batch-delete", summary="批量删除")
 async def batch_delete_tables(
+    request: Request,
     body: BatchDeleteRequest,
     current_user: Annotated[User, Depends(get_current_user)] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
@@ -815,18 +816,24 @@ async def batch_delete_tables(
     if not body.ids:
         return {"deleted": 0}
 
+    # 先根据 visible_ids 筛出允许删除的表格 ID
+    visible_ids = await get_visible_owner_ids(current_user, db, request)
+    chk_stmt = select(StructuredTable.id).where(StructuredTable.id.in_(body.ids))
+    if visible_ids is not None:
+        chk_stmt = chk_stmt.where(StructuredTable.owner_id.in_(visible_ids))
+    allowed = [row[0] for row in (await db.execute(chk_stmt)).fetchall()]
+    if not allowed:
+        return {"deleted": 0}
+
     # 先删行
     await db.execute(
         delete(StructuredTableRow).where(
-            StructuredTableRow.table_id.in_(body.ids)
+            StructuredTableRow.table_id.in_(allowed)
         )
     )
-    # 再删表（只删自己的）
+    # 再删表
     result = await db.execute(
-        delete(StructuredTable).where(
-            StructuredTable.id.in_(body.ids),
-            StructuredTable.owner_id == current_user.feishu_open_id,
-        )
+        delete(StructuredTable).where(StructuredTable.id.in_(allowed))
     )
     await db.commit()
     return {"deleted": result.rowcount}
@@ -844,21 +851,21 @@ from openpyxl.styles import Font, PatternFill
 
 @router.get("/{table_id}/export", summary="导出为 XLSX 文件")
 async def export_table_xlsx(
+    request: Request,
     table_id: int,
     current_user: Annotated[User, Depends(get_current_user)] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ):
     """导出结构化表格为 Excel 文件。"""
     # 校验归属
-    result = await db.execute(
-        select(StructuredTable).where(
-            StructuredTable.id == table_id,
-            StructuredTable.owner_id == current_user.feishu_open_id,
-        )
-    )
+    visible_ids = await get_visible_owner_ids(current_user, db, request)
+    chk_stmt = select(StructuredTable).where(StructuredTable.id == table_id)
+    if visible_ids is not None:
+        chk_stmt = chk_stmt.where(StructuredTable.owner_id.in_(visible_ids))
+    result = await db.execute(chk_stmt)
     table = result.scalar_one_or_none()
     if not table:
-        raise HTTPException(status_code=404, detail="表格不存在")
+        raise HTTPException(status_code=404, detail="表格不存在或无权访问")
 
     # 获取所有行数据
     rows_result = await db.execute(
@@ -928,6 +935,7 @@ async def export_table_xlsx(
 
 @router.get("/{table_id}/download-original", summary="下载原始上传文件")
 async def download_original_file(
+    request: Request,
     table_id: int,
     current_user: Annotated[User, Depends(get_current_user)] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
@@ -936,15 +944,14 @@ async def download_original_file(
     import os
     from fastapi.responses import FileResponse
 
-    result = await db.execute(
-        select(StructuredTable).where(
-            StructuredTable.id == table_id,
-            StructuredTable.owner_id == current_user.feishu_open_id,
-        )
-    )
+    visible_ids = await get_visible_owner_ids(current_user, db, request)
+    stmt = select(StructuredTable).where(StructuredTable.id == table_id)
+    if visible_ids is not None:
+        stmt = stmt.where(StructuredTable.owner_id.in_(visible_ids))
+    result = await db.execute(stmt)
     table = result.scalar_one_or_none()
     if not table:
-        raise HTTPException(status_code=404, detail="表格不存在")
+        raise HTTPException(status_code=404, detail="表格不存在或无权访问")
     if not table.file_path or not os.path.exists(table.file_path):
         raise HTTPException(status_code=404, detail="原始文件不存在（仅本地上传的表格保留原始文件）")
 

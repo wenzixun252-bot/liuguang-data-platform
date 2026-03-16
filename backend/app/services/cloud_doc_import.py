@@ -351,6 +351,9 @@ class CloudDocImportService:
                 parsed, content_text = await self._parse_image(content_bytes, ext, file_name)
             elif ext:
                 content_text = self._extract_text(content_bytes, ext)
+                # PDF 特殊处理：pypdf 提取为空说明是扫描件，用视觉模型 OCR
+                if ext == "pdf" and not content_text.strip():
+                    content_text = await self._ocr_pdf_fallback(content_bytes, file_name)
                 if not content_text.strip():
                     content_text = f"[{ext} 文件] {file_name}"
                 parsed = await self._llm_parse(content_text, ext)
@@ -359,6 +362,8 @@ class CloudDocImportService:
                 ext = self._guess_extension(content_bytes) or "bin"
                 if ext in EXTRACTABLE_FILE_EXTENSIONS:
                     content_text = self._extract_text(content_bytes, ext)
+                    if ext == "pdf" and not content_text.strip():
+                        content_text = await self._ocr_pdf_fallback(content_bytes, file_name)
                 else:
                     content_text = content_bytes.decode("utf-8", errors="replace")[:10000]
                 if not content_text.strip():
@@ -941,6 +946,9 @@ class CloudDocImportService:
                 _, content_text = await self._parse_image(content_bytes, ext, file_name)
             elif ext in EXTRACTABLE_FILE_EXTENSIONS:
                 content_text = self._extract_text(content_bytes, ext)
+                # PDF 特殊处理：pypdf 提取为空说明是扫描件，用视觉模型 OCR
+                if ext == "pdf" and not content_text.strip():
+                    content_text = await self._ocr_pdf_fallback(content_bytes, file_name)
             else:
                 content_text = content_bytes.decode("utf-8", errors="replace")[:10000]
 
@@ -1341,6 +1349,17 @@ class CloudDocImportService:
                 logger.warning("图片解析失败: %s", e)
 
         return parsed, content_text
+
+    @staticmethod
+    async def _ocr_pdf_fallback(content_bytes: bytes, file_name: str) -> str:
+        """纯图片 PDF 的 OCR 回退：调用视觉模型逐页识别文字。"""
+        try:
+            from app.services.llm import llm_client
+            logger.info("检测到纯图片 PDF，启动视觉模型 OCR: %s", file_name)
+            return await llm_client.ocr_pdf_pages(content_bytes)
+        except Exception as e:
+            logger.warning("PDF OCR 失败: %s", e)
+            return ""
 
     @staticmethod
     def _extract_text(content_bytes: bytes, ext: str) -> str:

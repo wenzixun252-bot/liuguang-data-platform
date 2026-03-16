@@ -302,7 +302,66 @@ class FeishuBotService:
                 task.result_message = result_msg
                 await db.commit()
 
-                # ── Step 4.5: 自动打标签（硬性规定：必须至少一个标签）──
+                # ── Step 4.5a: 应用 LLM 推荐的提取规则 ──
+                logger.info(
+                    "首次入库规则检查: rec_ext_id=%s, record_id=%s, record_type=%s",
+                    rec_ext_id, record_id, record_type,
+                )
+                if rec_ext_id and record_id and record_type in ("document", "communication"):
+                    try:
+                        from app.services.etl.enricher import extract_key_info
+                        content_text = await self._get_full_content(db, record_id, record_type)
+                        logger.info("首次入库提取规则: content_text长度=%d", len(content_text) if content_text else 0)
+                        if content_text:
+                            key_info = await extract_key_info(
+                                content_text, rec_ext_id, db,
+                                title=result_msg,
+                            )
+                            logger.info("首次入库提取规则: extract_key_info 返回=%s", "有结果" if key_info else "None")
+                            if key_info is not None:
+                                from sqlalchemy import text as sql_text
+                                table_name = "documents" if record_type == "document" else "communications"
+                                await db.execute(
+                                    sql_text(
+                                        f"UPDATE {table_name} SET extraction_rule_id = :rule_id, "
+                                        f"key_info = CAST(:key_info AS jsonb) WHERE id = :id"
+                                    ),
+                                    {
+                                        "rule_id": rec_ext_id,
+                                        "key_info": json.dumps(key_info, ensure_ascii=False),
+                                        "id": record_id,
+                                    },
+                                )
+                                await db.commit()
+                                logger.info("首次入库已应用提取规则 id=%d, record=%s/%d", rec_ext_id, record_type, record_id)
+                            else:
+                                logger.warning("首次入库提取规则返回 None (rule_id=%d)", rec_ext_id)
+                        else:
+                            logger.warning("首次入库提取规则跳过: 记录 %s/%s 内容为空", record_type, record_id)
+                    except Exception as e:
+                        logger.error("首次入库应用提取规则失败 (rule_id=%d): %s", rec_ext_id, e, exc_info=True)
+
+                # ── Step 4.5b: 应用 LLM 推荐的清洗规则 ──
+                if rec_cln_id and record_id and record_type == "structured_table":
+                    try:
+                        cln_rule_result = await db.execute(
+                            select(CleaningRule).where(CleaningRule.id == rec_cln_id)
+                        )
+                        cln_rule_obj = cln_rule_result.scalar_one_or_none()
+                        if cln_rule_obj:
+                            from app.services.structured_table_cleaner import apply_cleaning_rule
+                            cln_stats = await apply_cleaning_rule(db, record_id, cln_rule_obj)
+                            if cln_stats and "error" not in cln_stats:
+                                logger.info(
+                                    "首次入库已应用清洗规则 id=%d, table=%d: rows %d→%d, fields %d→%d",
+                                    rec_cln_id, record_id,
+                                    cln_stats.get("rows_before", 0), cln_stats.get("rows_after", 0),
+                                    cln_stats.get("fields_before", 0), cln_stats.get("fields_after", 0),
+                                )
+                    except Exception as e:
+                        logger.warning("首次入库应用清洗规则失败 (rule_id=%d): %s", rec_cln_id, e)
+
+                # ── Step 4.5c: 自动打标签（硬性规定：必须至少一个标签）──
                 if record_id and record_type:
                     try:
                         from app.services.llm import auto_tag_content, _force_apply_other_tag
@@ -476,8 +535,12 @@ class FeishuBotService:
         self, raw: dict, input_type: str, asset_type: str,
         owner_id: str, db: AsyncSession, asset_owner_name: str | None,
         user_access_token: str | None = None,
+        force: bool = False,
     ) -> tuple[str, int | None, str | None]:
         """执行实际入库操作。
+
+        Args:
+            force: 为 True 时强制重新导入（重新入库场景），不跳过已存在的记录。
 
         Returns: (result_msg, record_id, record_type)
         """
@@ -499,6 +562,7 @@ class FeishuBotService:
                 user_access_token=user_access_token,
                 feishu_doc_type=raw.get("feishu_doc_type", "docx"),
                 asset_type=asset_type,
+                force=force,
             )
         elif input_type == "bitable":
             return await self._ingest_bitable(
@@ -621,6 +685,7 @@ class FeishuBotService:
                 result_msg, record_id, record_type = await self._do_ingest(
                     raw, input_type, asset_type, owner_id, db, user.name,
                     user_access_token=user_token,
+                    force=True,  # 重新入库强制重新导入
                 )
 
                 task.ingested_record_id = record_id
@@ -632,15 +697,25 @@ class FeishuBotService:
                 # 应用用户选择的提取规则
                 ext_rule_applied = False
                 ext_rule_name = "未使用"
+                logger.info(
+                    "重新入库规则检查: extraction_rule_id=%s, record_id=%s, record_type=%s",
+                    extraction_rule_id, record_id, record_type,
+                )
                 if extraction_rule_id and record_id and record_type in ("document", "communication"):
                     try:
                         from app.services.etl.enricher import extract_key_info
-                        content_text = await self._get_record_content(db, record_id, record_type)
+                        # 提取规则需要完整内容（不用 _get_record_content，它只返回摘要/前2000字）
+                        content_text = await self._get_full_content(db, record_id, record_type)
+                        logger.info(
+                            "重新入库提取规则: content_text长度=%d",
+                            len(content_text) if content_text else 0,
+                        )
                         if content_text:
                             key_info = await extract_key_info(
                                 content_text, extraction_rule_id, db,
                                 title=result_msg,
                             )
+                            logger.info("重新入库提取规则: extract_key_info 返回=%s", "有结果" if key_info else "None")
                             if key_info is not None:
                                 from sqlalchemy import text as sql_text
                                 table_name = "documents" if record_type == "document" else "communications"
@@ -657,9 +732,20 @@ class FeishuBotService:
                                 )
                                 await db.commit()
                                 ext_rule_applied = True
-                                logger.info("重新入库已应用提取规则 id=%d, record=%s/%d", extraction_rule_id, record_type, record_id)
+                                logger.info("重新入库已应用提取规则 id=%d, record=%s/%d, key_info=%s",
+                                            extraction_rule_id, record_type, record_id,
+                                            json.dumps(key_info, ensure_ascii=False)[:200])
+                            else:
+                                logger.warning("重新入库提取规则返回 None (rule_id=%d), 可能规则无字段定义或 LLM 失败", extraction_rule_id)
+                        else:
+                            logger.warning("重新入库提取规则跳过: 记录 %s/%s 内容为空", record_type, record_id)
                     except Exception as e:
-                        logger.warning("重新入库应用提取规则失败 (rule_id=%d): %s", extraction_rule_id, e)
+                        logger.error("重新入库应用提取规则失败 (rule_id=%d): %s", extraction_rule_id, e, exc_info=True)
+                elif extraction_rule_id:
+                    logger.warning(
+                        "重新入库提取规则条件不满足: extraction_rule_id=%s, record_id=%s, record_type=%s",
+                        extraction_rule_id, record_id, record_type,
+                    )
 
                 # 查找规则名称（用于反馈）
                 if extraction_rule_id:
@@ -670,18 +756,44 @@ class FeishuBotService:
                     if ext_rule_obj:
                         ext_rule_name = ext_rule_obj.name
 
+                # 应用用户选择的清洗规则
+                cln_rule_applied = False
                 cln_rule_name = "未使用"
+                cln_stats = None
                 if cleaning_rule_id:
-                    cln_rule_obj = await db.execute(
+                    cln_rule_result = await db.execute(
                         select(CleaningRule).where(CleaningRule.id == cleaning_rule_id)
                     )
-                    cln_rule_obj = cln_rule_obj.scalar_one_or_none()
+                    cln_rule_obj = cln_rule_result.scalar_one_or_none()
                     if cln_rule_obj:
                         cln_rule_name = cln_rule_obj.name
+                        # 对结构化表格应用清洗
+                        if record_id and record_type == "structured_table":
+                            try:
+                                from app.services.structured_table_cleaner import apply_cleaning_rule
+                                cln_stats = await apply_cleaning_rule(db, record_id, cln_rule_obj)
+                                if cln_stats and "error" not in cln_stats:
+                                    cln_rule_applied = True
+                                    logger.info(
+                                        "重新入库已应用清洗规则 id=%d, table=%d: rows %d→%d, fields %d→%d",
+                                        cleaning_rule_id, record_id,
+                                        cln_stats.get("rows_before", 0), cln_stats.get("rows_after", 0),
+                                        cln_stats.get("fields_before", 0), cln_stats.get("fields_after", 0),
+                                    )
+                            except Exception as e:
+                                logger.warning("重新入库应用清洗规则失败 (rule_id=%d): %s", cleaning_rule_id, e)
 
-                # 自动打标签（硬性规定：必须至少一个标签）
+                # 自动打标签（重新入库：先清理旧标签再重新打）
                 if record_id and record_type:
                     try:
+                        from sqlalchemy import text as sql_text
+                        # 清理该记录的旧标签，确保重新打标签
+                        await db.execute(
+                            sql_text("DELETE FROM content_tags WHERE content_type = :ct AND content_id = :cid"),
+                            {"ct": record_type, "cid": record_id},
+                        )
+                        await db.commit()
+
                         from app.services.llm import auto_tag_content, _force_apply_other_tag
                         content_text = await self._get_record_content(db, record_id, record_type)
                         if not content_text:
@@ -689,8 +801,9 @@ class FeishuBotService:
                         tagged = await auto_tag_content(db, record_id, record_type, content_text[:2000], owner_id)
                         if tagged:
                             await db.commit()
+                            logger.info("重新入库自动打标签成功: %s id=%d, 共 %d 个标签", record_type, record_id, tagged)
                         else:
-                            from sqlalchemy import text as sql_text
+                            # 硬性保底
                             check = await db.execute(
                                 sql_text("SELECT COUNT(*) FROM content_tags WHERE content_type = :ct AND content_id = :cid"),
                                 {"ct": record_type, "cid": record_id},
@@ -726,7 +839,14 @@ class FeishuBotService:
                     else:
                         feedback_parts.append(f"提取规则「{ext_rule_name}」未能应用（内容为空或规则不适用）")
                 if cleaning_rule_id:
-                    feedback_parts.append(f"清洗规则「{cln_rule_name}」已记录")
+                    if cln_rule_applied and cln_stats:
+                        feedback_parts.append(
+                            f"清洗规则「{cln_rule_name}」已应用"
+                            f"（行数 {cln_stats.get('rows_before', '?')}→{cln_stats.get('rows_after', '?')}，"
+                            f"字段数 {cln_stats.get('fields_before', '?')}→{cln_stats.get('fields_after', '?')}）"
+                        )
+                    else:
+                        feedback_parts.append(f"清洗规则「{cln_rule_name}」未能应用（仅支持表格类型数据）")
                 await self._reply_text(open_id, "\n".join(feedback_parts))
             else:
                 await self._reply_text(open_id, f"重新入库失败：{result_msg}")
@@ -765,8 +885,23 @@ class FeishuBotService:
 
     # ── 删除记录 ──────────────────────────────────────────────
 
+    async def _get_full_content(self, db: AsyncSession, record_id: int, record_type: str) -> str:
+        """从数据库读取记录的完整内容文本（用于提取规则，需要完整内容以提取关键信息）。"""
+        try:
+            if record_type == "document":
+                doc = await db.get(Document, record_id)
+                if doc and doc.content_text:
+                    return doc.content_text
+            elif record_type == "communication":
+                comm = await db.get(Communication, record_id)
+                if comm:
+                    return comm.content_text or comm.transcript or ""
+        except Exception as e:
+            logger.warning("读取完整内容失败 (%s id=%d): %s", record_type, record_id, e)
+        return ""
+
     async def _get_record_content(self, db: AsyncSession, record_id: int, record_type: str) -> str:
-        """从数据库读取记录的实际内容文本（用于自动打标）。"""
+        """从数据库读取记录的摘要/简短内容（用于自动打标）。"""
         try:
             if record_type == "document":
                 doc = await db.get(Document, record_id)
@@ -781,7 +916,21 @@ class FeishuBotService:
         return ""
 
     async def _delete_record(self, db: AsyncSession, record_id: int, record_type: str) -> None:
-        """根据类型和 ID 删除入库记录。"""
+        """根据类型和 ID 删除入库记录及其关联的标签。"""
+        # 先删除关联的 content_tags（无外键级联，需手动清理）
+        from sqlalchemy import text as sql_text
+        content_type_map = {
+            "document": "document",
+            "communication": "communication",
+            "structured_table": "structured_table",
+        }
+        ct = content_type_map.get(record_type)
+        if ct:
+            await db.execute(
+                sql_text("DELETE FROM content_tags WHERE content_type = :ct AND content_id = :cid"),
+                {"ct": ct, "cid": record_id},
+            )
+
         if record_type == "document":
             await db.execute(delete(Document).where(Document.id == record_id))
         elif record_type == "communication":
@@ -1205,9 +1354,11 @@ class FeishuBotService:
         self, doc_token: str, owner_id: str, db: AsyncSession,
         asset_owner_name: str | None, user_access_token: str | None = None,
         feishu_doc_type: str = "docx", asset_type: str = "document",
+        force: bool = False,
     ) -> tuple[str, int | None, str | None]:
         """飞书文档入库（支持云文档、知识库、电子表格等）。
         根据 asset_type 决定入库为 document 或 communication。
+        force=True 时强制重新导入，不跳过已存在的记录。
         """
         if not doc_token:
             return "文档 token 为空。", None, None
@@ -1250,7 +1401,7 @@ class FeishuBotService:
                 db=db,
                 user_access_token=user_access_token,
                 asset_owner_name=asset_owner_name,
-                force=False,
+                force=force,
                 source_platform="feishu_bot",
             )
 

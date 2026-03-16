@@ -215,7 +215,6 @@ async def get_document(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> DocumentOut:
     visible_ids = await get_visible_owner_ids(current_user, db, request)
-
     stmt = (
         select(Document, User.name.label("uploader_name"))
         .outerjoin(User, Document.owner_id == User.feishu_open_id)
@@ -241,7 +240,6 @@ async def download_document(
 ) -> FileResponse:
     """下载本地上传的文档文件。"""
     visible_ids = await get_visible_owner_ids(current_user, db, request)
-
     stmt = select(Document).where(Document.id == doc_id)
     stmt = _apply_visibility(stmt, visible_ids)
     row = (await db.execute(stmt)).scalar_one_or_none()
@@ -261,14 +259,15 @@ async def download_document(
 
 @router.delete("/{doc_id}", summary="删除文档")
 async def delete_document(
+    request: Request,
     doc_id: int,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
-    """删除用户自己上传或同步的文档（仅限 owner 或 admin）。"""
+    """删除文档（个人模式仅限自己的，管理模式可删任何人的）。"""
+    visible_ids = await get_visible_owner_ids(current_user, db, request)
     stmt = select(Document).where(Document.id == doc_id)
-    if current_user.role != "admin":
-        stmt = stmt.where(Document.owner_id == current_user.feishu_open_id)
+    stmt = _apply_visibility(stmt, visible_ids)
     row = (await db.execute(stmt)).scalar_one_or_none()
 
     if not row:
@@ -293,14 +292,15 @@ class BatchDeleteRequest(BaseModel):
 
 @router.post("/batch-delete", summary="批量删除文档")
 async def batch_delete_documents(
+    request: Request,
     body: BatchDeleteRequest,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
-    """批量删除文档（仅限 owner 或 admin）。"""
+    """批量删除文档（个人模式仅限自己的，管理模式可删任何人的）。"""
+    visible_ids = await get_visible_owner_ids(current_user, db, request)
     stmt = select(Document).where(Document.id.in_(body.ids))
-    if current_user.role != "admin":
-        stmt = stmt.where(Document.owner_id == current_user.feishu_open_id)
+    stmt = _apply_visibility(stmt, visible_ids)
     rows = (await db.execute(stmt)).scalars().all()
 
     for row in rows:
