@@ -548,3 +548,5 @@
 - **2026-03-14 00:07:23** [项目配置] `backend/.env` — 新增 1 行代码
 - **2026-03-14 00:15:28** [项目配置] `backend/.env` — 修改逻辑 (+1/-1行)
 - **2026-03-15 11:34:35** [其他] `C:/Users/42437/.claude/plans/kind-imagining-harp.md` — 新建文件 `kind-imagining-harp` (73行)
+- **2026-03-16 09:39:40** [数据库迁移] `backend/alembic/versions/a7q8r9s0t1u2_fix_todo_source_type_constraint.py` — 修改逻辑 (+1/-1行)
+- **2026-03-16 09:39:47** [数据库迁移] `backend/alembic/versions/a7q8r9s0t1u2_fix_todo_source_type_constraint.py` — 修改逻辑 (+1/-1行)

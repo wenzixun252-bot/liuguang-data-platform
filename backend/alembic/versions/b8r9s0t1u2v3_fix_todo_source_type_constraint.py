@@ -1,12 +1,12 @@
 """fix todo_items source_type check constraint to allow 'communication'
 
-Revision ID: a7q8r9s0t1u2
+Revision ID: b8r9s0t1u2v3
 Revises: z6p7q8r9s0t1
 Create Date: 2026-03-12 10:00:00.000000
 """
 from alembic import op
 
-revision = "a7q8r9s0t1u2"
+revision = "b8r9s0t1u2v3"
 down_revision = ("z6p7q8r9s0t1", "23d9b40c8e80")
 branch_labels = None
 depends_on = None

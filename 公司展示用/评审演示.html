@@ -71,6 +71,11 @@
     transform: translateX(-40px);
   }
 
+  .slide.exit-right {
+    opacity: 0;
+    transform: translateX(40px);
+  }
+
   /* ====== PAGE INDICATOR ====== */
   .page-indicator {
     position: fixed;
@@ -233,8 +238,8 @@
 
   .story-cards {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 24px;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
     width: 100%;
   }
 
@@ -242,7 +247,7 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 20px;
-    padding: 32px;
+    padding: 24px;
     display: flex;
     flex-direction: column;
     gap: 16px;
@@ -386,7 +391,78 @@
     color: var(--primary-bright);
   }
 
-  /* ====== SLIDE 5: TRANSITION ====== */
+  /* ====== SLIDE: COMPETITIVE ANALYSIS ====== */
+  .compete-slide {
+    align-items: flex-start;
+    gap: 28px;
+  }
+
+  .compete-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+  }
+
+  .compete-table th,
+  .compete-table td {
+    padding: 14px 20px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    font-size: 15px;
+    line-height: 1.5;
+  }
+
+  .compete-table thead th {
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--text-muted);
+    background: rgba(255,255,255,0.03);
+  }
+
+  .compete-table thead th:last-child {
+    background: linear-gradient(135deg, rgba(99,102,241,0.15), rgba(168,85,247,0.15));
+    color: var(--primary-bright);
+  }
+
+  .compete-table td {
+    color: var(--text-muted);
+  }
+
+  .compete-table td:first-child {
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+  }
+
+  .compete-table td:last-child {
+    color: var(--success);
+    font-weight: 600;
+  }
+
+  .compete-table tr:last-child td { border-bottom: none; }
+
+  .compete-summary {
+    font-size: 16px;
+    color: var(--text-muted);
+    text-align: center;
+    padding: 12px 24px;
+    background: rgba(99, 102, 241, 0.08);
+    border: 1px solid rgba(99, 102, 241, 0.15);
+    border-radius: 12px;
+    width: 100%;
+    line-height: 1.6;
+  }
+
+  .compete-summary strong {
+    color: var(--primary-bright);
+    font-weight: 700;
+  }
+
+  /* ====== SLIDE: TRANSITION ====== */
   .transition-slide {
     text-align: center;
     gap: 32px;
@@ -471,12 +547,12 @@
       <div class="pain-row">
         <div class="pain-num">P1</div>
         <div class="pain-text">信息碎片化，检索效率低——文档、会议、聊天散落各处，缺乏统一归档和语义检索</div>
-        <div class="pain-stat red">1.5h/天 翻找</div>
+        <div class="pain-stat red">反复翻找</div>
       </div>
       <div class="pain-row">
         <div class="pain-num">P2</div>
         <div class="pain-text">数据质量差，加工全靠人工——格式不统一、重复冗余、关键信息依赖人工阅读提取</div>
-        <div class="pain-stat yellow">4种行业 各不相同</div>
+        <div class="pain-stat yellow">格式混乱 全靠人工</div>
       </div>
       <div class="pain-row">
         <div class="pain-num">P3</div>
@@ -513,11 +589,11 @@
       <div class="story-card">
         <div class="story-icon green">@</div>
         <div class="story-role">普通员工</div>
-        <div class="story-want">给机器人发消息即归档，<br>事后轻松追溯</div>
+        <div class="story-want">给机器人发消息即归档，<br>随时可检索追溯</div>
         <div class="story-benefit">
-          直接给流光机器人发消息或转发内容，<br>
-          AI自动分类归档，<br>
-          <strong>从此群聊信息不再转瞬即逝</strong>
+          随手转发或发送内容给流光机器人，<br>
+          AI自动分类归档入库，<br>
+          <strong>重要信息一键留存，事后轻松找回</strong>
         </div>
       </div>
       <div class="story-card">
@@ -528,6 +604,16 @@
           "下周三前，李四完成接口文档"<br>
           AI自动识别负责人+截止日期，<br>
           <strong>待办遗漏率从40%降至10%</strong>
+        </div>
+      </div>
+      <div class="story-card">
+        <div class="story-icon purple">&#9881;</div>
+        <div class="story-role">管理员</div>
+        <div class="story-want">一站式汇聚所有员工<br>归档的个人数据</div>
+        <div class="story-benefit">
+          无需逐个收集员工日报/周报，<br>
+          管理员可直接查看团队全部数据，<br>
+          <strong>全面掌控团队动态与项目全貌</strong>
         </div>
       </div>
     </div>
@@ -607,8 +693,76 @@
     </div>
   </div>
 
-  <!-- SLIDE 5: TRANSITION -->
-  <div class="slide transition-slide" data-index="4">
+  <!-- SLIDE 5: COMPETITIVE ANALYSIS -->
+  <div class="slide compete-slide" data-index="4">
+    <h2 class="slide-heading">竞品<span class="accent">分析</span></h2>
+    <table class="compete-table">
+      <thead>
+        <tr>
+          <th>对比维度</th>
+          <th>飞书原生搜索</th>
+          <th>Notion AI</th>
+          <th>流光·办公副驾</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>数据范围</td>
+          <td>仅飞书内单一模块</td>
+          <td>仅Notion内笔记</td>
+          <td>文档+会议+聊天+表格，跨源聚合</td>
+        </tr>
+        <tr>
+          <td>搜索方式</td>
+          <td>关键词精确匹配</td>
+          <td>关键词+AI问答</td>
+          <td>混合检索（语义+关键词+RRF融合）</td>
+        </tr>
+        <tr>
+          <td>知识图谱</td>
+          <td>无</td>
+          <td>无</td>
+          <td>自动构建人物-项目-组织关系图谱</td>
+        </tr>
+        <tr>
+          <td>会议待办</td>
+          <td>需手动记录</td>
+          <td>无</td>
+          <td>AI自动提取待办+负责人+截止日</td>
+        </tr>
+        <tr>
+          <td>数据权限</td>
+          <td>平台级粗粒度</td>
+          <td>工作区级</td>
+          <td>行级权限（RLS），AI回答也经过滤</td>
+        </tr>
+        <tr>
+          <td>报告生成</td>
+          <td>无</td>
+          <td>简单摘要</td>
+          <td>指定范围自动汇总周报/月报</td>
+        </tr>
+        <tr>
+          <td>部署方式</td>
+          <td>SaaS（数据在飞书）</td>
+          <td>SaaS（数据在境外）</td>
+          <td>私有化部署，数据不出企业</td>
+        </tr>
+        <tr>
+          <td>定制性</td>
+          <td>不可定制</td>
+          <td>有限</td>
+          <td>4行业模板 + 8清洗选项 + 自定义ETL</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="compete-summary">
+      核心差异：流光不是"另一个搜索工具"，而是企业级数据中枢——<strong>自动归集 · AI加工 · 权限隔离 · 智能问答</strong>，形成完整闭环
+    </div>
+  </div>
+
+  <!-- SLIDE 6: TRANSITION -->
+  <div class="slide transition-slide" data-index="5">
     <h2 class="transition-main">
       接下来<br>
       按<span class="highlight">用户实际使用流程</span><br>
@@ -660,10 +814,11 @@
   function goTo(idx) {
     if (idx === current || idx < 0 || idx >= total) return;
     const dir = idx > current ? 1 : -1;
-    slides[current].classList.remove('active');
-    slides[current].classList.add(dir > 0 ? 'exit-left' : '');
+    const prev = current;
+    slides[prev].classList.remove('active');
+    slides[prev].classList.add(dir > 0 ? 'exit-left' : 'exit-right');
     setTimeout(() => {
-      slides[current].classList.remove('exit-left');
+      slides[prev].classList.remove('exit-left', 'exit-right');
     }, 500);
     current = idx;
     slides[current].style.transform = dir > 0 ? 'translateX(40px)' : 'translateX(-40px)';
