@@ -16,6 +16,9 @@ export default function TrendWidget({ onClose }: { onClose?: () => void }) {
   const [period, setPeriod] = useState<Period>('30')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [chartReady, setChartReady] = useState(false)
+
+  useEffect(() => { requestAnimationFrame(() => setChartReady(true)) }, [])
 
   const fetch = () => {
     setLoading(true)
@@ -55,7 +58,7 @@ export default function TrendWidget({ onClose }: { onClose?: () => void }) {
         ))}
       </div>
 
-      {filteredTrend.length > 0 ? (
+      {filteredTrend.length > 0 && chartReady ? (
         <ResponsiveContainer width="100%" height={220}>
           <LineChart data={filteredTrend}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
