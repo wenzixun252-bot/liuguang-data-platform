@@ -222,16 +222,16 @@ export default function Communications() {
   const actionsCell = (item: CommunicationItem) => (
     <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
       {item.source_url && (
-        <a href={item.source_url} target="_blank" rel="noopener noreferrer" className="p-1.5 hover:bg-blue-50 rounded text-blue-600" title="跳转源文档">
+        <a href={item.source_url} target="_blank" rel="noopener noreferrer" className="p-1.5 hover:bg-blue-50 rounded-lg text-blue-600" title="跳转源文档">
           <ExternalLink size={14} />
         </a>
       )}
       {item.bitable_url && (
-        <a href={item.bitable_url} target="_blank" rel="noopener noreferrer" className="p-1.5 hover:bg-purple-50 rounded text-purple-600" title="跳转源多维表格">
+        <a href={item.bitable_url} target="_blank" rel="noopener noreferrer" className="p-1.5 hover:bg-purple-50 rounded-lg text-purple-600" title="跳转源多维表格">
           <Table2 size={14} />
         </a>
       )}
-      <button onClick={() => handleDelete(item.id)} className="p-1.5 hover:bg-red-50 rounded text-red-500" title="删除">
+      <button onClick={() => handleDelete(item.id)} className="p-1.5 hover:bg-red-50 rounded-lg text-red-500" title="删除">
         <Trash2 size={14} />
       </button>
     </div>

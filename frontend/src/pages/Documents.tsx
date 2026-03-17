@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
-import { Search, X, Paperclip, ExternalLink, Download, Image, User, Trash2, Table2, Upload } from 'lucide-react'
+import { Search, X, Paperclip, ExternalLink, Download, Image, User, Trash2, Upload } from 'lucide-react'
 import api, { getExtractionRules } from '../lib/api'
 import toast from 'react-hot-toast'
 import { useQuery } from '@tanstack/react-query'
@@ -352,26 +352,21 @@ export default function Documents() {
     {
       key: 'actions',
       label: '操作',
-      width: 120,
-      minWidth: 80,
+      width: 100,
+      minWidth: 70,
       cell: (item) => (
         <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
           {item.source_type === 'local' && (
-            <button onClick={() => handleDownload(item.id, item.title)} className="p-1.5 hover:bg-green-50 rounded text-green-600" title="下载文件">
+            <button onClick={() => handleDownload(item.id, item.title)} className="p-1.5 hover:bg-green-50 rounded-lg text-green-600" title="下载文件">
               <Download size={14} />
             </button>
           )}
           {item.source_url && (
-            <a href={item.source_url} target="_blank" rel="noopener noreferrer" className="p-1.5 hover:bg-blue-50 rounded text-blue-600" title="跳转源文档">
+            <a href={item.source_url} target="_blank" rel="noopener noreferrer" className="p-1.5 hover:bg-blue-50 rounded-lg text-blue-600" title="跳转源文档">
               <ExternalLink size={14} />
             </a>
           )}
-          {item.bitable_url && (
-            <a href={item.bitable_url} target="_blank" rel="noopener noreferrer" className="p-1.5 hover:bg-purple-50 rounded text-purple-600" title="跳转源多维表格">
-              <Table2 size={14} />
-            </a>
-          )}
-          <button onClick={() => handleDelete(item.id)} className="p-1.5 hover:bg-red-50 rounded text-red-500" title="删除">
+          <button onClick={() => handleDelete(item.id)} className="p-1.5 hover:bg-red-50 rounded-lg text-red-500" title="删除">
             <Trash2 size={14} />
           </button>
         </div>

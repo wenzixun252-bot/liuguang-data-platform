@@ -371,11 +371,11 @@ export default function ETLAdmin() {
                       </td>
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-1">
-                          <button onClick={() => handleToggle(s.id, s.is_enabled)} className="p-1 hover:bg-gray-100 rounded" title={s.is_enabled ? '禁用' : '启用'}>
-                            {s.is_enabled ? <ToggleRight size={18} className="text-green-500" /> : <ToggleLeft size={18} className="text-gray-400" />}
+                          <button onClick={() => handleToggle(s.id, s.is_enabled)} className="p-1.5 hover:bg-gray-100 rounded-lg" title={s.is_enabled ? '禁用' : '启用'}>
+                            {s.is_enabled ? <ToggleRight size={14} className="text-green-500" /> : <ToggleLeft size={14} className="text-gray-400" />}
                           </button>
-                          <button onClick={() => handleDelete(s.id, s.table_name)} className="p-1 hover:bg-red-50 rounded text-gray-400 hover:text-red-500" title="删除">
-                            <Trash2 size={16} />
+                          <button onClick={() => handleDelete(s.id, s.table_name)} className="p-1.5 hover:bg-red-50 rounded-lg text-gray-400 hover:text-red-500" title="删除">
+                            <Trash2 size={14} />
                           </button>
                         </div>
                       </td>

@@ -122,6 +122,17 @@ export default function Reports() {
     setPage(1)
   }
 
+  const handleDelete = async (id: number) => {
+    if (!confirm('确定要删除这份报告吗？')) return
+    try {
+      await api.delete(`/reports/${id}`)
+      toast.success('已删除')
+      fetchReports()
+    } catch {
+      toast.error('删除失败')
+    }
+  }
+
   const handleBatchDelete = async () => {
     if (selectedIds.size === 0) return
     if (!confirm(`确定要删除选中的 ${selectedIds.size} 份报告吗？`)) return
@@ -246,22 +257,30 @@ export default function Reports() {
                           {new Date(report.created_at).toLocaleDateString('zh-CN')}
                         </td>
                         <td className="py-3 px-4">
-                          <button
-                            onClick={() => navigate(`/reports/${report.id}`)}
-                            className="text-indigo-600 hover:text-indigo-800 text-sm"
-                          >
-                            查看
-                          </button>
-                          {report.feishu_doc_url && (
-                            <a
-                              href={report.feishu_doc_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="ml-3 text-blue-600 hover:text-blue-800 text-sm"
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => navigate(`/reports/${report.id}`)}
+                              className="text-indigo-600 hover:text-indigo-800 text-sm"
                             >
-                              飞书文档
-                            </a>
-                          )}
+                              查看
+                            </button>
+                            {report.feishu_doc_url && (
+                              <a
+                                href={report.feishu_doc_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-blue-600 hover:text-blue-800 text-sm"
+                              >
+                                飞书文档
+                              </a>
+                            )}
+                            <button
+                              onClick={() => handleDelete(report.id)}
+                              className="text-red-500 hover:text-red-700 text-sm"
+                            >
+                              删除
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     )

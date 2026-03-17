@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import {
   Search, ChevronLeft, ChevronRight, X, Trash2, RefreshCw,
-  ExternalLink, Table2, Download, Upload,
+  ExternalLink, Table2, Download, Upload, Eye,
 } from 'lucide-react'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
@@ -245,26 +245,29 @@ export default function StructuredTables() {
     {
       key: 'actions',
       label: '操作',
-      width: 130,
-      minWidth: 100,
+      width: 150,
+      minWidth: 120,
       cell: (item) => (
         <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+          <button onClick={() => openDetail(item.id)} className="p-1.5 hover:bg-indigo-50 rounded-lg text-indigo-600" title="查看详情">
+            <Eye size={14} />
+          </button>
           {item.source_type === 'local' && (
-            <button onClick={() => handleExport(item.id, item.name)} className="p-1.5 hover:bg-green-50 rounded text-green-600" title="下载 XLSX">
+            <button onClick={() => handleExport(item.id, item.name)} className="p-1.5 hover:bg-green-50 rounded-lg text-green-600" title="下载 XLSX">
               <Download size={14} />
             </button>
           )}
           {item.source_url && (
-            <a href={item.source_url} target="_blank" rel="noopener noreferrer" className="p-1.5 hover:bg-purple-50 rounded text-purple-600" title="跳转源表格">
+            <a href={item.source_url} target="_blank" rel="noopener noreferrer" className="p-1.5 hover:bg-blue-50 rounded-lg text-blue-600" title="跳转源表格">
               <ExternalLink size={14} />
             </a>
           )}
           {item.source_type !== 'local' && (
-            <button onClick={() => handleSync(item.id)} className="p-1.5 hover:bg-blue-50 rounded text-blue-600" title="重新同步">
+            <button onClick={() => handleSync(item.id)} className="p-1.5 hover:bg-blue-50 rounded-lg text-blue-600" title="重新同步">
               <RefreshCw size={14} />
             </button>
           )}
-          <button onClick={() => handleDelete(item.id)} className="p-1.5 hover:bg-red-50 rounded text-red-500" title="删除">
+          <button onClick={() => handleDelete(item.id)} className="p-1.5 hover:bg-red-50 rounded-lg text-red-500" title="删除">
             <Trash2 size={14} />
           </button>
         </div>

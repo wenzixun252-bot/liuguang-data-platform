@@ -362,13 +362,13 @@ export default function DataInsights() {
                                     href={linkUrl}
                                     target="_blank"
                                     rel="noopener noreferrer"
-                                    className="p-1 hover:bg-black/[0.04] rounded transition-colors inline-flex"
+                                    className="p-1.5 hover:bg-black/[0.04] rounded-lg transition-colors inline-flex"
                                     title="查看源文件"
                                   >
                                     <ExternalLink size={14} className="text-indigo-500" />
                                   </a>
                                 ) : (
-                                  <span className="p-1 inline-flex">
+                                  <span className="p-1.5 inline-flex">
                                     <ExternalLink size={14} className="text-gray-300" />
                                   </span>
                                 )}
