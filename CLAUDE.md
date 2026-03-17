@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Workflow Rules
+
+- 每次完成代码修改后，自动帮我 git add、commit 并 push 到远程仓库，不需要额外确认。
+
 ## Project Overview
 
 流光数据中台 (Liuguang Data Platform). An enterprise intelligent data platform that collects multi-source data from Feishu (Lark) ecosystem (Bitable, cloud docs, meetings, chats), processes it through an LLM-powered ETL pipeline with extraction/cleaning rule engines, and stores standardized assets in PostgreSQL with pgvector. Core strengths: 7-step ETL pipeline, 4 industry extraction templates, 7 cleaning options, LLM Schema mapping with MD5 cache. Also provides knowledge graph construction and hybrid RAG search (exploring: AI Q&A, report generation, calendar assistant, smart todos).
