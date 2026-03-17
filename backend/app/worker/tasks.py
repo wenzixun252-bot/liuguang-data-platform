@@ -697,7 +697,7 @@ async def calendar_reminder_job() -> None:
 
     reminded_count = 0
     for pref, user in rows:
-        if not user.feishu_access_token:
+        if not user.feishu_access_token and not user.feishu_refresh_token:
             continue
 
         try:
@@ -706,9 +706,52 @@ async def calendar_reminder_job() -> None:
             window_start = now + timedelta(minutes=max(0, pref.minutes_before - 5))
             window_end = now + timedelta(minutes=pref.minutes_before + 5)
 
-            events = await feishu_client.get_calendar_events(
-                user.feishu_access_token, window_start, window_end,
-            )
+            # 获取日历事件，token 过期时自动刷新
+            access_token = user.feishu_access_token
+            events = None
+            try:
+                if access_token:
+                    events = await feishu_client.get_calendar_events(
+                        access_token, window_start, window_end,
+                    )
+            except FeishuAPIError as e:
+                err_msg = str(e)
+                is_token_error = any(kw in err_msg for kw in ["99991671", "99991668", "99991672", "99991677", "HTTP 401"])
+                if not is_token_error:
+                    raise
+                logger.info("用户 %s 的 access_token 已过期，尝试刷新", user.name)
+                access_token = None
+
+            if events is None and user.feishu_refresh_token:
+                try:
+                    token_data = await feishu_client.refresh_user_access_token(user.feishu_refresh_token)
+                    new_token = token_data["access_token"]
+                    new_refresh = token_data.get("refresh_token", user.feishu_refresh_token)
+                    # 更新数据库中的 token
+                    async with async_session() as db:
+                        result = await db.execute(
+                            select(User).where(User.id == user.id)
+                        )
+                        u = result.scalar_one_or_none()
+                        if u:
+                            old_token = u.feishu_access_token
+                            u.feishu_access_token = new_token
+                            u.feishu_refresh_token = new_refresh
+                            await db.commit()
+                            if old_token:
+                                feishu_client.invalidate_calendar_cache(old_token)
+                    access_token = new_token
+                    events = await feishu_client.get_calendar_events(
+                        access_token, window_start, window_end,
+                    )
+                    logger.info("用户 %s token 刷新成功，获取到 %d 个事件", user.name, len(events))
+                except Exception as refresh_err:
+                    logger.warning("用户 %s token 刷新失败: %s", user.name, refresh_err)
+                    continue
+
+            if events is None:
+                logger.warning("用户 %s 无法获取日历事件（token 无效且无法刷新）", user.name)
+                continue
 
             # 已提醒事件集合（兼容旧字段 + 新字段）
             already_reminded: set[str] = set(pref.reminded_event_ids or [])
