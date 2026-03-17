@@ -74,7 +74,7 @@ export default function App() {
             <Route path="/chat" element={<Chat />} />
             <Route path="/search" element={<SearchPage />} />
             <Route path="/settings" element={<Settings />} />
-            <Route path="/reports" element={<Navigate to="/chat" replace />} />
+            <Route path="/reports" element={<Navigate to="/chat?tab=report" replace />} />
             <Route path="/reports/:id" element={<ReportDetail />} />
             {/* 整合后的重定向路由 */}
             <Route path="/todos" element={<Navigate to="/chat?tab=todos" replace />} />

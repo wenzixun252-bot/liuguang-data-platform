@@ -87,6 +87,16 @@ export default function DataInsights() {
       .finally(() => setStatsLoading(false))
   }, [])
 
+  // Escape 键关闭弹窗
+  useEffect(() => {
+    if (!detailModal) return
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setDetailModal(null)
+    }
+    document.addEventListener('keydown', handleKey)
+    return () => document.removeEventListener('keydown', handleKey)
+  }, [detailModal])
+
   // 弹窗加载数据
   const showDetail = async (card: typeof CARD_CONFIG[0], mode: 'all' | 'today') => {
     setCommTab('meeting')
@@ -185,12 +195,14 @@ export default function DataInsights() {
       </Suspense>
 
       {/* 数据明细弹窗（全量 or 今日新增） */}
-      <AnimatePresence>
+      <AnimatePresence mode="wait">
         {detailModal && (
           <motion.div
+            key="detail-modal-overlay"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
             className="fixed inset-0 bg-black/30 backdrop-blur-sm z-50 flex items-center justify-center"
             onClick={() => setDetailModal(null)}
           >

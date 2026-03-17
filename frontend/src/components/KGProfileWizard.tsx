@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { X, ChevronRight, ChevronLeft, Sparkles, User, Target, Database } from 'lucide-react'
 
 interface KGProfileData {
@@ -88,6 +88,15 @@ export default function KGProfileWizard({ defaultValues, onSubmit, onClose }: Pr
       setInput('')
     }
   }
+
+  // Escape 键关闭弹窗
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', handleKey)
+    return () => document.removeEventListener('keydown', handleKey)
+  }, [onClose])
 
   const canProceed = step < 2
   const isLastStep = step === 2

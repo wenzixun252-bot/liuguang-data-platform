@@ -70,6 +70,16 @@ export default function ImportConfirmModal({
     }
   }, [open])
 
+  // Escape 键关闭弹窗
+  useEffect(() => {
+    if (!open || uploading) return
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', handleKey)
+    return () => document.removeEventListener('keydown', handleKey)
+  }, [open, uploading, onClose])
+
   // 是否显示音频补充信息表单
   const showAudioForm = effectiveCategory === 'communication'
 

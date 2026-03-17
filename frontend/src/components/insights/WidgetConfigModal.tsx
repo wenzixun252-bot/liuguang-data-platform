@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { X, ChevronUp, ChevronDown, RotateCcw } from 'lucide-react'
 import type { WidgetConfig, WidgetId } from '../../hooks/useWidgetConfig'
 
@@ -20,6 +21,14 @@ export default function WidgetConfigModal({
   onReset: () => void
   onClose: () => void
 }) {
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', handleKey)
+    return () => document.removeEventListener('keydown', handleKey)
+  }, [onClose])
+
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onClick={onClose}>
       <div

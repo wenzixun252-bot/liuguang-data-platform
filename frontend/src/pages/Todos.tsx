@@ -62,11 +62,11 @@ interface SourceDetail {
   comm_type: string
   comm_time: string | null
   initiator: string | null
-  participants: string[]
+  participants: (string | { name?: string; open_id?: string })[]
   content_text: string
   summary: string | null
   conclusions: string | null
-  action_items: string[]
+  action_items: (string | Record<string, unknown>)[]
   keywords: string[]
   source_url: string | null
   bitable_url: string | null
@@ -93,6 +93,8 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
     loading: false,
     data: null,
   })
+  const [savingId, setSavingId] = useState<number | null>(null)
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
@@ -128,6 +130,19 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
     fetchTodos()
     setSelected(new Set())
   }, [tab, search, dateFilters, page])
+
+  // Escape 键关闭弹窗
+  useEffect(() => {
+    if (!sourceModal.open && !deleteConfirm) return
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (deleteConfirm) setDeleteConfirm(false)
+        else if (sourceModal.open) setSourceModal({ open: false, loading: false, data: null })
+      }
+    }
+    document.addEventListener('keydown', handleKey)
+    return () => document.removeEventListener('keydown', handleKey)
+  }, [sourceModal.open, deleteConfirm])
 
   const handleExtract = async () => {
     if (extracting) return
@@ -174,6 +189,7 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
   }
 
   const handleSaveEdit = async (id: number) => {
+    setSavingId(id)
     try {
       await api.patch(`/todos/${id}`, { title: editTitle })
       toast.success('已保存')
@@ -181,12 +197,18 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
       fetchTodos()
     } catch {
       toast.error('保存失败')
+    } finally {
+      setSavingId(null)
     }
   }
 
   const handleBatchDelete = async () => {
     if (selected.size === 0) return
-    if (!confirm(`确定要删除选中的 ${selected.size} 条待办吗？`)) return
+    setDeleteConfirm(true)
+  }
+
+  const confirmBatchDelete = async () => {
+    setDeleteConfirm(false)
     try {
       const res = await api.post('/todos/batch-delete', { ids: Array.from(selected) })
       toast.success(`已删除 ${res.data.deleted} 条`)
@@ -381,18 +403,25 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
                       type="text"
                       value={editTitle}
                       onChange={(e) => setEditTitle(e.target.value)}
-                      className="flex-1 border border-gray-200 rounded px-2 py-1 text-sm"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !savingId) handleSaveEdit(item.id)
+                        if (e.key === 'Escape') setEditingId(null)
+                      }}
+                      disabled={savingId === item.id}
+                      className="flex-1 border border-gray-200 rounded px-2 py-1 text-sm disabled:opacity-50"
                       autoFocus
                     />
                     <button
                       onClick={() => handleSaveEdit(item.id)}
-                      className="p-1 text-green-600 hover:bg-green-50 rounded"
+                      disabled={savingId === item.id}
+                      className="p-1 text-green-600 hover:bg-green-50 rounded disabled:opacity-50"
                     >
-                      <Check size={16} />
+                      {savingId === item.id ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
                     </button>
                     <button
                       onClick={() => setEditingId(null)}
-                      className="p-1 text-gray-400 hover:bg-gray-100 rounded"
+                      disabled={savingId === item.id}
+                      className="p-1 text-gray-400 hover:bg-gray-100 rounded disabled:opacity-50"
                     >
                       <X size={16} />
                     </button>
@@ -558,6 +587,30 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
         </div>
       )}
 
+      {/* 删除确认弹窗 */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setDeleteConfirm(false)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 p-6" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-semibold text-gray-800 mb-2">确认删除</h3>
+            <p className="text-sm text-gray-500 mb-5">确定要删除选中的 {selected.size} 条待办吗？此操作不可撤销。</p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setDeleteConfirm(false)}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50"
+              >
+                取消
+              </button>
+              <button
+                onClick={confirmBatchDelete}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700"
+              >
+                确认删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 来源详情弹窗 */}
       {sourceModal.open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setSourceModal({ open: false, loading: false, data: null })}>
@@ -630,7 +683,7 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
                       <div className="flex flex-wrap gap-1.5 mt-1">
                         {sourceModal.data.participants.map((p, i) => (
                           <span key={i} className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full text-xs">
-                            {typeof p === 'string' ? p : JSON.stringify(p)}
+                            {typeof p === 'string' ? p : (p?.name || '未知')}
                           </span>
                         ))}
                       </div>
@@ -658,12 +711,26 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
                     <div>
                       <span className="text-xs font-medium text-gray-400">待办事项</span>
                       <ul className="mt-1 space-y-1">
-                        {sourceModal.data.action_items.map((a, i) => (
-                          <li key={i} className="text-sm text-gray-700 flex items-start gap-1.5">
-                            <span className="text-indigo-400 mt-0.5">•</span>
-                            {typeof a === 'string' ? a : JSON.stringify(a)}
-                          </li>
-                        ))}
+                        {sourceModal.data.action_items.map((a, i) => {
+                          let task = '', assignee = ''
+                          if (typeof a === 'string') {
+                            try {
+                              const parsed = JSON.parse(a)
+                              task = parsed.task || parsed.content || parsed.text || a
+                              assignee = parsed.assignee || ''
+                            } catch { task = a }
+                          } else {
+                            const obj = a as Record<string, unknown>
+                            task = String(obj.task || obj.content || obj.text || JSON.stringify(a))
+                            assignee = String(obj.assignee || '')
+                          }
+                          return (
+                            <li key={i} className="text-sm text-gray-700 flex items-start gap-1.5">
+                              <span className="text-indigo-400 mt-0.5">•</span>
+                              <span>{task}{assignee && <span className="ml-1.5 text-xs text-gray-400">— {assignee}</span>}</span>
+                            </li>
+                          )
+                        })}
                       </ul>
                     </div>
                   )}
