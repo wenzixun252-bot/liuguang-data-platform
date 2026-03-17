@@ -709,6 +709,11 @@ async def calendar_reminder_job() -> None:
                 user.feishu_access_token, window_start, window_end,
             )
 
+            # 已提醒事件集合（兼容旧字段 + 新字段）
+            already_reminded: set[str] = set(pref.reminded_event_ids or [])
+            if pref.last_reminded_event_id:
+                already_reminded.add(pref.last_reminded_event_id)
+
             for event in events:
                 event_id = event.get("event_id", "")
                 if not event_id:
@@ -719,7 +724,7 @@ async def calendar_reminder_job() -> None:
                     continue
 
                 # 跳过已提醒的事件
-                if pref.last_reminded_event_id == event_id:
+                if event_id in already_reminded:
                     continue
 
                 summary = event.get("summary", "无标题会议")
@@ -840,8 +845,9 @@ async def calendar_reminder_job() -> None:
                         content=content,
                     )
                     reminded_count += 1
+                    already_reminded.add(event_id)
 
-                    # 更新提醒记录
+                    # 更新提醒记录：追加到已提醒列表，只保留最近50条
                     async with async_session() as db:
                         result = await db.execute(
                             select(CalendarReminderPref).where(
@@ -850,6 +856,9 @@ async def calendar_reminder_job() -> None:
                         )
                         p = result.scalar_one_or_none()
                         if p:
+                            ids_list = list(p.reminded_event_ids or [])
+                            ids_list.append(event_id)
+                            p.reminded_event_ids = ids_list[-50:]
                             p.last_reminded_event_id = event_id
                             p.last_reminded_at = datetime.now(tz=ZoneInfo("Asia/Shanghai"))
                             await db.commit()
