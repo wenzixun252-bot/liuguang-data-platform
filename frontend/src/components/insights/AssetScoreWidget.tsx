@@ -44,7 +44,10 @@ export default function AssetScoreWidget({ onClose, compact }: { onClose?: () =>
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [buildingKG, setBuildingKG] = useState(false)
+  const [chartReady, setChartReady] = useState(false)
   const navigate = useNavigate()
+
+  useEffect(() => { requestAnimationFrame(() => setChartReady(true)) }, [])
 
   const fetchScore = () => {
     setLoading(true)
@@ -111,7 +114,7 @@ export default function AssetScoreWidget({ onClose, compact }: { onClose?: () =>
 
             {/* Radar chart */}
             <div className={`flex-1 min-w-0 relative ${compact ? 'h-36' : 'h-44'}`}>
-              <div className="absolute inset-0">
+              {chartReady && <div className="absolute inset-0">
               <ResponsiveContainer width="100%" height="100%">
                 <RadarChart data={radarData} cx="50%" cy="50%" outerRadius="75%">
                   <PolarGrid stroke="#e5e7eb" />
@@ -132,7 +135,7 @@ export default function AssetScoreWidget({ onClose, compact }: { onClose?: () =>
                   />
                 </RadarChart>
               </ResponsiveContainer>
-              </div>
+              </div>}
             </div>
           </div>
 
