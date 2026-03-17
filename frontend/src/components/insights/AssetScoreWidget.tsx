@@ -110,8 +110,9 @@ export default function AssetScoreWidget({ onClose, compact }: { onClose?: () =>
             </div>
 
             {/* Radar chart */}
-            <div className={`flex-1 min-w-0 ${compact ? 'h-36' : 'h-44'}`}>
-              <ResponsiveContainer width="100%" height="100%" minWidth={100}>
+            <div className={`flex-1 min-w-0 relative ${compact ? 'h-36' : 'h-44'}`}>
+              <div className="absolute inset-0">
+              <ResponsiveContainer width="100%" height="100%">
                 <RadarChart data={radarData} cx="50%" cy="50%" outerRadius="75%">
                   <PolarGrid stroke="#e5e7eb" />
                   <PolarAngleAxis dataKey="dimension" tick={{ fill: '#6b7280', fontSize: compact ? 10 : 11 }} />
@@ -131,6 +132,7 @@ export default function AssetScoreWidget({ onClose, compact }: { onClose?: () =>
                   />
                 </RadarChart>
               </ResponsiveContainer>
+              </div>
             </div>
           </div>
 
