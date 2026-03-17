@@ -39,7 +39,7 @@ const LEVEL_BG: Record<string, string> = {
   '\u5f85\u63d0\u5347': 'from-red-500 to-red-600',
 }
 
-export default function AssetScoreWidget({ onClose }: { onClose?: () => void }) {
+export default function AssetScoreWidget({ onClose, compact }: { onClose?: () => void; compact?: boolean }) {
   const [data, setData] = useState<AssetScore | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -98,23 +98,23 @@ export default function AssetScoreWidget({ onClose }: { onClose?: () => void }) 
       {data && (
         <div className="space-y-5">
           {/* Score header */}
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-4">
             {/* Big score circle */}
             <div
-              className={`relative flex-shrink-0 w-28 h-28 rounded-full bg-gradient-to-br ${levelGradient} flex items-center justify-center shadow-lg`}
+              className={`relative flex-shrink-0 ${compact ? 'w-20 h-20' : 'w-28 h-28'} rounded-full bg-gradient-to-br ${levelGradient} flex items-center justify-center shadow-lg`}
             >
               <div className="text-center text-white">
-                <div className="text-3xl font-bold leading-none">{data.total_score}</div>
+                <div className={`${compact ? 'text-2xl' : 'text-3xl'} font-bold leading-none`}>{data.total_score}</div>
                 <div className="text-xs opacity-80 mt-1">{data.level}</div>
               </div>
             </div>
 
             {/* Radar chart */}
-            <div className="flex-1 h-44">
-              <ResponsiveContainer width="100%" height="100%">
+            <div className={`flex-1 min-w-0 ${compact ? 'h-36' : 'h-44'}`}>
+              <ResponsiveContainer width="100%" height="100%" minWidth={100}>
                 <RadarChart data={radarData} cx="50%" cy="50%" outerRadius="75%">
                   <PolarGrid stroke="#e5e7eb" />
-                  <PolarAngleAxis dataKey="dimension" tick={{ fill: '#6b7280', fontSize: 11 }} />
+                  <PolarAngleAxis dataKey="dimension" tick={{ fill: '#6b7280', fontSize: compact ? 10 : 11 }} />
                   <PolarRadiusAxis
                     angle={90}
                     domain={[0, 100]}
@@ -135,18 +135,18 @@ export default function AssetScoreWidget({ onClose }: { onClose?: () => void }) 
           </div>
 
           {/* Dimension list */}
-          <div className="space-y-2">
+          <div className={compact ? 'space-y-1' : 'space-y-2'}>
             {data.dimensions.map((dim) => (
               <div
                 key={dim.key}
-                className="flex items-center gap-3 py-2 px-3 rounded-lg hover:bg-gray-50 transition-colors"
+                className={`flex items-center gap-3 ${compact ? 'py-1 px-2' : 'py-2 px-3'} rounded-lg hover:bg-gray-50 transition-colors`}
               >
                 {/* Score bar */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm font-medium text-gray-700">{dim.label}</span>
+                    <span className={`${compact ? 'text-xs' : 'text-sm'} font-medium text-gray-700`}>{dim.label}</span>
                     <span
-                      className={`text-sm font-semibold ${dim.score >= 70 ? 'text-gray-600' : 'text-amber-600'}`}
+                      className={`${compact ? 'text-xs' : 'text-sm'} font-semibold ${dim.score >= 70 ? 'text-gray-600' : 'text-amber-600'}`}
                     >
                       {dim.score}
                     </span>
@@ -165,11 +165,11 @@ export default function AssetScoreWidget({ onClose }: { onClose?: () => void }) 
                       style={{ width: `${dim.score}%` }}
                     />
                   </div>
-                  <p className="text-xs text-gray-400 mt-0.5">{dim.detail}</p>
+                  {!compact && <p className="text-xs text-gray-400 mt-0.5">{dim.detail}</p>}
                 </div>
 
-                {/* Action button */}
-                {dim.action && (
+                {/* Action button — hidden in compact mode */}
+                {!compact && dim.action && (
                   <button
                     onClick={() => handleAction(dim.action!)}
                     disabled={dim.action.route === '__action:build_kg' && buildingKG}

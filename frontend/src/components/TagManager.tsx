@@ -24,22 +24,10 @@ const PRESET_COLORS = ['#6366f1', '#ec4899', '#f59e0b', '#10b981', '#3b82f6', '#
 
 // ---- 标签定义管理面板 ----
 export function TagManagerPanel() {
-  const [tags, setTags] = useState<TagDef[]>([])
-  const [loading, setLoading] = useState(true)
+  const tags = useTagDefs()
   const [showCreate, setShowCreate] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [form, setForm] = useState({ name: '', category: 'custom', color: '#6366f1', is_shared: false })
-
-  const fetchTags = async () => {
-    try {
-      const { data } = await api.get('/tags')
-      setTags(Array.isArray(data) ? data : [])
-    } catch { /* ignore */ } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => { fetchTags() }, [])
 
   const handleCreate = async () => {
     if (!form.name.trim()) return toast.error('请输入标签名')
@@ -48,7 +36,7 @@ export function TagManagerPanel() {
       toast.success('标签已创建')
       setShowCreate(false)
       setForm({ name: '', category: 'custom', color: '#6366f1', is_shared: false })
-      fetchTags()
+      fetchTagCache(true)
     } catch (e: any) {
       toast.error(e.response?.data?.detail || '创建失败')
     }
@@ -59,7 +47,7 @@ export function TagManagerPanel() {
       await api.put(`/tags/${id}`, form)
       toast.success('已更新')
       setEditingId(null)
-      fetchTags()
+      fetchTagCache(true)
     } catch (e: any) {
       toast.error(e.response?.data?.detail || '更新失败')
     }
@@ -70,13 +58,11 @@ export function TagManagerPanel() {
     try {
       await api.delete(`/tags/${id}`)
       toast.success('已删除')
-      fetchTags()
+      fetchTagCache(true)
     } catch (e: any) {
       toast.error(e.response?.data?.detail || '删除失败')
     }
   }
-
-  if (loading) return <div className="text-gray-400 text-sm p-4">加载中...</div>
 
   return (
     <div className="space-y-4">
@@ -210,7 +196,7 @@ export function TagChips({
   editable?: boolean
 }) {
   const [tags, setTags] = useState<ContentTagItem[]>([])
-  const [allTags, setAllTags] = useState<TagDef[]>([])
+  const allTags = useTagDefs()
   const [showPicker, setShowPicker] = useState(false)
   const [search, setSearch] = useState('')
   const [creating, setCreating] = useState(false)
@@ -251,14 +237,10 @@ export function TagChips({
     } catch { /* ignore */ }
   }
 
-  const openPicker = async () => {
-    try {
-      const { data } = await api.get('/tags')
-      setAllTags(data)
-      setShowPicker(true)
-      setSearch('')
-      setTimeout(() => inputRef.current?.focus(), 50)
-    } catch { /* ignore */ }
+  const openPicker = () => {
+    setShowPicker(true)
+    setSearch('')
+    setTimeout(() => inputRef.current?.focus(), 50)
   }
 
   const handleCreate = async () => {
@@ -267,7 +249,7 @@ export function TagChips({
     try {
       const randomColor = PRESET_COLORS[Math.floor(Math.random() * PRESET_COLORS.length)]
       const { data } = await api.post('/tags', { name: search.trim(), category: 'custom', color: randomColor })
-      setAllTags(prev => [...prev, data])
+      addToTagCache(data)
       await handleAttach(data.id)
       setSearch('')
     } catch (e: any) {
@@ -371,11 +353,7 @@ export function TagFilter({
   selectedTagIds: number[]
   onChange: (ids: number[]) => void
 }) {
-  const [allTags, setAllTags] = useState<TagDef[]>([])
-
-  useEffect(() => {
-    api.get('/tags').then(res => setAllTags(Array.isArray(res.data) ? res.data : [])).catch(() => {})
-  }, [])
+  const allTags = useTagDefs()
 
   const toggle = (id: number) => {
     if (selectedTagIds.includes(id)) {
@@ -422,16 +400,12 @@ export function QuickTagSelector({
   onChange: (ids: number[]) => void
   placeholder?: string
 }) {
-  const [allTags, setAllTags] = useState<TagDef[]>([])
+  const allTags = useTagDefs()
   const [search, setSearch] = useState('')
   const [open, setOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    api.get('/tags').then(res => setAllTags(Array.isArray(res.data) ? res.data : [])).catch(() => {})
-  }, [])
 
   useEffect(() => {
     if (!open) return
@@ -457,7 +431,7 @@ export function QuickTagSelector({
     try {
       const randomColor = PRESET_COLORS[Math.floor(Math.random() * PRESET_COLORS.length)]
       const { data } = await api.post('/tags', { name: search.trim(), category: 'custom', color: randomColor })
-      setAllTags(prev => [...prev, data])
+      addToTagCache(data)
       onChange([...selected, data.id])
       setSearch('')
     } catch (e: any) {
@@ -637,16 +611,12 @@ export function TagSelector({
   onChange: (ids: number[]) => void
   placeholder?: string
 }) {
-  const [allTags, setAllTags] = useState<TagDef[]>([])
+  const allTags = useTagDefs()
   const [search, setSearch] = useState('')
   const [open, setOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    api.get('/tags').then(res => setAllTags(Array.isArray(res.data) ? res.data : [])).catch(() => {})
-  }, [])
 
   useEffect(() => {
     if (!open) return
@@ -668,7 +638,7 @@ export function TagSelector({
     try {
       const randomColor = PRESET_COLORS[Math.floor(Math.random() * PRESET_COLORS.length)]
       const { data } = await api.post('/tags', { name: search.trim(), category: 'custom', color: randomColor })
-      setAllTags(prev => [...prev, data])
+      addToTagCache(data)
       onChange([...selected, data.id])
       setSearch('')
     } catch (e: any) {
@@ -845,7 +815,7 @@ export function InlineTagEditor({
   tags: ContentTagItem[]
   onChanged: () => void
 }) {
-  const [allTags, setAllTags] = useState<TagDef[]>([])
+  const allTags = useTagDefs()
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [creating, setCreating] = useState(false)
@@ -853,11 +823,6 @@ export function InlineTagEditor({
   const triggerRef = useRef<HTMLDivElement>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-
-  // 组件挂载时预加载标签（和 TagFilter 同样的可靠模式）
-  useEffect(() => {
-    api.get('/tags').then(res => setAllTags(Array.isArray(res.data) ? res.data : [])).catch(() => {})
-  }, [])
 
   // 点击外部关闭
   useEffect(() => {
@@ -926,7 +891,7 @@ export function InlineTagEditor({
     try {
       const randomColor = PRESET_COLORS[Math.floor(Math.random() * PRESET_COLORS.length)]
       const { data } = await api.post('/tags', { name: search.trim(), category: 'custom', color: randomColor })
-      setAllTags(prev => [...prev, data])
+      addToTagCache(data)
       await handleAttach(data.id)
       setSearch('')
     } catch (e: any) {
