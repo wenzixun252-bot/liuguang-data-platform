@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.database import async_session
 from app.models.asset import ETLSyncState
@@ -735,6 +736,11 @@ async def calendar_reminder_job() -> None:
                     continue
 
                 start_dt = datetime.fromtimestamp(int(start_ts), tz=ZoneInfo("Asia/Shanghai"))
+
+                # 跳过已经开始的会议（会前提醒只对未来的事件有意义）
+                if start_dt <= now:
+                    continue
+
                 time_str = start_dt.strftime("%H:%M")
 
                 location = ""
@@ -859,6 +865,7 @@ async def calendar_reminder_job() -> None:
                             ids_list = list(p.reminded_event_ids or [])
                             ids_list.append(event_id)
                             p.reminded_event_ids = ids_list[-50:]
+                            flag_modified(p, "reminded_event_ids")
                             p.last_reminded_event_id = event_id
                             p.last_reminded_at = datetime.now(tz=ZoneInfo("Asia/Shanghai"))
                             await db.commit()
