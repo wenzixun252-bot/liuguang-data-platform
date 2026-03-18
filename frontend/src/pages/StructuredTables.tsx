@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback, useMemo, lazy, Suspense } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import {
   Search, ChevronLeft, ChevronRight, X, Trash2, RefreshCw,
@@ -12,6 +12,9 @@ import { DateRangeFilter } from '../components/DateRangeFilter'
 import { HighlightText } from '../components/HighlightText'
 import { DataTable, type DataTableColumn, getPersistedDisplayCount } from '../components/DataTable'
 import ArchiverPopover from '../components/ArchiverPopover'
+import ExtractionRuleSlicer from '../components/ExtractionRuleSlicer'
+
+const ExtractionFieldView = lazy(() => import('../components/ExtractionFieldView'))
 
 /* ── 类型定义 ────────────────────────────────── */
 
@@ -88,6 +91,8 @@ export default function StructuredTables() {
   const [tagIds, setTagIds] = useState<number[]>([])
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [refreshKey, setRefreshKey] = useState(0)
+  const [extractionRuleId, setExtractionRuleId] = useState<number | null>(null)
+  const [fieldViewRuleId, setFieldViewRuleId] = useState<number | null>(null)
 
   const detailPageSize = 20 // 穿透搜索和详情面板的分页大小
 
@@ -299,6 +304,7 @@ export default function StructuredTables() {
     const params: Record<string, unknown> = { page: 1, page_size: displayCount }
     if (search) params.search = search
     if (tagIds.length > 0) params.tag_ids = tagIds
+    if (extractionRuleId) params.extraction_rule_id = extractionRuleId
     for (const [key, vals] of Object.entries(columnFilters)) {
       if (vals.length > 0) params[key] = vals.join(',')
     }
@@ -314,9 +320,9 @@ export default function StructuredTables() {
       .then((res) => { setItems(res.data.items); setTotal(res.data.total) })
       .catch(() => toast.error('加载表格列表失败'))
       .finally(() => setLoading(false))
-  }, [displayCount, search, columnFilters, dateFilters, tagIds, refreshKey])
+  }, [displayCount, search, columnFilters, dateFilters, tagIds, extractionRuleId, refreshKey])
 
-  useEffect(() => { setSelectedIds(new Set()) }, [search, columnFilters, dateFilters, tagIds])
+  useEffect(() => { setSelectedIds(new Set()) }, [search, columnFilters, dateFilters, tagIds, extractionRuleId])
 
   useEffect(() => {
     const highlightId = searchParams.get('highlight')
@@ -516,6 +522,13 @@ export default function StructuredTables() {
       {/* 标签切片器 */}
       <TagFilter selectedTagIds={tagIds} onChange={setTagIds} />
 
+      {/* 提取规则切片器 */}
+      <ExtractionRuleSlicer
+        selectedRuleId={extractionRuleId}
+        onSelect={setExtractionRuleId}
+        onViewFields={(id) => setFieldViewRuleId(id)}
+      />
+
       {/* 批量操作栏 */}
       {selectedIds.size > 0 && (
         <div className="flex items-center gap-3 px-4 py-2 bg-indigo-50 border border-indigo-200 rounded-lg flex-wrap">
@@ -573,6 +586,13 @@ export default function StructuredTables() {
           onExport={handleExport}
           onDownloadOriginal={handleDownloadOriginal}
         />
+      )}
+
+      {/* 字段视图 */}
+      {fieldViewRuleId && (
+        <Suspense fallback={null}>
+          <ExtractionFieldView ruleId={fieldViewRuleId} onClose={() => setFieldViewRuleId(null)} />
+        </Suspense>
       )}
     </div>
   )

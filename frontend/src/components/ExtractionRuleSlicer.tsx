@@ -34,9 +34,9 @@ export default function ExtractionRuleSlicer({
       <Sparkles size={13} className="text-violet-400 shrink-0" />
       <span className="text-[11px] text-gray-400 shrink-0 mr-0.5">按提取规则筛选</span>
       <button
-        onClick={() => onSelect(selectedRuleId === -1 ? null : -1)}
+        onClick={() => onSelect(selectedRuleId === -999 ? null : -999)}
         className={`px-2.5 py-0.5 rounded-full text-[11px] font-medium transition-colors border ${
-          selectedRuleId === -1
+          selectedRuleId === -999
             ? 'bg-violet-100 text-violet-700 border-violet-300'
             : 'bg-white text-gray-500 border-gray-200 hover:border-violet-200 hover:text-violet-600'
         }`}
@@ -62,7 +62,7 @@ export default function ExtractionRuleSlicer({
           </button>
         )
       })}
-      {selectedRuleId && selectedRuleId > 0 && (
+      {selectedRuleId && selectedRuleId !== -999 && (
         <button
           onClick={() => onViewFields(selectedRuleId)}
           className="ml-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition-colors flex items-center gap-1"

@@ -90,7 +90,7 @@ async def list_communications(
         count_stmt = count_stmt.where(Communication.initiator.ilike(like))
 
     if extraction_rule_id is not None:
-        if extraction_rule_id == -1:
+        if extraction_rule_id == -999:
             base = base.where(Communication.extraction_rule_id.is_(None))
             count_stmt = count_stmt.where(Communication.extraction_rule_id.is_(None))
         else:

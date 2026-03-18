@@ -520,6 +520,7 @@ async def list_tables(
     table_category: str | None = Query(None),
     asset_owner_name: str | None = Query(None),
     tag_ids: list[int] = Query(default=[]),
+    extraction_rule_id: int | None = Query(None, description="按提取规则ID筛选，-999表示无规则"),
     date_field: str | None = Query(None, description="时间筛选字段: synced_at, created_at, updated_at"),
     date_from: datetime | None = Query(None, description="时间范围开始"),
     date_to: datetime | None = Query(None, description="时间范围结束"),
@@ -537,6 +538,12 @@ async def list_tables(
         conditions.append(StructuredTable.source_type == source_type)
     if table_category:
         conditions.append(StructuredTable.table_category == table_category)
+    if extraction_rule_id is not None:
+        if extraction_rule_id == -999:
+            conditions.append(StructuredTable.extraction_rule_id.is_(None))
+        else:
+            conditions.append(StructuredTable.extraction_rule_id == extraction_rule_id)
+
     if tag_ids:
         subq = select(ContentTag.content_id).where(
             ContentTag.content_type == "structured_table",

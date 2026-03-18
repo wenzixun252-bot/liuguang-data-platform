@@ -98,7 +98,7 @@ async def list_documents(
         count_stmt = count_stmt.where(Document.file_type == file_type)
 
     if extraction_rule_id is not None:
-        if extraction_rule_id == -1:
+        if extraction_rule_id == -999:
             base = base.where(Document.extraction_rule_id.is_(None))
             count_stmt = count_stmt.where(Document.extraction_rule_id.is_(None))
         else:
