@@ -445,11 +445,11 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
                         onClick={() => handleViewSource(item.source_id!)}
                         className="text-xs text-indigo-500 hover:text-indigo-700 hover:underline transition-colors"
                       >
-                        来源: 沟通记录
+                        来源: {item.source_type === 'chat' ? '会话记录' : '会议录音'}
                       </button>
                     ) : (
                       <span className="text-xs text-gray-400">
-                        来源: 沟通记录
+                        来源: {item.source_type === 'chat' ? '会话记录' : '会议录音'}
                       </span>
                     )}
                     {item.source_time && (
