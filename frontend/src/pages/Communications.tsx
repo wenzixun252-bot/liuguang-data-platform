@@ -251,9 +251,9 @@ export default function Communications() {
           <span className="text-gray-800 font-medium truncate">
             <HighlightText text={item.title || '无标题'} keyword={search} />
           </span>
-          {item.extraction_rule_id && rulesMap[item.extraction_rule_id] && (
+          {item.extraction_rule_id && (
             <span className="shrink-0 px-1.5 py-0.5 rounded text-xs bg-violet-50 text-violet-700 border border-violet-200 font-medium">
-              {rulesMap[item.extraction_rule_id]}
+              {rulesMap[item.extraction_rule_id] || '提取规则'}
             </span>
           )}
         </div>

@@ -4,8 +4,9 @@ import {
   Search, ChevronLeft, ChevronRight, X, Trash2, RefreshCw,
   ExternalLink, Table2, Download, Upload, Eye,
 } from 'lucide-react'
-import api from '../lib/api'
+import api, { getExtractionRules } from '../lib/api'
 import toast from 'react-hot-toast'
+import { useQuery } from '@tanstack/react-query'
 import { BatchTagBar, TagChips, useContentTags, InlineTagEditor, TagFilter } from '../components/TagManager'
 import { ColumnFilter } from '../components/ColumnFilter'
 import { DateRangeFilter } from '../components/DateRangeFilter'
@@ -32,6 +33,7 @@ interface StructuredTableItem {
   column_count: number
   import_count: number
   key_info?: Record<string, string> | null
+  extraction_rule_id?: number | null
   cleaning_rule_id?: number | null
   cleaning_rule_name?: string | null
   asset_owner_name: string | null
@@ -93,6 +95,13 @@ export default function StructuredTables() {
   const [refreshKey, setRefreshKey] = useState(0)
   const [extractionRuleId, setExtractionRuleId] = useState<number | null>(null)
   const [fieldViewRuleId, setFieldViewRuleId] = useState<number | null>(null)
+
+  // 提取规则名称映射
+  const { data: rulesList } = useQuery({ queryKey: ['extraction-rules'], queryFn: getExtractionRules })
+  const rulesMap: Record<number, string> = {}
+  if (Array.isArray(rulesList)) {
+    rulesList.forEach((r: any) => { rulesMap[r.id] = r.name })
+  }
 
   const detailPageSize = 20 // 穿透搜索和详情面板的分页大小
 
@@ -160,6 +169,11 @@ export default function StructuredTables() {
           <span className="text-gray-800 font-medium truncate">{item.name}</span>
           {(item.import_count ?? 1) > 1 && (
             <ArchiverPopover contentType="structured_table" contentId={item.id} importCount={item.import_count} />
+          )}
+          {item.extraction_rule_id && (
+            <span className="shrink-0 px-1.5 py-0.5 rounded text-xs bg-violet-50 text-violet-700 border border-violet-200 font-medium">
+              {rulesMap[item.extraction_rule_id] || '提取规则'}
+            </span>
           )}
           {item.cleaning_rule_id ? (
             <span className="shrink-0 px-1.5 py-0.5 rounded text-xs bg-green-50 text-green-600 border border-green-200" title={item.cleaning_rule_name || '已清洗'}>
