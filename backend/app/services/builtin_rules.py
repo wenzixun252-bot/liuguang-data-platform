@@ -49,23 +49,6 @@ BUILTIN_EXTRACTION_RULES = [
     },
     {
         "id": -3,
-        "name": "聊天记录提取",
-        "sectors": [],
-        "fields": [
-            {"key": "topic_summary", "label": "话题摘要", "description": "对话涉及的主要话题概述", "builtin": True, "sector": "custom"},
-            {"key": "key_people", "label": "关键人物", "description": "对话中提到的重要人物及其角色", "builtin": True, "sector": "custom"},
-            {"key": "todo_items", "label": "待办事项", "description": "对话中提到需要跟进的事项", "builtin": True, "sector": "custom"},
-            {"key": "mentioned_projects", "label": "提及的项目/客户", "description": "对话中涉及的项目名或客户名", "builtin": True, "sector": "custom"},
-            {"key": "conclusions", "label": "重要结论", "description": "对话中达成的共识或结论", "builtin": True, "sector": "custom"},
-        ],
-        "prompt_hint": "从多人对话中提炼业务相关信息，忽略寒暄和无关闲聊，聚焦于工作事项和决策。",
-        "is_active": True,
-        "is_builtin": True,
-        "created_at": _BUILTIN_TIME,
-        "updated_at": _BUILTIN_TIME,
-    },
-    {
-        "id": -4,
         "name": "项目报告提取",
         "sectors": [],
         "fields": [
@@ -83,7 +66,7 @@ BUILTIN_EXTRACTION_RULES = [
         "updated_at": _BUILTIN_TIME,
     },
     {
-        "id": -5,
+        "id": -4,
         "name": "商务洽谈提取",
         "sectors": [],
         "fields": [
@@ -98,23 +81,6 @@ BUILTIN_EXTRACTION_RULES = [
             {"key": "follow_up", "label": "后续跟进", "description": "下一步行动计划和跟进时间节点", "builtin": True, "sector": "custom"},
         ],
         "prompt_hint": "以商务谈判视角提取信息，重点关注商机阶段、签约主体、客户信息和谈判进展。注意区分己方和对方的立场。",
-        "is_active": True,
-        "is_builtin": True,
-        "created_at": _BUILTIN_TIME,
-        "updated_at": _BUILTIN_TIME,
-    },
-    {
-        "id": -6,
-        "name": "表格数据提取",
-        "sectors": [],
-        "fields": [
-            {"key": "data_summary", "label": "数据摘要", "description": "表格数据的整体概述和主要内容", "builtin": True, "sector": "custom"},
-            {"key": "key_metrics", "label": "关键指标", "description": "重要的数值指标和统计数据", "builtin": True, "sector": "custom"},
-            {"key": "anomalies", "label": "异常值", "description": "明显偏离正常范围的数据点", "builtin": True, "sector": "custom"},
-            {"key": "trend_analysis", "label": "趋势分析", "description": "数据中可观察到的趋势或规律", "builtin": True, "sector": "custom"},
-            {"key": "data_quality", "label": "数据质量", "description": "缺失值、重复值等数据质量问题", "builtin": True, "sector": "custom"},
-        ],
-        "prompt_hint": "分析表格的整体结构和数据特征，提取关键统计信息和数据洞察，而非逐行提取。",
         "is_active": True,
         "is_builtin": True,
         "created_at": _BUILTIN_TIME,
