@@ -115,6 +115,39 @@ def _level(score: int) -> str:
     return "待提升"
 
 
+def _tier_score(value: float, tiers: list[tuple[float, float, int, int]]) -> int:
+    """阶梯内线性插值。tiers: [(lower, upper, min_score, max_score), ...] 从高到低排列。"""
+    for lower, upper, min_s, max_s in tiers:
+        if value >= lower:
+            if upper <= lower:
+                return max_s
+            ratio = min((value - lower) / (upper - lower), 1.0)
+            return min_s + int(ratio * (max_s - min_s))
+    return 0
+
+
+# 参评的 Communication 类型（排除 chat）
+SCORED_COMM_TYPES = ("meeting", "recording")
+
+# ETL 质量均分阶梯 (子权重 0.4, 满分 40)
+_QUALITY_AVG_TIERS: list[tuple[float, float, int, int]] = [
+    (0.85, 1.0,  36, 40),
+    (0.70, 0.85, 28, 36),
+    (0.50, 0.70, 20, 28),
+    (0.30, 0.50, 12, 20),
+    (0.00, 0.30,  0, 12),
+]
+
+# 高质量内容占比阶梯 (子权重 0.35, 满分 35)
+_HIGH_QUALITY_TIERS: list[tuple[float, float, int, int]] = [
+    (0.70, 1.0,  30, 35),
+    (0.50, 0.70, 22, 30),
+    (0.30, 0.50, 15, 22),
+    (0.10, 0.30,  8, 15),
+    (0.00, 0.10,  0,  8),
+]
+
+
 @router.get("/score", response_model=AssetScoreResponse, summary="个人数据资产评分")
 async def get_asset_score(
     request: Request,
