@@ -129,7 +129,8 @@ async def get_rule_data(
         builtin = get_builtin_extraction_rule(rule_id)
         if not builtin:
             raise HTTPException(404, "规则不存在")
-        rule = type("BuiltinRule", (), builtin)()
+        from types import SimpleNamespace
+        rule = SimpleNamespace(**builtin)
     else:
         result = await db.execute(
             select(ExtractionRule).where(
@@ -245,7 +246,8 @@ async def export_rule_data(
         builtin = get_builtin_extraction_rule(rule_id)
         if not builtin:
             raise HTTPException(404, "规则不存在")
-        rule = type("BuiltinRule", (), builtin)()
+        from types import SimpleNamespace
+        rule = SimpleNamespace(**builtin)
     else:
         result = await db.execute(
             select(ExtractionRule).where(

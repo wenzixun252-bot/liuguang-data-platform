@@ -230,7 +230,8 @@ async def extract_key_info(
         if builtin is None:
             logger.warning("内置提取规则 ID=%d 不存在，跳过关键信息提取", extraction_rule_id)
             return None
-        rule = type("BuiltinRule", (), builtin)()
+        from types import SimpleNamespace
+        rule = SimpleNamespace(**builtin)
     else:
         try:
             from sqlalchemy import select
