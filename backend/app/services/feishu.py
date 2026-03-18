@@ -1118,6 +1118,91 @@ class FeishuClient:
 
         raise last_error or FeishuAPIError("创建飞书任务失败: 未知错误")
 
+    async def delete_task(
+        self,
+        task_id: str,
+        user_access_token: str | None = None,
+    ) -> bool:
+        """删除飞书任务。失败不抛异常，返回 False。"""
+        tokens_to_try = []
+        if user_access_token:
+            tokens_to_try.append(("user", user_access_token))
+        tokens_to_try.append(("tenant", None))
+
+        for token_type, token in tokens_to_try:
+            if token is None:
+                token = await self.get_tenant_access_token()
+            async with self._client() as client:
+                try:
+                    resp = await client.delete(
+                        f"{FEISHU_BASE_URL}/task/v2/tasks/{task_id}",
+                        headers={"Authorization": f"Bearer {token}"},
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    if data.get("code") == 0:
+                        logger.info("已删除飞书任务: %s", task_id)
+                        return True
+                    if token_type == "user":
+                        logger.warning("user_access_token 删除任务失败 (code=%s)，降级到 tenant", data.get("code"))
+                        continue
+                    logger.warning("删除飞书任务 %s 失败: code=%s, msg=%s", task_id, data.get("code"), data.get("msg"))
+                    return False
+                except Exception as e:
+                    if token_type == "user":
+                        logger.warning("user_access_token 删除任务异常，降级到 tenant: %s", e)
+                        continue
+                    logger.warning("删除飞书任务 %s 异常: %s", task_id, e)
+                    return False
+        return False
+
+    async def complete_task(
+        self,
+        task_id: str,
+        user_access_token: str | None = None,
+    ) -> bool:
+        """在飞书端标记任务完成。失败不抛异常，返回 False。"""
+        import time
+        body = {
+            "task": {"completed_at": str(int(time.time()))},
+            "update_fields": ["completed_at"],
+        }
+        tokens_to_try = []
+        if user_access_token:
+            tokens_to_try.append(("user", user_access_token))
+        tokens_to_try.append(("tenant", None))
+
+        for token_type, token in tokens_to_try:
+            if token is None:
+                token = await self.get_tenant_access_token()
+            async with self._client() as client:
+                try:
+                    resp = await client.patch(
+                        f"{FEISHU_BASE_URL}/task/v2/tasks/{task_id}",
+                        headers={
+                            "Authorization": f"Bearer {token}",
+                            "Content-Type": "application/json; charset=utf-8",
+                        },
+                        json=body,
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    if data.get("code") == 0:
+                        logger.info("已标记飞书任务完成: %s", task_id)
+                        return True
+                    if token_type == "user":
+                        logger.warning("user_access_token 完成任务失败 (code=%s)，降级到 tenant", data.get("code"))
+                        continue
+                    logger.warning("标记飞书任务 %s 完成失败: code=%s, msg=%s", task_id, data.get("code"), data.get("msg"))
+                    return False
+                except Exception as e:
+                    if token_type == "user":
+                        logger.warning("user_access_token 完成任务异常，降级到 tenant: %s", e)
+                        continue
+                    logger.warning("标记飞书任务 %s 完成异常: %s", task_id, e)
+                    return False
+        return False
+
     # ── 云文档 API ──────────────────────────────────────────
 
     async def create_document(

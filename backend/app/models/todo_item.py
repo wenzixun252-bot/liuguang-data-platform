@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import CheckConstraint, Float, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -20,7 +20,7 @@ class TodoItem(Base):
             name="ck_todo_source_type",
         ),
         CheckConstraint(
-            "status IN ('pending_review', 'in_progress', 'dismissed', 'completed')",
+            "status IN ('in_progress', 'completed', 'cancelled')",
             name="ck_todo_status",
         ),
         Index("idx_todo_owner", "owner_id"),
@@ -37,10 +37,12 @@ class TodoItem(Base):
     source_id: Mapped[int | None] = mapped_column(Integer)
     source_text: Mapped[str | None] = mapped_column(Text)
     source_time: Mapped[datetime | None] = mapped_column(comment="来源内容的时间（聊天发送时间/会议时间）")
-    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="pending_review")
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="in_progress")
     feishu_task_id: Mapped[str | None] = mapped_column(String(128))
     pushed_at: Mapped[datetime | None] = mapped_column()
     content_hash: Mapped[str | None] = mapped_column(String(64))
     completed_at: Mapped[datetime | None] = mapped_column()
+    cancelled_at: Mapped[datetime | None] = mapped_column()
     created_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(nullable=False, server_default=func.now(), onupdate=func.now())

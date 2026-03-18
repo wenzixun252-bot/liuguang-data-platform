@@ -92,6 +92,10 @@ async def feishu_event_callback(request: Request):
         asyncio.create_task(
             _safe_handle_message(event_data)
         )
+    elif event_type == "task.task.updated_v1":
+        asyncio.create_task(
+            _safe_handle_task_update(payload.get("event", {}))
+        )
     else:
         logger.info("收到非消息事件，忽略: %s", event_type)
 
@@ -104,6 +108,46 @@ async def _safe_handle_message(event_data: dict) -> None:
         await feishu_bot_service.handle_message(event_data)
     except Exception as e:
         logger.error("处理飞书消息事件失败: %s", e, exc_info=True)
+
+
+async def _safe_handle_task_update(event_data: dict) -> None:
+    """处理飞书任务更新事件，同步完成状态到平台。"""
+    try:
+        from datetime import datetime
+        from sqlalchemy import select, and_
+        from app.database import async_session
+        from app.models.todo_item import TodoItem
+        from app.services.feishu import feishu_client
+
+        task_id = event_data.get("task_id") or event_data.get("object", {}).get("task_id", "")
+        if not task_id:
+            logger.warning("飞书任务事件缺少 task_id: %s", event_data)
+            return
+
+        task_data = await feishu_client.get_task_detail(task_id)
+        if not task_data:
+            return
+
+        if not task_data.get("completed_at") or task_data["completed_at"] == "0":
+            return
+
+        async with async_session() as db:
+            result = await db.execute(
+                select(TodoItem).where(
+                    and_(
+                        TodoItem.feishu_task_id == task_id,
+                        TodoItem.status == "in_progress",
+                    )
+                )
+            )
+            todo = result.scalar_one_or_none()
+            if todo:
+                todo.status = "completed"
+                todo.completed_at = datetime.utcnow()
+                await db.commit()
+                logger.info("飞书任务 %s 已完成，待办 #%d 状态已同步", task_id, todo.id)
+    except Exception as e:
+        logger.error("处理飞书任务更新事件失败: %s", e, exc_info=True)
 
 
 # ── 消息卡片回调 ──────────────────────────────────────────────

@@ -225,7 +225,7 @@ async def gather_meeting_context(
             select(TodoItem).where(
                 and_(
                     TodoItem.owner_id == owner_id,
-                    TodoItem.status.in_(["pending_review", "in_progress"]),
+                    TodoItem.status == "in_progress",
                 )
             ).order_by(TodoItem.created_at.desc()).limit(10)
         )

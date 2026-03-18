@@ -22,7 +22,7 @@ from app.schemas.todo import (
     TodoUpdate,
 )
 from app.services.feishu import feishu_client, FeishuAPIError
-from app.services.todo_extractor import extract_and_save
+from app.services.todo_extractor import extract_and_save, auto_push_high_confidence_todos
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +34,7 @@ _extract_tasks: dict[str, dict] = {}
 
 # 允许的状态转换
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
-    "pending_review": {"in_progress", "dismissed"},
-    "in_progress": {"completed"},
+    "in_progress": {"completed", "cancelled"},
 }
 
 
@@ -74,7 +73,7 @@ async def todo_summary(
         select(TodoItem)
         .where(and_(
             TodoItem.owner_id == owner_id,
-            TodoItem.status != "dismissed",
+            TodoItem.status != "cancelled",
         ))
         .order_by(TodoItem.created_at.desc())
         .limit(5)
@@ -93,10 +92,24 @@ async def _run_extract_task(owner_id: str, owner_name: str, days: int) -> None:
         _extract_tasks[owner_id] = {"status": "running", "message": "正在提取待办..."}
         async with async_session() as db:
             items = await extract_and_save(db, owner_id, owner_name, days)
+            # 自动推送高置信度待办到飞书
+            pushed = 0
+            if items:
+                from app.models.user import User
+                result = await db.execute(
+                    select(User).where(User.feishu_open_id == owner_id)
+                )
+                user = result.scalar_one_or_none()
+                user_token = user.feishu_access_token if user else None
+                pushed = await auto_push_high_confidence_todos(db, items, user_token)
+            msg = f"提取完成，共 {len(items)} 条"
+            if pushed:
+                msg += f"，{pushed} 条已自动推送飞书"
             _extract_tasks[owner_id] = {
                 "status": "done",
-                "message": f"提取完成，共 {len(items)} 条",
+                "message": msg,
                 "count": len(items),
+                "pushed": pushed,
             }
     except Exception as e:
         logger.exception("后台待办提取失败: %s", e)
@@ -211,6 +224,14 @@ async def update_todo(
         todo.status = body.status
         if body.status == "completed":
             todo.completed_at = datetime.utcnow()
+            if todo.feishu_task_id:
+                await feishu_client.complete_task(todo.feishu_task_id)
+        elif body.status == "cancelled":
+            todo.cancelled_at = datetime.utcnow()
+            if todo.feishu_task_id:
+                await feishu_client.delete_task(todo.feishu_task_id)
+                todo.feishu_task_id = None
+                todo.pushed_at = None
 
     await db.commit()
     await db.refresh(todo)
@@ -241,6 +262,14 @@ async def batch_status(
             item.status = body.status
             if body.status == "completed":
                 item.completed_at = datetime.utcnow()
+                if item.feishu_task_id:
+                    await feishu_client.complete_task(item.feishu_task_id)
+            elif body.status == "cancelled":
+                item.cancelled_at = datetime.utcnow()
+                if item.feishu_task_id:
+                    await feishu_client.delete_task(item.feishu_task_id)
+                    item.feishu_task_id = None
+                    item.pushed_at = None
             updated.append(item)
 
     await db.commit()
@@ -286,8 +315,8 @@ async def push_to_feishu(
     if not todo or todo.owner_id != current_user.feishu_open_id:
         raise HTTPException(status_code=404, detail="待办不存在")
 
-    if todo.status not in ("pending_review", "in_progress"):
-        raise HTTPException(status_code=400, detail="只能推送待确认或进行中的待办")
+    if todo.status != "in_progress":
+        raise HTTPException(status_code=400, detail="只能推送进行中的待办")
 
     access_token = await _ensure_fresh_token(current_user, db)
 

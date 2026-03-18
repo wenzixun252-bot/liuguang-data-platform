@@ -26,8 +26,10 @@ class TodoOut(BaseModel):
     source_time: UTCDatetimeOpt = None
     status: str
     feishu_task_id: str | None = None
+    confidence: float | None = None
     pushed_at: UTCDatetimeOpt = None
     completed_at: UTCDatetimeOpt = None
+    cancelled_at: UTCDatetimeOpt = None
     created_at: UTCDatetime
     updated_at: UTCDatetime
 

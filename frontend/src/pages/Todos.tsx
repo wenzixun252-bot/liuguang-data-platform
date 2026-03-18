@@ -13,6 +13,7 @@ import {
   Trash2,
   ExternalLink,
   Loader2,
+  AlertTriangle,
 } from 'lucide-react'
 import api from '../lib/api'
 import { DateRangeFilter } from '../components/DateRangeFilter'
@@ -31,8 +32,10 @@ interface TodoItem {
   source_text: string | null
   source_time: string | null
   status: string
+  confidence: number | null
   feishu_task_id: string | null
   pushed_at: string | null
+  cancelled_at: string | null
   created_at: string
   updated_at: string
 }
@@ -44,16 +47,15 @@ const PRIORITY_COLORS = {
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  pending_review: '待确认',
   in_progress: '进行中',
-  dismissed: '已驳回',
   completed: '已完成',
+  cancelled: '已取消',
 }
 
 const TABS = [
-  { key: 'pending_review', label: '待确认' },
   { key: 'in_progress', label: '进行中' },
   { key: 'completed', label: '已完成' },
+  { key: 'cancelled', label: '已取消' },
 ]
 
 interface SourceDetail {
@@ -79,7 +81,7 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
   const [items, setItems] = useState<TodoItem[]>([])
   const [loading, setLoading] = useState(true)
   const [extracting, setExtracting] = useState(false)
-  const [tab, setTab] = useState('pending_review')
+  const [tab, setTab] = useState('in_progress')
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editTitle, setEditTitle] = useState('')
@@ -95,6 +97,7 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
   })
   const [savingId, setSavingId] = useState<number | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
+  const [cancelConfirm, setCancelConfirm] = useState<{ show: boolean; ids: number[] }>({ show: false, ids: [] })
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
@@ -102,7 +105,6 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
     setLoading(true)
     const params: Record<string, unknown> = { status: tab, page_size: PAGE_SIZE, page }
     if (search) params.search = search
-    // 时间筛选
     for (const [field, range] of Object.entries(dateFilters)) {
       if (range.from || range.to) {
         params.date_field = field
@@ -133,16 +135,17 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
 
   // Escape 键关闭弹窗
   useEffect(() => {
-    if (!sourceModal.open && !deleteConfirm) return
+    if (!sourceModal.open && !deleteConfirm && !cancelConfirm.show) return
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (deleteConfirm) setDeleteConfirm(false)
+        if (cancelConfirm.show) setCancelConfirm({ show: false, ids: [] })
+        else if (deleteConfirm) setDeleteConfirm(false)
         else if (sourceModal.open) setSourceModal({ open: false, loading: false, data: null })
       }
     }
     document.addEventListener('keydown', handleKey)
     return () => document.removeEventListener('keydown', handleKey)
-  }, [sourceModal.open, deleteConfirm])
+  }, [sourceModal.open, deleteConfirm, cancelConfirm.show])
 
   const handleExtract = async () => {
     if (extracting) return
@@ -152,22 +155,23 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
     updateTask(taskId, { message: '正在分析数据...' })
     try {
       await api.post('/todos/extract', { days })
-      // 后端是异步任务，需要轮询 extract-status 等待完成
-      const poll = async (): Promise<number> => {
+      const poll = async (): Promise<{ count: number; pushed: number }> => {
         for (let i = 0; i < 120; i++) {
           await new Promise(r => setTimeout(r, 2000))
           const statusRes = await api.get('/todos/extract-status')
           const st = statusRes.data
-          if (st.status === 'done') return st.count ?? 0
+          if (st.status === 'done') return { count: st.count ?? 0, pushed: st.pushed ?? 0 }
           if (st.status === 'error') throw new Error(st.message || '提取失败')
           updateTask(taskId, { message: st.message || '提取中...' })
         }
         throw new Error('提取超时')
       }
-      const count = await poll()
-      updateTask(taskId, { status: 'done', progress: 100, message: `提取到 ${count} 条` })
-      toast.success(`提取到 ${count} 条待办`)
-      setTab('pending_review')
+      const { count, pushed } = await poll()
+      let msg = `提取到 ${count} 条待办`
+      if (pushed > 0) msg += `，${pushed} 条已自动推送飞书`
+      updateTask(taskId, { status: 'done', progress: 100, message: msg })
+      toast.success(msg)
+      setTab('in_progress')
       fetchTodos()
     } catch (err: any) {
       const detail = err?.response?.data?.detail || err?.message || '未知错误'
@@ -231,6 +235,32 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
     }
   }
 
+  const handleCancelSingle = (id: number) => {
+    setCancelConfirm({ show: true, ids: [id] })
+  }
+
+  const handleBatchCancel = () => {
+    if (selected.size === 0) return
+    setCancelConfirm({ show: true, ids: Array.from(selected) })
+  }
+
+  const confirmCancel = async () => {
+    const ids = cancelConfirm.ids
+    setCancelConfirm({ show: false, ids: [] })
+    try {
+      if (ids.length === 1) {
+        await api.patch(`/todos/${ids[0]}`, { status: 'cancelled' })
+      } else {
+        await api.post('/todos/batch-status', { ids, status: 'cancelled' })
+      }
+      toast.success(`已取消 ${ids.length} 条待办`)
+      setSelected(new Set())
+      fetchTodos()
+    } catch {
+      toast.error('取消操作失败')
+    }
+  }
+
   const handlePushSingle = async (id: number) => {
     try {
       await api.post(`/todos/${id}/push-feishu`)
@@ -276,6 +306,9 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
     })
     setPage(1)
   }
+
+  // 检查取消确认弹窗中是否有已推送飞书的待办
+  const cancelHasFeishuItems = cancelConfirm.ids.some(id => items.find(i => i.id === id)?.feishu_task_id)
 
   return (
     <div className="space-y-4">
@@ -354,14 +387,23 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
           {selected.size > 0 && (
             <>
               <span className="text-sm text-gray-400">已选 {selected.size} 条</span>
-              {tab === 'pending_review' && (
-                <button
-                  onClick={() => handleBatchStatus('in_progress')}
-                  className="flex items-center gap-1 px-3 py-1.5 bg-green-50 text-green-700 rounded-lg hover:bg-green-100 text-sm"
-                >
-                  <CheckCircle size={14} />
-                  批量确认
-                </button>
+              {tab === 'in_progress' && (
+                <>
+                  <button
+                    onClick={() => handleBatchStatus('completed')}
+                    className="flex items-center gap-1 px-3 py-1.5 bg-green-50 text-green-700 rounded-lg hover:bg-green-100 text-sm"
+                  >
+                    <CheckCircle size={14} />
+                    批量完成
+                  </button>
+                  <button
+                    onClick={handleBatchCancel}
+                    className="flex items-center gap-1 px-3 py-1.5 bg-gray-50 text-gray-600 rounded-lg hover:bg-gray-100 text-sm"
+                  >
+                    <X size={14} />
+                    批量取消
+                  </button>
+                </>
               )}
               <button
                 onClick={handleBatchDelete}
@@ -427,7 +469,14 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
                     </button>
                   </div>
                 ) : (
-                  <p className="text-sm font-medium text-gray-800">{item.title}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium text-gray-800">{item.title}</p>
+                    {tab === 'in_progress' && !item.feishu_task_id && (item.confidence ?? 0) < 0.7 && (
+                      <span className="px-1.5 py-0.5 bg-orange-100 text-orange-600 rounded text-[10px] font-medium shrink-0">
+                        AI 建议
+                      </span>
+                    )}
+                  </div>
                 )}
 
                 {item.description && (
@@ -479,19 +528,19 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
 
               {/* Actions */}
               <div className="flex items-center gap-1 shrink-0">
-                {tab === 'pending_review' && (
+                {tab === 'in_progress' && (
                   <>
                     <button
-                      onClick={() => handleUpdateStatus(item.id, 'in_progress')}
+                      onClick={() => handleUpdateStatus(item.id, 'completed')}
                       className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg"
-                      title="确认"
+                      title="标记完成"
                     >
                       <CheckCircle size={16} />
                     </button>
                     <button
-                      onClick={() => handleUpdateStatus(item.id, 'dismissed')}
+                      onClick={() => handleCancelSingle(item.id)}
                       className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-lg"
-                      title="驳回"
+                      title="取消"
                     >
                       <X size={16} />
                     </button>
@@ -504,24 +553,6 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
                       title="编辑"
                     >
                       <Edit3 size={16} />
-                    </button>
-                    <button
-                      onClick={() => handlePushSingle(item.id)}
-                      className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg"
-                      title="推送到飞书"
-                    >
-                      <Send size={16} />
-                    </button>
-                  </>
-                )}
-                {tab === 'in_progress' && (
-                  <>
-                    <button
-                      onClick={() => handleUpdateStatus(item.id, 'completed')}
-                      className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg"
-                      title="标记完成"
-                    >
-                      <CheckCircle size={16} />
                     </button>
                     {!item.feishu_task_id && (
                       <button
@@ -605,6 +636,38 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
                 className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700"
               >
                 确认删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 取消确认弹窗 */}
+      {cancelConfirm.show && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setCancelConfirm({ show: false, ids: [] })}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 p-6" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-semibold text-gray-800 mb-2">确认取消待办</h3>
+            <p className="text-sm text-gray-500 mb-3">
+              确定要取消{cancelConfirm.ids.length > 1 ? `选中的 ${cancelConfirm.ids.length} 条` : '这条'}待办吗？
+            </p>
+            {cancelHasFeishuItems && (
+              <div className="flex items-start gap-2 p-3 mb-3 bg-red-50 rounded-lg">
+                <AlertTriangle size={16} className="text-red-500 shrink-0 mt-0.5" />
+                <p className="text-xs text-red-600">已推送到飞书的任务将被同步删除</p>
+              </div>
+            )}
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setCancelConfirm({ show: false, ids: [] })}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50"
+              >
+                返回
+              </button>
+              <button
+                onClick={confirmCancel}
+                className="px-4 py-2 text-sm font-medium text-white bg-gray-600 rounded-lg hover:bg-gray-700"
+              >
+                确认取消
               </button>
             </div>
           </div>

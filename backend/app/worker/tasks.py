@@ -506,9 +506,9 @@ async def cloud_folder_sync_job() -> None:
 
 
 async def todo_extract_job() -> None:
-    """定时任务：为所有活跃用户自动提取待办（去重）。"""
+    """定时任务：为所有活跃用户自动提取待办（去重），高置信度自动推送飞书。"""
     from app.models.user import User
-    from app.services.todo_extractor import extract_and_save
+    from app.services.todo_extractor import extract_and_save, auto_push_high_confidence_todos
 
     logger.info("待办自动提取任务开始")
 
@@ -520,6 +520,7 @@ async def todo_extract_job() -> None:
         users = result.scalars().all()
 
     total_extracted = 0
+    total_pushed = 0
     for user in users:
         try:
             async with async_session() as db:
@@ -527,10 +528,14 @@ async def todo_extract_job() -> None:
                 total_extracted += len(items)
                 if items:
                     logger.info("用户 %s 自动提取 %d 条待办", user.name, len(items))
+                    pushed = await auto_push_high_confidence_todos(db, items, user.feishu_access_token)
+                    total_pushed += pushed
+                    if pushed:
+                        logger.info("用户 %s 自动推送 %d 条待办到飞书", user.name, pushed)
         except Exception as e:
             logger.warning("用户 %s 待办提取失败: %s", user.feishu_open_id, e)
 
-    logger.info("待办自动提取完成，共提取 %d 条", total_extracted)
+    logger.info("待办自动提取完成，共提取 %d 条，推送飞书 %d 条", total_extracted, total_pushed)
 
 
 async def todo_sync_status_job() -> None:
