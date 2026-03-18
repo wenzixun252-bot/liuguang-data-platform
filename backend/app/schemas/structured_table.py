@@ -67,6 +67,7 @@ class StructuredTableDetail(BaseModel):
     quality_score: float | None = None
     duplicate_of: int | None = None
     extra_fields: dict = {}
+    sheet_names: list[str] | None = None
     asset_owner_name: str | None = None
     parse_status: str = "done"
     processed_at: UTCDatetimeOpt = None
@@ -81,6 +82,7 @@ class StructuredTableRowOut(BaseModel):
     """单行输出。"""
     id: int
     row_index: int
+    sheet_name: str | None = None
     row_data: dict
 
     model_config = {"from_attributes": True}

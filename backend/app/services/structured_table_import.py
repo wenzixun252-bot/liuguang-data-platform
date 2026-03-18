@@ -399,40 +399,52 @@ async def import_from_spreadsheet(
     return table_obj
 
 
+def _deduplicate_headers(headers: list[str]) -> list[str]:
+    """处理重复列名：加序号后缀。"""
+    seen: dict[str, int] = {}
+    unique: list[str] = []
+    for h in headers:
+        if h in seen:
+            seen[h] += 1
+            unique.append(f"{h}_{seen[h]}")
+        else:
+            seen[h] = 0
+            unique.append(h)
+    return unique
+
+
 async def import_from_local_file(
     db: AsyncSession,
     owner_id: str,
     file_name: str,
     file_content: bytes,
 ) -> StructuredTable:
-    """从本地 CSV/Excel 文件导入。"""
+    """从本地 CSV/Excel 文件导入。支持多 sheet Excel。"""
     lower_name = file_name.lower()
 
     if lower_name.endswith(".csv"):
-        headers, data_rows = _parse_csv(file_content)
+        parsed = _parse_csv(file_content)
     elif lower_name.endswith(".tsv"):
-        headers, data_rows = _parse_csv(file_content, delimiter="\t")
+        parsed = _parse_csv(file_content, delimiter="\t")
     elif lower_name.endswith(".xlsx"):
-        headers, data_rows = _parse_excel_xlsx(file_content)
+        parsed = _parse_excel_xlsx(file_content)
     elif lower_name.endswith(".xls"):
-        headers, data_rows = _parse_excel_xls(file_content)
+        parsed = _parse_excel_xls(file_content)
     else:
         raise ValueError(f"不支持的文件格式: {file_name}，请上传 .csv / .tsv / .xlsx / .xls 文件")
 
-    if not headers:
+    # 统一为 sheets 格式: [(sheet_name, headers, data_rows), ...]
+    if isinstance(parsed, list) and len(parsed) > 0 and isinstance(parsed[0], tuple) and len(parsed[0]) == 3:
+        # 多 sheet 返回格式
+        sheets = parsed
+    elif isinstance(parsed, tuple) and len(parsed) == 2:
+        # 单 sheet 返回格式 (headers, data_rows)
+        sheets = [(None, parsed[0], parsed[1])]
+    else:
         raise ValueError("文件为空或无法解析列名")
 
-    # 处理重复列名：加序号后缀
-    seen: dict[str, int] = {}
-    unique_headers: list[str] = []
-    for h in headers:
-        if h in seen:
-            seen[h] += 1
-            unique_headers.append(f"{h}_{seen[h]}")
-        else:
-            seen[h] = 0
-            unique_headers.append(h)
-    headers = unique_headers
+    if not sheets or not sheets[0][1]:
+        raise ValueError("文件为空或无法解析列名")
 
     # 保存原始文件到磁盘
     ext = Path(file_name).suffix
@@ -442,10 +454,31 @@ async def import_from_local_file(
     with open(saved_path, "wb") as f:
         f.write(file_content)
 
-    schema_info = [
-        {"field_id": f"col_{i}", "field_name": h, "field_type": "text"}
-        for i, h in enumerate(headers)
-    ]
+    # 构建多 sheet 的 schema_info：每个 sheet 独立的列定义
+    is_multi_sheet = len(sheets) > 1
+    sheet_names_list = [s[0] for s in sheets] if is_multi_sheet else None
+
+    # schema_info 结构：多 sheet 时用 dict 按 sheet 名索引，单 sheet 保持原格式
+    if is_multi_sheet:
+        schema_info = {
+            "__sheets__": {
+                name: [
+                    {"field_id": f"col_{i}", "field_name": h, "field_type": "text"}
+                    for i, h in enumerate(_deduplicate_headers(headers))
+                ]
+                for name, headers, _ in sheets
+            }
+        }
+        # 用第一个 sheet 的列数作为 column_count
+        total_rows = sum(len(rows) for _, _, rows in sheets)
+        first_headers = _deduplicate_headers(sheets[0][1])
+    else:
+        first_headers = _deduplicate_headers(sheets[0][1])
+        schema_info = [
+            {"field_id": f"col_{i}", "field_name": h, "field_type": "text"}
+            for i, h in enumerate(first_headers)
+        ]
+        total_rows = len(sheets[0][2])
 
     table_obj = StructuredTable(
         owner_id=owner_id,
@@ -454,35 +487,50 @@ async def import_from_local_file(
         file_name=file_name,
         file_path=saved_path,
         schema_info=schema_info,
-        row_count=len(data_rows),
-        column_count=len(headers),
+        row_count=total_rows,
+        column_count=len(first_headers),
         synced_at=datetime.utcnow(),
     )
+    if is_multi_sheet:
+        table_obj.extra_fields = {"sheet_names": sheet_names_list}
     db.add(table_obj)
     await db.flush()
 
-    row_dicts: list[dict] = []
-    for idx, row in enumerate(data_rows):
-        row_data = {}
-        for col_idx, header in enumerate(headers):
-            val = row[col_idx] if col_idx < len(row) else None
-            row_data[header] = str(val) if val is not None else None
+    all_row_dicts: list[dict] = []
+    for sheet_name, headers, data_rows in sheets:
+        unique_headers = _deduplicate_headers(headers)
+        for idx, row in enumerate(data_rows):
+            row_data = {}
+            for col_idx, header in enumerate(unique_headers):
+                val = row[col_idx] if col_idx < len(row) else None
+                row_data[header] = str(val) if val is not None else None
 
-        row_dicts.append(row_data)
-        db.add(StructuredTableRow(
-            table_id=table_obj.id,
-            row_index=idx,
-            row_data=row_data,
-            row_text=build_row_text(row_data),
-        ))
+            all_row_dicts.append(row_data)
+            db.add(StructuredTableRow(
+                table_id=table_obj.id,
+                sheet_name=sheet_name,
+                row_index=idx,
+                row_data=row_data,
+                row_text=build_row_text(row_data),
+            ))
 
-    # 生成 content_text（前50行拼接文本，供提取规则和 RAG 使用）
+    # 生成 content_text（每个 sheet 取前若干行，标注 sheet 名）
     text_rows = []
-    for rd in row_dicts[:50]:
-        text_rows.append(" | ".join(f"{k}: {v}" for k, v in rd.items() if v))
+    for sheet_name, headers, data_rows in sheets:
+        unique_headers = _deduplicate_headers(headers)
+        if is_multi_sheet and sheet_name:
+            text_rows.append(f"[Sheet: {sheet_name}]")
+        sample_count = max(10, 50 // len(sheets)) if is_multi_sheet else 50
+        for row in data_rows[:sample_count]:
+            row_data = {}
+            for col_idx, header in enumerate(unique_headers):
+                val = row[col_idx] if col_idx < len(row) else None
+                if val is not None:
+                    row_data[header] = str(val)
+            text_rows.append(" | ".join(f"{k}: {v}" for k, v in row_data.items() if v))
     table_obj.content_text = "\n".join(text_rows)
 
-    summary, display_name = await _generate_summary_and_name(row_dicts, file_name)
+    summary, display_name = await _generate_summary_and_name(all_row_dicts, file_name)
     table_obj.summary = summary
     if display_name != file_name:
         table_obj.name = display_name
@@ -515,51 +563,72 @@ def _parse_csv(content: bytes, delimiter: str = ",") -> tuple[list[str], list[li
     return headers, data_rows
 
 
-def _parse_excel_xlsx(content: bytes) -> tuple[list[str], list[list]]:
-    """解析 .xlsx 文件（Excel 2007+），返回 (列名列表, 数据行列表)。
+def _parse_excel_xlsx(content: bytes) -> tuple[list[str], list[list]] | list[tuple[str, list[str], list[list]]]:
+    """解析 .xlsx 文件（Excel 2007+）。
 
     智能处理：
     - 自动检测表头行（跳过标题、公司信息等合并行）
     - 处理合并单元格（填充合并区域的值）
-    - 多工作表时读取第一个 sheet
+    - 支持多 sheet：当有多个 sheet 时返回所有 sheet 数据
+
+    返回值：
+    - 单 sheet 时：(headers, data_rows) 保持向后兼容
+    - 多 sheet 时：[(sheet_name, headers, data_rows), ...]
     """
     import openpyxl
 
-    # 不用 read_only 模式，以便读取合并单元格信息
     wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
-    ws = wb.active
-    if ws is None:
+    sheet_names = wb.sheetnames
+
+    if not sheet_names:
         wb.close()
         return [], []
 
-    # 1. 填充合并单元格的值（让合并区域内所有格子都有值）
-    merge_ranges = list(ws.merged_cells.ranges)
-    for mr in merge_ranges:
-        top_left_value = ws.cell(mr.min_row, mr.min_col).value
-        ws.unmerge_cells(str(mr))
-        for row in range(mr.min_row, mr.max_row + 1):
-            for col in range(mr.min_col, mr.max_col + 1):
-                ws.cell(row=row, column=col, value=top_left_value)
+    def _parse_one_sheet(ws):
+        """解析单个 sheet，返回 (headers, data_rows)。"""
+        # 填充合并单元格
+        merge_ranges = list(ws.merged_cells.ranges)
+        for mr in merge_ranges:
+            top_left_value = ws.cell(mr.min_row, mr.min_col).value
+            ws.unmerge_cells(str(mr))
+            for row in range(mr.min_row, mr.max_row + 1):
+                for col in range(mr.min_col, mr.max_col + 1):
+                    ws.cell(row=row, column=col, value=top_left_value)
 
-    # 2. 读取所有行
-    all_rows = []
-    for row in ws.iter_rows(values_only=True):
-        all_rows.append(list(row))
+        all_rows = []
+        for row in ws.iter_rows(values_only=True):
+            all_rows.append(list(row))
+
+        if not all_rows:
+            return [], []
+
+        header_idx = _detect_header_row(all_rows)
+        headers = [str(h).strip() if h is not None else f"列{i+1}" for i, h in enumerate(all_rows[header_idx])]
+        data_rows = [list(row) for row in all_rows[header_idx + 1:]]
+        data_rows = [r for r in data_rows if any(v is not None and str(v).strip() != "" for v in r)]
+        return headers, data_rows
+
+    # 单 sheet 保持向后兼容
+    if len(sheet_names) == 1:
+        ws = wb[sheet_names[0]]
+        headers, data_rows = _parse_one_sheet(ws)
+        wb.close()
+        return headers, data_rows
+
+    # 多 sheet：返回列表
+    sheets_data = []
+    for name in sheet_names:
+        ws = wb[name]
+        headers, data_rows = _parse_one_sheet(ws)
+        if headers:  # 跳过空 sheet
+            sheets_data.append((name, headers, data_rows))
     wb.close()
 
-    if not all_rows:
+    if not sheets_data:
         return [], []
-
-    # 3. 智能检测表头行：找到第一个「多数格有值且无明显合并标题」的行
-    header_idx = _detect_header_row(all_rows)
-
-    headers = [str(h).strip() if h is not None else f"列{i+1}" for i, h in enumerate(all_rows[header_idx])]
-    data_rows = [list(row) for row in all_rows[header_idx + 1:]]
-
-    # 4. 过滤掉全空行
-    data_rows = [r for r in data_rows if any(v is not None and str(v).strip() != "" for v in r)]
-
-    return headers, data_rows
+    if len(sheets_data) == 1:
+        return sheets_data[0][1], sheets_data[0][2]
+    return sheets_data
 
 
 def _detect_header_row(rows: list[list], max_scan: int = 10) -> int:
@@ -594,28 +663,45 @@ def _detect_header_row(rows: list[list], max_scan: int = 10) -> int:
     return 0
 
 
-def _parse_excel_xls(content: bytes) -> tuple[list[str], list[list]]:
-    """解析 .xls 文件（Excel 97-2003），返回 (列名列表, 数据行列表)。"""
+def _parse_excel_xls(content: bytes) -> tuple[list[str], list[list]] | list[tuple[str, list[str], list[list]]]:
+    """解析 .xls 文件（Excel 97-2003）。
+
+    返回值：
+    - 单 sheet 时：(headers, data_rows)
+    - 多 sheet 时：[(sheet_name, headers, data_rows), ...]
+    """
     import xlrd
 
     wb = xlrd.open_workbook(file_contents=content)
-    ws = wb.sheet_by_index(0)
 
-    if ws.nrows == 0:
+    def _parse_one_sheet(ws):
+        if ws.nrows == 0:
+            return [], []
+        all_rows = []
+        for r in range(ws.nrows):
+            row = [ws.cell_value(r, c) for c in range(ws.ncols)]
+            all_rows.append(row)
+        header_idx = _detect_header_row(all_rows)
+        headers = [str(v).strip() if v is not None and str(v).strip() != "" else f"列{c+1}" for c, v in enumerate(all_rows[header_idx])]
+        data_rows = all_rows[header_idx + 1:]
+        data_rows = [r for r in data_rows if any(v is not None and str(v) != "" for v in r)]
+        return headers, data_rows
+
+    if wb.nsheets == 1:
+        return _parse_one_sheet(wb.sheet_by_index(0))
+
+    sheets_data = []
+    for i in range(wb.nsheets):
+        ws = wb.sheet_by_index(i)
+        headers, data_rows = _parse_one_sheet(ws)
+        if headers:
+            sheets_data.append((ws.name, headers, data_rows))
+
+    if not sheets_data:
         return [], []
-
-    # 读取所有行用于智能表头检测
-    all_rows = []
-    for r in range(ws.nrows):
-        row = [ws.cell_value(r, c) for c in range(ws.ncols)]
-        all_rows.append(row)
-
-    header_idx = _detect_header_row(all_rows)
-
-    headers = [str(v).strip() if v is not None and str(v).strip() != "" else f"列{c+1}" for c, v in enumerate(all_rows[header_idx])]
-    data_rows = all_rows[header_idx + 1:]
-    data_rows = [r for r in data_rows if any(v is not None and str(v) != "" for v in r)]
-    return headers, data_rows
+    if len(sheets_data) == 1:
+        return sheets_data[0][1], sheets_data[0][2]
+    return sheets_data
 
 
 async def sync_table(db: AsyncSession, table_id: int, user_access_token: str | None = None) -> dict:

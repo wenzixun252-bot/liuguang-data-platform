@@ -792,6 +792,9 @@ async def get_table(
     if not table:
         raise HTTPException(status_code=404, detail="表格不存在或无权访问")
     out = StructuredTableDetail.model_validate(table)
+    # 从 extra_fields 提取 sheet_names
+    if table.extra_fields and "sheet_names" in table.extra_fields:
+        out = out.model_copy(update={"sheet_names": table.extra_fields["sheet_names"]})
     if table.cleaning_rule_id:
         from app.models.cleaning_rule import CleaningRule
         rule = await db.get(CleaningRule, table.cleaning_rule_id)
@@ -807,6 +810,7 @@ async def get_table_rows(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     search: str = Query("", max_length=200),
+    sheet_name: str = Query("", max_length=256),
     current_user: Annotated[User, Depends(get_current_user)] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ):
@@ -820,6 +824,8 @@ async def get_table_rows(
         raise HTTPException(status_code=404, detail="表格不存在或无权访问")
 
     conditions = [StructuredTableRow.table_id == table_id]
+    if sheet_name:
+        conditions.append(StructuredTableRow.sheet_name == sheet_name)
     if search:
         conditions.append(StructuredTableRow.row_text.ilike(f"%{search}%"))
 
@@ -976,50 +982,55 @@ async def export_table_xlsx(
     rows_result = await db.execute(
         select(StructuredTableRow)
         .where(StructuredTableRow.table_id == table_id)
-        .order_by(StructuredTableRow.row_index)
+        .order_by(StructuredTableRow.sheet_name.nullsfirst(), StructuredTableRow.row_index)
     )
     rows = rows_result.scalars().all()
 
+    # 检查是否多 sheet
+    sheet_names = table.extra_fields.get("sheet_names") if table.extra_fields else None
+
     # 创建 Excel 工作簿
     wb = Workbook()
-    ws = wb.active
-    ws.title = "数据"
-
-    # 获取列名（从第一行数据中提取，如果没有则用默认列名）
-    columns: list[str] = []
-    if rows and rows[0].row_data:
-        columns = list(rows[0].row_data.keys())
-
-    if not columns:
-        columns = ["序号"]
-
-    # 写入表头
     header_fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
     header_font = Font(bold=True, color="FFFFFF")
-    for col_idx, col_name in enumerate(columns, 1):
-        cell = ws.cell(row=1, column=col_idx, value=col_name)
-        cell.fill = header_fill
-        cell.font = header_font
 
-    # 写入数据行
-    for row_idx, row in enumerate(rows, 2):
-        if row.row_data:
-            for col_idx, col_name in enumerate(columns, 1):
-                value = row.row_data.get(col_name, "")
-                # 处理特殊类型
-                if isinstance(value, (list, dict)):
-                    value = str(value)
-                ws.cell(row=row_idx, column=col_idx, value=value)
-
-    # 自动调整列宽
-    for col_idx, col_name in enumerate(columns, 1):
-        max_length = len(str(col_name))
-        for row in rows:
+    def _write_sheet(ws, sheet_rows):
+        columns: list[str] = []
+        if sheet_rows and sheet_rows[0].row_data:
+            columns = list(sheet_rows[0].row_data.keys())
+        if not columns:
+            columns = ["序号"]
+        for col_idx, col_name in enumerate(columns, 1):
+            cell = ws.cell(row=1, column=col_idx, value=col_name)
+            cell.fill = header_fill
+            cell.font = header_font
+        for row_idx, row in enumerate(sheet_rows, 2):
             if row.row_data:
-                cell_value = row.row_data.get(col_name, "")
-                if cell_value:
-                    max_length = max(max_length, len(str(cell_value)))
-        ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = min(max_length + 2, 50)
+                for col_idx, col_name in enumerate(columns, 1):
+                    value = row.row_data.get(col_name, "")
+                    if isinstance(value, (list, dict)):
+                        value = str(value)
+                    ws.cell(row=row_idx, column=col_idx, value=value)
+        for col_idx, col_name in enumerate(columns, 1):
+            max_length = len(str(col_name))
+            for row in sheet_rows:
+                if row.row_data:
+                    cell_value = row.row_data.get(col_name, "")
+                    if cell_value:
+                        max_length = max(max_length, len(str(cell_value)))
+            ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = min(max_length + 2, 50)
+
+    if sheet_names and len(sheet_names) > 1:
+        # 多 sheet 导出
+        wb.remove(wb.active)
+        for sn in sheet_names:
+            ws = wb.create_sheet(title=sn[:31])  # Excel sheet 名最长 31 字符
+            sheet_rows = [r for r in rows if r.sheet_name == sn]
+            _write_sheet(ws, sheet_rows)
+    else:
+        ws = wb.active
+        ws.title = "数据"
+        _write_sheet(ws, rows)
 
     # 写入内存缓冲区
     buffer = BytesIO()

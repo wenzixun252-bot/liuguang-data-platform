@@ -46,9 +46,10 @@ interface StructuredTableItem {
 interface StructuredTableDetail extends StructuredTableItem {
   source_app_token: string | null
   source_table_id: string | null
-  schema_info: { field_id: string; field_name: string; field_type: string | number }[] | null
+  schema_info: { field_id: string; field_name: string; field_type: string | number }[] | Record<string, unknown> | null
   keywords: string[]
   key_info?: Record<string, string> | null
+  sheet_names?: string[] | null
 }
 
 interface RowItem {
@@ -118,6 +119,7 @@ export default function StructuredTables() {
   const [detailPage, setDetailPage] = useState(1)
   const [detailSearch, setDetailSearch] = useState('')
   const [detailLoading, setDetailLoading] = useState(false)
+  const [activeSheet, setActiveSheet] = useState<string>('')
 
   const [tagRefreshKey, setTagRefreshKey] = useState(0)
   const navigate = useNavigate()
@@ -367,11 +369,15 @@ export default function StructuredTables() {
   const openDetail = async (id: number) => {
     try {
       setDetailLoading(true)
-      const [detailRes, rowsRes] = await Promise.all([
-        api.get(`/structured-tables/${id}`),
-        api.get(`/structured-tables/${id}/rows`, { params: { page: 1, page_size: detailPageSize } }),
-      ])
-      setDetail(detailRes.data)
+      const detailRes = await api.get(`/structured-tables/${id}`)
+      const detailData = detailRes.data
+      setDetail(detailData)
+      // 如果有多 sheet，默认选第一个
+      const firstSheet = detailData.sheet_names?.[0] || ''
+      setActiveSheet(firstSheet)
+      const rowParams: Record<string, unknown> = { page: 1, page_size: detailPageSize }
+      if (firstSheet) rowParams.sheet_name = firstSheet
+      const rowsRes = await api.get(`/structured-tables/${id}/rows`, { params: rowParams })
       setDetailRows(rowsRes.data.items)
       setDetailRowsTotal(rowsRes.data.total)
       setDetailPage(1)
@@ -380,10 +386,12 @@ export default function StructuredTables() {
     finally { setDetailLoading(false) }
   }
 
-  const loadDetailRows = async (tableId: number, p: number, s: string) => {
+  const loadDetailRows = async (tableId: number, p: number, s: string, sheetName?: string) => {
     try {
       const params: Record<string, unknown> = { page: p, page_size: detailPageSize }
       if (s) params.search = s
+      const sn = sheetName ?? activeSheet
+      if (sn) params.sheet_name = sn
       const res = await api.get(`/structured-tables/${tableId}/rows`, { params })
       setDetailRows(res.data.items)
       setDetailRowsTotal(res.data.total)
@@ -592,6 +600,13 @@ export default function StructuredTables() {
           rowSearch={detailSearch}
           detailPageSize={detailPageSize}
           loading={detailLoading}
+          activeSheet={activeSheet}
+          onSheetChange={(sn) => {
+            setActiveSheet(sn)
+            setDetailPage(1)
+            setDetailSearch('')
+            loadDetailRows(detail.id, 1, '', sn)
+          }}
           onClose={() => setDetail(null)}
           onPageChange={setDetailPage}
           onSearchChange={setDetailSearch}
@@ -616,6 +631,7 @@ export default function StructuredTables() {
 
 function TableDetailPanel({
   detail, rows, rowsTotal, rowPage, rowSearch, detailPageSize, loading,
+  activeSheet, onSheetChange,
   onClose, onPageChange, onSearchChange, onSync, onDelete, onExport, onDownloadOriginal,
 }: {
   detail: StructuredTableDetail
@@ -625,6 +641,8 @@ function TableDetailPanel({
   rowSearch: string
   detailPageSize: number
   loading: boolean
+  activeSheet: string
+  onSheetChange: (sheetName: string) => void
   onClose: () => void
   onPageChange: (p: number) => void
   onSearchChange: (s: string) => void
@@ -633,14 +651,32 @@ function TableDetailPanel({
   onExport: (id: number, name: string) => void
   onDownloadOriginal: (id: number, name: string) => void
 }) {
+  const sheetNames = detail.sheet_names || []
+  const isMultiSheet = sheetNames.length > 1
+
+  // 根据当前 sheet 获取对应的 schema_info
+  const getSchemaForSheet = () => {
+    if (!detail.schema_info) return null
+    // 多 sheet 格式：{ __sheets__: { sheetName: [...fields] } }
+    const sheetsMap = (detail.schema_info as Record<string, unknown>).__sheets__
+    if (sheetsMap && typeof sheetsMap === 'object' && activeSheet) {
+      const fields = (sheetsMap as Record<string, { field_id: string; field_name: string; field_type: string | number }[]>)[activeSheet]
+      return fields || null
+    }
+    // 单 sheet 格式：[...fields]
+    if (Array.isArray(detail.schema_info)) return detail.schema_info
+    return null
+  }
+  const currentSchema = getSchemaForSheet()
+
   const fieldIdToName: Record<string, string> = {}
-  if (detail.schema_info) {
-    detail.schema_info.forEach((s) => {
+  if (currentSchema) {
+    currentSchema.forEach((s: { field_id: string; field_name: string }) => {
       fieldIdToName[s.field_id] = s.field_name
       fieldIdToName[s.field_name] = s.field_name
     })
   }
-  const columnKeys = detail.schema_info?.map((s) => s.field_name) || (rows.length > 0 ? Object.keys(rows[0].row_data) : [])
+  const columnKeys = currentSchema?.map((s: { field_name: string }) => s.field_name) || (rows.length > 0 ? Object.keys(rows[0].row_data) : [])
   const getColumnLabel = (key: string) => fieldIdToName[key] || key
   const rowTotalPages = Math.ceil(rowsTotal / detailPageSize)
 
@@ -654,7 +690,7 @@ function TableDetailPanel({
               <span className={`px-2 py-0.5 rounded-full text-xs ${SOURCE_COLORS[detail.source_type] || ''}`}>
                 {SOURCE_LABELS[detail.source_type] || detail.source_type}
               </span>
-              <span>{detail.row_count} 行 × {detail.column_count} 列</span>
+              <span>{detail.row_count} 行 × {detail.column_count} 列{isMultiSheet ? ` · ${sheetNames.length} 个工作表` : ''}</span>
               {detail.synced_at && <span>同步: {new Date(detail.synced_at).toLocaleString('zh-CN')}</span>}
               {detail.cleaning_rule_id ? (
                 <span className="px-2 py-0.5 rounded-full text-xs bg-green-50 text-green-600 border border-green-200">{detail.cleaning_rule_name || '已清洗'}</span>
@@ -758,6 +794,26 @@ function TableDetailPanel({
                 <button onClick={() => onPageChange(Math.max(1, rowPage - 1))} disabled={rowPage <= 1} className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-30"><ChevronLeft size={16} /></button>
                 <button onClick={() => onPageChange(Math.min(rowTotalPages, rowPage + 1))} disabled={rowPage >= rowTotalPages} className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-30"><ChevronRight size={16} /></button>
               </div>
+            </div>
+          )}
+          {/* Excel 风格 Sheet 标签栏 */}
+          {isMultiSheet && (
+            <div className="flex items-end gap-0 mt-4 border-t border-gray-200 pt-0 -mx-6 px-6 bg-gray-50">
+              {sheetNames.map((sn) => (
+                <button
+                  key={sn}
+                  onClick={() => onSheetChange(sn)}
+                  className={`
+                    relative px-4 py-2 text-sm font-medium border border-b-0 rounded-t-lg transition-colors
+                    ${activeSheet === sn
+                      ? 'bg-white text-indigo-700 border-gray-300 -mb-px z-10 shadow-sm'
+                      : 'bg-gray-100 text-gray-500 border-transparent hover:bg-gray-200 hover:text-gray-700'
+                    }
+                  `}
+                >
+                  {sn}
+                </button>
+              ))}
             </div>
           )}
         </div>

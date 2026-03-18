@@ -107,6 +107,7 @@ class StructuredTableRow(Base):
         ForeignKey("structured_tables.id", ondelete="CASCADE"),
         nullable=False,
     )
+    sheet_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
     row_index: Mapped[int] = mapped_column(Integer, nullable=False)
     row_data: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
     row_text: Mapped[str | None] = mapped_column(Text, nullable=True)
