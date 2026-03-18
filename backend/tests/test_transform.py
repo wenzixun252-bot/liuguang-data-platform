@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.services.etl.extractor import ExtractionResult
-from app.services.etl.transformer import DataTransformer, TransformedRecord
+from app.services.etl.transformer import DataTransformer, TransformedDocument
 
 pytestmark = pytest.mark.asyncio
 
@@ -52,15 +52,15 @@ class TestDataTransformer:
             },
         }
 
-        result = t._apply_mapping(raw_record, mapping, "app1", "tbl1", "conversation")
+        result = t._apply_mapping(raw_record, mapping, "app1", "tbl1", "conversation", default_owner_id="ou_abc123")
 
         assert result is not None
         assert result.feishu_record_id == "rec_001"
         assert result.owner_id == "ou_abc123"
         assert result.title == "测试标题"
         assert result.content_text == "这是正文内容"
-        assert "额外字段" in result.asset_tags
-        assert result.asset_tags["额外字段"] == "会进入 asset_tags"
+        assert "额外字段" in result.extra_fields
+        assert result.extra_fields["额外字段"] == "会进入 asset_tags"
 
     async def test_apply_mapping_missing_critical_fields(self):
         """关键字段缺失时返回 None (丢弃记录)。"""
@@ -80,11 +80,11 @@ class TestDataTransformer:
             },
         }
 
-        result = t._apply_mapping(raw_record, mapping, "app1", "tbl1", "conversation")
+        result = t._apply_mapping(raw_record, mapping, "app1", "tbl1", "conversation", default_owner_id="ou_abc")
         assert result is None
 
     async def test_apply_mapping_unmapped_fields_to_asset_tags(self):
-        """未映射的字段打包到 asset_tags。"""
+        """未映射的字段打包到 extra_fields。"""
         t = DataTransformer()
         mapping = {
             "feishu_record_id": None,
@@ -102,12 +102,12 @@ class TestDataTransformer:
             },
         }
 
-        result = t._apply_mapping(raw_record, mapping, "app1", "tbl1", "conversation")
+        result = t._apply_mapping(raw_record, mapping, "app1", "tbl1", "conversation", default_owner_id="ou_abc")
 
         assert result is not None
-        assert "tag1" in result.asset_tags
-        assert "tag2" in result.asset_tags
-        assert "tag3" in result.asset_tags
+        assert "tag1" in result.extra_fields
+        assert "tag2" in result.extra_fields
+        assert "tag3" in result.extra_fields
 
     async def test_parse_time_milliseconds(self):
         """毫秒时间戳正确解析。"""
@@ -160,7 +160,7 @@ class TestDataTransformer:
         }
 
         with patch.object(t, "_get_or_create_mapping", new_callable=AsyncMock, return_value=mapping):
-            result = await t.transform(extraction, "conversation", db_session)
+            result = await t.transform(extraction, "conversation", db_session, owner_id="ou_abc")
 
         assert len(result.records) == 1
         assert result.records[0].content_text == "内容"
@@ -168,7 +168,7 @@ class TestDataTransformer:
 
     async def test_transform_llm_failure_sends_alert(self, db_session):
         """LLM 映射失败时发送告警。"""
-        from app.services.llm import LLMError
+        from app.services.etl.transformer import LLMError
 
         t = DataTransformer()
         extraction = self._make_extraction(
