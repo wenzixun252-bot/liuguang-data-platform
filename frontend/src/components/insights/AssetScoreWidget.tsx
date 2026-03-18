@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Shield, ArrowRight, Loader2 } from 'lucide-react'
+import { Shield, ArrowRight, ChevronDown } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import {
   RadarChart,
@@ -10,8 +10,17 @@ import {
   ResponsiveContainer,
 } from 'recharts'
 import api from '../../lib/api'
-import toast from 'react-hot-toast'
 import WidgetContainer from './WidgetContainer'
+
+interface SubScoreDetail {
+  key: string
+  label: string
+  weight: number
+  score: number
+  max_score: number
+  value: string
+  criteria: string[]
+}
 
 interface ScoreAction {
   label: string
@@ -21,8 +30,10 @@ interface ScoreAction {
 interface ScoreDimension {
   key: string
   label: string
+  weight: number
   score: number
   detail: string
+  sub_scores: SubScoreDetail[]
   action: ScoreAction | null
 }
 
@@ -33,17 +44,24 @@ interface AssetScore {
 }
 
 const LEVEL_BG: Record<string, string> = {
-  '\u5353\u8d8a': 'from-emerald-500 to-emerald-600',
-  '\u4f18\u79c0': 'from-indigo-500 to-purple-600',
-  '\u826f\u597d': 'from-amber-500 to-amber-600',
-  '\u5f85\u63d0\u5347': 'from-red-500 to-red-600',
+  '卓越': 'from-emerald-500 to-emerald-600',
+  '优秀': 'from-indigo-500 to-purple-600',
+  '良好': 'from-amber-500 to-amber-600',
+  '待提升': 'from-red-500 to-red-600',
+}
+
+function scoreBarColor(score: number) {
+  if (score >= 90) return 'bg-emerald-500'
+  if (score >= 70) return 'bg-indigo-500'
+  if (score >= 50) return 'bg-amber-500'
+  return 'bg-red-500'
 }
 
 export default function AssetScoreWidget({ onClose, compact }: { onClose?: () => void; compact?: boolean }) {
   const [data, setData] = useState<AssetScore | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [buildingKG, setBuildingKG] = useState(false)
+  const [expandedKey, setExpandedKey] = useState<string | null>(null)
   const [chartReady, setChartReady] = useState(false)
   const navigate = useNavigate()
 
@@ -59,24 +77,10 @@ export default function AssetScoreWidget({ onClose, compact }: { onClose?: () =>
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => {
-    fetchScore()
-  }, [])
+  useEffect(() => { fetchScore() }, [])
 
-  const handleAction = async (action: ScoreAction) => {
-    if (action.route === '__action:build_kg') {
-      setBuildingKG(true)
-      try {
-        await api.post('/knowledge-graph/build-and-analyze')
-        toast.success('知识图谱构建已启动，完成后评分将自动更新')
-      } catch {
-        toast.error('启动构建失败')
-      } finally {
-        setBuildingKG(false)
-      }
-    } else {
-      navigate(action.route)
-    }
+  const handleAction = (action: ScoreAction) => {
+    navigate(action.route)
   }
 
   const radarData =
@@ -86,7 +90,7 @@ export default function AssetScoreWidget({ onClose, compact }: { onClose?: () =>
       fullMark: 100,
     })) || []
 
-  const levelGradient = data ? (LEVEL_BG[data.level] || LEVEL_BG['\u826f\u597d']) : ''
+  const levelGradient = data ? (LEVEL_BG[data.level] || LEVEL_BG['良好']) : ''
 
   return (
     <WidgetContainer
@@ -140,53 +144,88 @@ export default function AssetScoreWidget({ onClose, compact }: { onClose?: () =>
           </div>
 
           {/* Dimension list */}
-          <div className={compact ? 'space-y-1' : 'space-y-2'}>
+          <div className={compact ? 'space-y-1' : 'space-y-1.5'}>
             {data.dimensions.map((dim) => (
-              <div
-                key={dim.key}
-                className={`flex items-center gap-3 ${compact ? 'py-1 px-2' : 'py-2 px-3'} rounded-lg hover:bg-gray-50 transition-colors`}
-              >
-                {/* Score bar */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className={`${compact ? 'text-xs' : 'text-sm'} font-medium text-gray-700`}>{dim.label}</span>
-                    <span
-                      className={`${compact ? 'text-xs' : 'text-sm'} font-semibold ${dim.score >= 70 ? 'text-gray-600' : 'text-amber-600'}`}
-                    >
-                      {dim.score}
-                    </span>
+              <div key={dim.key} className="rounded-lg hover:bg-gray-50/50 transition-colors">
+                {/* Header row — clickable to expand */}
+                <button
+                  onClick={() => !compact && setExpandedKey(expandedKey === dim.key ? null : dim.key)}
+                  className={`w-full ${compact ? 'py-1 px-2' : 'py-2 px-3'} flex items-center gap-3 text-left`}
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className={`${compact ? 'text-xs' : 'text-sm'} font-medium text-gray-700`}>
+                        {dim.label}
+                        {!compact && (
+                          <span className="ml-1.5 text-[10px] text-gray-400 font-normal">{Math.round(dim.weight * 100)}%</span>
+                        )}
+                      </span>
+                      <span
+                        className={`${compact ? 'text-xs' : 'text-sm'} font-semibold ${dim.score >= 70 ? 'text-gray-600' : 'text-amber-600'}`}
+                      >
+                        {dim.score}
+                      </span>
+                    </div>
+                    <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ${scoreBarColor(dim.score)}`}
+                        style={{ width: `${dim.score}%` }}
+                      />
+                    </div>
+                    {!compact && <p className="text-[11px] text-gray-400 mt-0.5">{dim.detail}</p>}
                   </div>
-                  <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all duration-500 ${
-                        dim.score >= 90
-                          ? 'bg-emerald-500'
-                          : dim.score >= 70
-                            ? 'bg-indigo-500'
-                            : dim.score >= 50
-                              ? 'bg-amber-500'
-                              : 'bg-red-500'
-                      }`}
-                      style={{ width: `${dim.score}%` }}
+                  {!compact && (
+                    <ChevronDown
+                      size={14}
+                      className={`text-gray-300 shrink-0 transition-transform duration-200 ${expandedKey === dim.key ? 'rotate-180' : ''}`}
                     />
-                  </div>
-                  {!compact && <p className="text-xs text-gray-400 mt-0.5">{dim.detail}</p>}
-                </div>
+                  )}
+                </button>
 
-                {/* Action button — hidden in compact mode */}
-                {!compact && dim.action && (
-                  <button
-                    onClick={() => handleAction(dim.action!)}
-                    disabled={dim.action.route === '__action:build_kg' && buildingKG}
-                    className="flex-shrink-0 flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors disabled:opacity-50"
-                  >
-                    {dim.action.route === '__action:build_kg' && buildingKG ? (
-                      <Loader2 size={12} className="animate-spin" />
-                    ) : (
-                      <ArrowRight size={12} />
+                {/* Expanded sub-scores panel */}
+                {!compact && expandedKey === dim.key && (
+                  <div className="px-3 pb-3 space-y-2">
+                    {dim.sub_scores.map((sub) => (
+                      <div key={sub.key} className="bg-gray-50 rounded-lg p-2.5">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs font-medium text-gray-600">
+                            {sub.label}
+                            <span className="ml-1 text-[10px] text-gray-400 font-normal">({Math.round(sub.weight * 100)}%)</span>
+                          </span>
+                          <span className="text-xs font-semibold text-gray-600">{sub.score}/{sub.max_score}</span>
+                        </div>
+                        <div className="w-full h-1 bg-gray-200 rounded-full overflow-hidden mb-1.5">
+                          <div
+                            className="h-full rounded-full bg-indigo-400 transition-all duration-300"
+                            style={{ width: `${sub.max_score > 0 ? (sub.score / sub.max_score) * 100 : 0}%` }}
+                          />
+                        </div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-[10px] text-indigo-600 font-medium bg-indigo-50 px-1.5 py-0.5 rounded">
+                            你: {sub.value}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {sub.criteria.map((c, i) => (
+                            <span key={i} className="text-[10px] text-gray-400 bg-white px-1.5 py-0.5 rounded border border-gray-100">
+                              {c}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+
+                    {/* Action button inside expanded panel */}
+                    {dim.action && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleAction(dim.action!) }}
+                        className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors"
+                      >
+                        <ArrowRight size={12} />
+                        {dim.action.label}
+                      </button>
                     )}
-                    {dim.action.label}
-                  </button>
+                  </div>
                 )}
               </div>
             ))}
