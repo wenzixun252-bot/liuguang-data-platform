@@ -5,6 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Workflow Rules
 
 - 每次完成代码修改后，自动帮我 git add、commit 并 push 到远程仓库，不需要额外确认。
+- 每次完成前端代码修改后，自动使用 Chrome 扩展（mcp__claude-in-chrome）打开对应页面进行截图验证，确认修改效果符合预期。验证步骤：先用 `tabs_context_mcp` 获取标签页，然后导航到修改涉及的页面截图查看。
 
 ## Project Overview
 
