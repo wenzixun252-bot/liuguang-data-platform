@@ -1,10 +1,11 @@
-import { useState, useMemo } from 'react'
-import { Cloud, Table2, FileText, FolderOpen, RefreshCw, Database, Plus, CheckCircle, XCircle, Loader2, MessageSquare, Video, Clock, ChevronDown, ChevronRight, Trash2, AlertCircle } from 'lucide-react'
+import { useState, useMemo, useEffect, useRef } from 'react'
+import { Cloud, Table2, FileText, FolderOpen, RefreshCw, Database, Plus, CheckCircle, XCircle, Loader2, MessageSquare, Video } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import api from '../../lib/api'
 import CloudDocSync from '../CloudDocSync'
 import RecipeSyncConfig from '../RecipeSyncConfig'
+import { useTaskProgress } from '../../hooks/useTaskProgress'
 
 interface SyncStatus {
   id: number
@@ -125,7 +126,8 @@ export default function FeishuSyncSection({ extractionRuleId, cleaningRuleId }: 
   const [cloudDocTarget, setCloudDocTarget] = useState<ImportTarget>('document')
   const [syncingType, setSyncingType] = useState<'bitable' | 'folder' | null>(null)
   const [configTarget, setConfigTarget] = useState<ConfigTarget>(null)
-  const [expandedTaskId, setExpandedTaskId] = useState<number | null>(null)
+  const { addTask, updateTask } = useTaskProgress()
+  const registeredTaskIds = useRef<Set<string>>(new Set())
 
   // 获取多维表格同步状态
   const { data: syncStatus = [] } = useQuery({
@@ -157,37 +159,44 @@ export default function FeishuSyncSection({ extractionRuleId, cleaningRuleId }: 
     refetchInterval: 3000,
   })
 
-  // 统计运行中的任务
-  const runningTasks = importTasks.filter(t => t.status === 'running' || t.status === 'pending')
-  const recentTasks = importTasks.filter(t => t.status === 'completed' || t.status === 'failed' || t.status === 'timeout' || t.status === 'cancelled').slice(0, 10)
+  // 将后端导入任务同步到全局任务中心（切换页面不丢失）
+  useEffect(() => {
+    for (const task of importTasks) {
+      const globalId = `feishu-import-${task.id}`
+      const isRunning = task.status === 'running' || task.status === 'pending'
+      const label =
+        task.task_type === 'communication' ? '沟通资产导入' :
+        task.task_type === 'cloud_doc' ? '云文档导入' :
+        task.task_type === 'folder_sync' ? '文件夹同步' :
+        task.task_type === 'bitable_sync' ? '多维表格同步' : '同步任务'
+      const countLabel = task.task_type === 'folder_sync'
+        ? `${task.total_count} 个文件夹`
+        : `${task.total_count} 个文件`
 
-  // 取消任务
-  const cancelTaskMutation = useMutation({
-    mutationFn: async (taskId: number) => {
-      return await api.post(`/import/tasks/${taskId}/cancel`)
-    },
-    onSuccess: () => {
-      toast.success('任务已取消')
-      queryClient.invalidateQueries({ queryKey: ['import-tasks'] })
-    },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.detail || '取消失败')
-    },
-  })
+      if (isRunning && !registeredTaskIds.current.has(globalId)) {
+        addTask(globalId, `${label} ${countLabel}`)
+        registeredTaskIds.current.add(globalId)
+      }
 
-  // 删除任务
-  const deleteTaskMutation = useMutation({
-    mutationFn: async (taskId: number) => {
-      return await api.delete(`/import/tasks/${taskId}`)
-    },
-    onSuccess: () => {
-      toast.success('记录已删除')
-      queryClient.invalidateQueries({ queryKey: ['import-tasks'] })
-    },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.detail || '删除失败')
-    },
-  })
+      if (registeredTaskIds.current.has(globalId)) {
+        if (isRunning) {
+          const processed = task.imported_count + task.skipped_count + task.failed_count
+          const progress = task.total_count > 0 ? Math.round((processed / task.total_count) * 100) : -1
+          updateTask(globalId, {
+            progress,
+            message: task.status === 'pending' ? '等待中' : `${processed}/${task.total_count}`,
+          })
+        } else {
+          const finalStatus = task.status === 'completed' ? 'done' : 'error'
+          const message = task.status === 'completed'
+            ? `成功 ${task.imported_count} · 跳过 ${task.skipped_count}`
+            : task.status === 'timeout' ? '超时'
+            : task.error_message || '失败'
+          updateTask(globalId, { status: finalStatus as 'done' | 'error', progress: 100, message })
+        }
+      }
+    }
+  }, [importTasks, addTask, updateTask])
 
   // 按 asset_type 分组
   const { commSources, structuredSources } = useMemo(() => {
@@ -595,148 +604,6 @@ export default function FeishuSyncSection({ extractionRuleId, cleaningRuleId }: 
           </div>
         </div>
       </div>
-
-      {/* 导入任务状态面板 */}
-      {(runningTasks.length > 0 || recentTasks.length > 0) && (
-        <div className="mt-4 bg-white rounded-xl border border-gray-200 p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-medium text-gray-800">导入任务</h3>
-            {runningTasks.length > 0 && (
-              <span className="flex items-center gap-1 text-xs text-blue-600">
-                <Loader2 className="w-3 h-3 animate-spin" />
-                {runningTasks.length} 个任务运行中
-              </span>
-            )}
-          </div>
-          <div className="space-y-2">
-            {[...runningTasks, ...recentTasks].map(task => {
-              const isExpanded = expandedTaskId === task.id
-              const files = (task.details as any)?.files as Array<{ token?: string; name?: string }> | undefined
-              const isFinished = !['running', 'pending'].includes(task.status)
-              return (
-                <div key={task.id} className="rounded-lg bg-gray-50 text-sm overflow-hidden">
-                  {/* 任务摘要行 - 可点击展开 */}
-                  <div
-                    className="flex items-center gap-3 p-2 cursor-pointer hover:bg-gray-100 transition-colors"
-                    onClick={() => setExpandedTaskId(isExpanded ? null : task.id)}
-                  >
-                    {isExpanded ? (
-                      <ChevronDown className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-                    ) : (
-                      <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-                    )}
-                    {task.status === 'running' || task.status === 'pending' ? (
-                      <Loader2 className="w-4 h-4 text-blue-500 animate-spin shrink-0" />
-                    ) : task.status === 'completed' ? (
-                      <CheckCircle className="w-4 h-4 text-green-500 shrink-0" />
-                    ) : task.status === 'timeout' ? (
-                      <Clock className="w-4 h-4 text-orange-500 shrink-0" />
-                    ) : (
-                      <XCircle className="w-4 h-4 text-red-500 shrink-0" />
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium text-gray-700">
-                          {task.task_type === 'communication' ? '沟通资产导入' :
-                           task.task_type === 'cloud_doc' ? '云文档导入' :
-                           task.task_type === 'folder_sync' ? '文件夹同步' :
-                           task.task_type === 'bitable_sync' ? '多维表格同步' : '同步任务'}
-                        </span>
-                        <span className="text-xs text-gray-400">
-                          {task.task_type === 'folder_sync' ? `${task.total_count} 个文件夹` : `${task.total_count} 个文件`}
-                        </span>
-                      </div>
-                      {task.status === 'running' && (task.imported_count > 0 || task.skipped_count > 0) && (
-                        <p className="text-xs text-blue-500 mt-0.5">
-                          已导入 {task.imported_count} · 跳过 {task.skipped_count}{task.failed_count > 0 ? ` · 失败 ${task.failed_count}` : ''}
-                        </p>
-                      )}
-                      {task.status === 'completed' && (
-                        <p className="text-xs text-gray-500 mt-0.5">
-                          成功 {task.imported_count} · 跳过 {task.skipped_count} · 失败 {task.failed_count}
-                        </p>
-                      )}
-                      {task.status === 'timeout' && (
-                        <p className="text-xs text-orange-500 mt-0.5">导入超时（超过5分钟）</p>
-                      )}
-                      {task.status === 'failed' && task.error_message && (
-                        <p className="text-xs text-red-500 mt-0.5 truncate">{task.error_message}</p>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      {(task.status === 'running' || task.status === 'pending') && (
-                        <button
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); cancelTaskMutation.mutate(task.id) }}
-                          disabled={cancelTaskMutation.isPending}
-                          className="px-2 py-1 text-xs text-red-500 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                          title="取消任务"
-                        >
-                          取消
-                        </button>
-                      )}
-                      <span className="text-xs text-gray-400">
-                        {task.completed_at ? new Date(task.completed_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) :
-                         task.started_at ? '进行中...' : '等待中'}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* 展开的详情区域 */}
-                  {isExpanded && (
-                    <div className="px-3 pb-3 pt-1 border-t border-gray-200 bg-white">
-                      {/* 文件列表 */}
-                      {files && files.length > 0 ? (
-                        <div className="mb-2">
-                          <p className="text-xs font-medium text-gray-500 mb-1.5">导入文件列表</p>
-                          <div className="space-y-1 max-h-40 overflow-y-auto">
-                            {files.map((file, idx) => (
-                              <div key={idx} className="flex items-center gap-2 text-xs text-gray-600 py-0.5">
-                                <FileText className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-                                <span className="truncate">{file.name || file.token || `文件 ${idx + 1}`}</span>
-                              </div>
-                            ))}
-                            {task.total_count > files.length && (
-                              <p className="text-xs text-gray-400 pl-5.5">...还有 {task.total_count - files.length} 个文件</p>
-                            )}
-                          </div>
-                        </div>
-                      ) : (
-                        <p className="text-xs text-gray-400 mb-2">无文件详情记录</p>
-                      )}
-
-                      {/* 错误信息 */}
-                      {task.error_message && (
-                        <div className="mb-2 p-2 rounded-lg bg-red-50 border border-red-100">
-                          <div className="flex items-start gap-1.5">
-                            <AlertCircle className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" />
-                            <p className="text-xs text-red-600 break-all">{task.error_message}</p>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* 删除按钮 */}
-                      {isFinished && (
-                        <div className="flex justify-end pt-1">
-                          <button
-                            type="button"
-                            onClick={() => deleteTaskMutation.mutate(task.id)}
-                            disabled={deleteTaskMutation.isPending}
-                            className="flex items-center gap-1 px-2 py-1 text-xs text-gray-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                            删除记录
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
 
       {/* 云文档同步弹窗 */}
       {showCloudDocSync && (

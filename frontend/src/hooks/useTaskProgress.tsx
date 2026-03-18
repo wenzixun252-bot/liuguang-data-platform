@@ -60,6 +60,9 @@ export function TaskProgressProvider({ children }: { children: ReactNode }) {
       } else if (id.startsWith('import-task-')) {
         const taskId = id.replace('import-task-', '')
         await api.post(`/data-import/tasks/${taskId}/cancel`)
+      } else if (id.startsWith('feishu-import-')) {
+        const taskId = id.replace('feishu-import-', '')
+        await api.post(`/import/tasks/${taskId}/cancel`)
       } else if (id.startsWith('chat-')) {
         // 通过自定义事件通知 Chat 组件 abort SSE 连接
         window.dispatchEvent(new CustomEvent('cancel-chat-task', { detail: { taskId: id } }))
