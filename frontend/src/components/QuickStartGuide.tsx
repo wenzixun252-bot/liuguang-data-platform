@@ -7,7 +7,7 @@ import {
   ChevronRight,
   Sparkles,
   X,
-  FileSearch,
+  Tags,
   DatabaseZap,
   Bot,
   Loader2,
@@ -17,10 +17,10 @@ import { useQuickStart } from '../hooks/useQuickStart'
 
 const STEPS = [
   {
-    title: '配置数据处理规则',
-    desc: '设置提取规则和清洗规则，定义数据处理方式',
-    icon: FileSearch,
-    path: '/data-import',
+    title: '设置标签分类',
+    desc: '创建至少 5 个标签，用于数据分类和检索',
+    icon: Tags,
+    path: '/settings?tab=tags',
   },
   {
     title: '配置数据源',

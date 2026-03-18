@@ -1,6 +1,5 @@
 import { useCallback, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { getExtractionRules, getCleaningRules } from '../lib/api'
 import api from '../lib/api'
 import { getUser } from '../lib/auth'
 
@@ -39,16 +38,10 @@ function setDismissed() {
 export function useQuickStart(): QuickStartState {
   const dismissed = getDismissed()
 
-  // 步骤1：检测提取规则和清洗规则
-  const { data: extractionRules, isLoading: loadingExtraction, refetch: refetchExtraction } = useQuery({
-    queryKey: ['quickstart-extraction-rules'],
-    queryFn: getExtractionRules,
-    staleTime: 60_000,
-  })
-
-  const { data: cleaningRules, isLoading: loadingCleaning, refetch: refetchCleaning } = useQuery({
-    queryKey: ['quickstart-cleaning-rules'],
-    queryFn: getCleaningRules,
+  // 步骤1：检测标签数量是否 >= 5
+  const { data: tags, isLoading: loadingTags, refetch: refetchTags } = useQuery({
+    queryKey: ['quickstart-tags'],
+    queryFn: () => api.get('/tags').then(r => r.data),
     staleTime: 60_000,
   })
 
@@ -73,7 +66,7 @@ export function useQuickStart(): QuickStartState {
   })
 
   // 计算各步骤完成状态（实时检测，不缓存）
-  const step1Done = (Array.isArray(extractionRules) && extractionRules.length > 0) || (Array.isArray(cleaningRules) && cleaningRules.length > 0)
+  const step1Done = Array.isArray(tags) && tags.length >= 5
 
   // 步骤2：三类数据源（会话、会议、云文件夹）全部配置才算完成
   const chatKeywords = ['会话', '群聊', '消息', '聊天', 'chat']
@@ -86,7 +79,7 @@ export function useQuickStart(): QuickStartState {
   const step3Done = Array.isArray(conversations) && conversations.length > 0
 
   const steps: [StepState, StepState, StepState] = [
-    { done: !!step1Done, loading: loadingExtraction || loadingCleaning },
+    { done: !!step1Done, loading: loadingTags },
     { done: !!step2Done, loading: loadingCommSources || loadingCloudFolders },
     { done: !!step3Done, loading: loadingConversations },
   ]
@@ -101,12 +94,11 @@ export function useQuickStart(): QuickStartState {
   }, [])
 
   const refetchAll = useCallback(() => {
-    refetchExtraction()
-    refetchCleaning()
+    refetchTags()
     refetchCommSources()
     refetchCloudFolders()
     refetchConversations()
-  }, [refetchExtraction, refetchCleaning, refetchCommSources, refetchCloudFolders, refetchConversations])
+  }, [refetchTags, refetchCommSources, refetchCloudFolders, refetchConversations])
 
   return useMemo(() => ({
     steps,
@@ -115,5 +107,5 @@ export function useQuickStart(): QuickStartState {
     isFirstVisit,
     dismiss,
     refetchAll,
-  }), [step1Done, step2Done, step3Done, dismissed, loadingExtraction, loadingCleaning, loadingCommSources, loadingCloudFolders, loadingConversations])
+  }), [step1Done, step2Done, step3Done, dismissed, loadingTags, loadingCommSources, loadingCloudFolders, loadingConversations])
 }
