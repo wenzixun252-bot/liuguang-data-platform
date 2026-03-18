@@ -12,6 +12,16 @@ class TagDefinitionCreate(BaseModel):
     is_shared: bool = False
 
 
+class TagDefinitionBatchCreate(BaseModel):
+    names: list[str]
+    category: str = "custom"
+    color: str = "#6366f1"
+
+
+class TagDefinitionBatchDelete(BaseModel):
+    tag_ids: list[int]
+
+
 class TagDefinitionUpdate(BaseModel):
     name: str | None = None
     color: str | None = None

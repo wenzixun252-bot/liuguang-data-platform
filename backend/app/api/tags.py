@@ -17,6 +17,8 @@ from app.schemas.tag import (
     ContentTagCreate,
     ContentTagOut,
     DetachRequest,
+    TagDefinitionBatchCreate,
+    TagDefinitionBatchDelete,
     TagDefinitionCreate,
     TagDefinitionOut,
     TagDefinitionUpdate,
@@ -70,6 +72,61 @@ async def create_tag(
     await db.commit()
     await db.refresh(tag)
     return TagDefinitionOut.model_validate(tag)
+
+
+@router.post("/batch-create", response_model=list[TagDefinitionOut], summary="批量创建标签")
+async def batch_create_tags(
+    body: TagDefinitionBatchCreate,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[TagDefinitionOut]:
+    names = [n.strip() for n in body.names if n.strip()]
+    if not names:
+        raise HTTPException(400, "标签名称不能为空")
+    # 过滤已存在的
+    existing = await db.execute(
+        select(TagDefinition.name).where(
+            TagDefinition.owner_id == current_user.feishu_open_id,
+            TagDefinition.name.in_(names),
+        )
+    )
+    existing_names = {r for r in existing.scalars().all()}
+    created = []
+    for name in names:
+        if name in existing_names:
+            continue
+        tag = TagDefinition(
+            owner_id=current_user.feishu_open_id,
+            category=body.category,
+            name=name,
+            color=body.color,
+            is_shared=False,
+        )
+        db.add(tag)
+        created.append(tag)
+    await db.commit()
+    for tag in created:
+        await db.refresh(tag)
+    return [TagDefinitionOut.model_validate(t) for t in created]
+
+
+@router.post("/batch-delete", summary="批量删除标签定义")
+async def batch_delete_tags(
+    body: TagDefinitionBatchDelete,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    if not body.tag_ids:
+        return {"deleted": 0}
+    # 只删除自己拥有的标签
+    result = await db.execute(
+        delete(TagDefinition).where(
+            TagDefinition.id.in_(body.tag_ids),
+            TagDefinition.owner_id == current_user.feishu_open_id,
+        )
+    )
+    await db.commit()
+    return {"deleted": result.rowcount}
 
 
 @router.put("/{tag_id}", response_model=TagDefinitionOut, summary="修改标签")

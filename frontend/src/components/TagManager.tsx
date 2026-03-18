@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Tag, Plus, X, Edit2, Check } from 'lucide-react'
+import { Tag, Plus, X, Edit2, Check, Trash2, ListChecks } from 'lucide-react'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
 
@@ -26,19 +26,48 @@ const PRESET_COLORS = ['#6366f1', '#ec4899', '#f59e0b', '#10b981', '#3b82f6', '#
 export function TagManagerPanel() {
   const tags = useTagDefs()
   const [showCreate, setShowCreate] = useState(false)
+  const [showBatchCreate, setShowBatchCreate] = useState(false)
+  const [batchMode, setBatchMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [editingId, setEditingId] = useState<number | null>(null)
-  const [form, setForm] = useState({ name: '', category: 'custom', color: '#6366f1', is_shared: false })
+  const [form, setForm] = useState({ name: '', category: 'custom', color: '#6366f1' })
+  const [batchForm, setBatchForm] = useState({ names: '', category: 'custom', color: '#6366f1' })
+  const [batchDeleting, setBatchDeleting] = useState(false)
+  const [batchCreating, setBatchCreating] = useState(false)
 
   const handleCreate = async () => {
     if (!form.name.trim()) return toast.error('请输入标签名')
     try {
-      await api.post('/tags', form)
+      await api.post('/tags', { ...form, is_shared: false })
       toast.success('标签已创建')
       setShowCreate(false)
-      setForm({ name: '', category: 'custom', color: '#6366f1', is_shared: false })
+      setForm({ name: '', category: 'custom', color: '#6366f1' })
       fetchTagCache(true)
     } catch (e: any) {
       toast.error(e.response?.data?.detail || '创建失败')
+    }
+  }
+
+  const handleBatchCreate = async () => {
+    const names = batchForm.names.split(/[,，\n]/).map(s => s.trim()).filter(Boolean)
+    if (names.length === 0) return toast.error('请输入至少一个标签名')
+    setBatchCreating(true)
+    try {
+      const { data } = await api.post('/tags/batch-create', {
+        names,
+        category: batchForm.category,
+        color: batchForm.color,
+      })
+      const created = data.length
+      const skipped = names.length - created
+      toast.success(`已创建 ${created} 个标签${skipped > 0 ? `，${skipped} 个已存在被跳过` : ''}`)
+      setShowBatchCreate(false)
+      setBatchForm({ names: '', category: 'custom', color: '#6366f1' })
+      fetchTagCache(true)
+    } catch (e: any) {
+      toast.error(e.response?.data?.detail || '批量创建失败')
+    } finally {
+      setBatchCreating(false)
     }
   }
 
@@ -64,18 +93,96 @@ export function TagManagerPanel() {
     }
   }
 
+  const handleBatchDelete = async () => {
+    if (selectedIds.size === 0) return toast.error('请先选择要删除的标签')
+    if (!confirm(`确定删除选中的 ${selectedIds.size} 个标签？关联也会一并删除。`)) return
+    setBatchDeleting(true)
+    try {
+      const { data } = await api.post('/tags/batch-delete', { tag_ids: Array.from(selectedIds) })
+      toast.success(`已删除 ${data.deleted} 个标签`)
+      setSelectedIds(new Set())
+      setBatchMode(false)
+      fetchTagCache(true)
+    } catch (e: any) {
+      toast.error(e.response?.data?.detail || '批量删除失败')
+    } finally {
+      setBatchDeleting(false)
+    }
+  }
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  // 只有自己的标签才能被选中删除
+  const ownTags = tags.filter(t => t.owner_id)
+  const allOwnSelected = ownTags.length > 0 && ownTags.every(t => selectedIds.has(t.id))
+
+  const toggleSelectAll = () => {
+    if (allOwnSelected) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(ownTags.map(t => t.id)))
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium text-gray-700 flex items-center gap-2">
           <Tag size={16} /> 标签管理
         </h3>
-        <button
-          onClick={() => setShowCreate(!showCreate)}
-          className="text-xs px-2 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded flex items-center gap-1"
-        >
-          <Plus size={12} /> 新建
-        </button>
+        <div className="flex items-center gap-2">
+          {batchMode ? (
+            <>
+              <button
+                onClick={toggleSelectAll}
+                className="text-xs px-2 py-1 text-gray-600 hover:bg-gray-100 rounded flex items-center gap-1"
+              >
+                <ListChecks size={12} /> {allOwnSelected ? '取消全选' : '全选'}
+              </button>
+              <button
+                onClick={handleBatchDelete}
+                disabled={selectedIds.size === 0 || batchDeleting}
+                className="text-xs px-2 py-1 bg-red-600 hover:bg-red-500 text-white rounded flex items-center gap-1 disabled:opacity-50"
+              >
+                <Trash2 size={12} /> {batchDeleting ? '删除中...' : `删除 (${selectedIds.size})`}
+              </button>
+              <button
+                onClick={() => { setBatchMode(false); setSelectedIds(new Set()) }}
+                className="text-xs px-2 py-1 bg-gray-200 text-gray-600 rounded"
+              >
+                取消
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => setBatchMode(true)}
+                className="text-xs px-2 py-1 text-gray-600 hover:bg-gray-100 rounded flex items-center gap-1"
+              >
+                <ListChecks size={12} /> 批量管理
+              </button>
+              <button
+                onClick={() => { setShowBatchCreate(!showBatchCreate); setShowCreate(false) }}
+                className="text-xs px-2 py-1 text-indigo-600 hover:bg-indigo-50 rounded flex items-center gap-1"
+              >
+                <Plus size={12} /> 批量添加
+              </button>
+              <button
+                onClick={() => { setShowCreate(!showCreate); setShowBatchCreate(false) }}
+                className="text-xs px-2 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded flex items-center gap-1"
+              >
+                <Plus size={12} /> 新建
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {showCreate && (
@@ -84,6 +191,7 @@ export function TagManagerPanel() {
             placeholder="标签名称"
             value={form.name}
             onChange={e => setForm({ ...form, name: e.target.value })}
+            onKeyDown={e => { if (e.key === 'Enter') handleCreate() }}
             className="w-full bg-white text-sm text-gray-900 rounded px-2 py-1.5 border border-gray-200 outline-none focus:ring-2 focus:ring-indigo-200"
           />
           <div className="flex gap-2 items-center">
@@ -107,17 +215,53 @@ export function TagManagerPanel() {
               ))}
             </div>
           </div>
-          <label className="flex items-center gap-2 text-xs text-gray-500">
-            <input
-              type="checkbox"
-              checked={form.is_shared}
-              onChange={e => setForm({ ...form, is_shared: e.target.checked })}
-            />
-            共享给所有人
-          </label>
           <div className="flex gap-2">
             <button onClick={handleCreate} className="text-xs px-3 py-1 bg-indigo-600 text-white rounded">创建</button>
             <button onClick={() => setShowCreate(false)} className="text-xs px-3 py-1 bg-gray-200 text-gray-600 rounded">取消</button>
+          </div>
+        </div>
+      )}
+
+      {showBatchCreate && (
+        <div className="bg-gray-50 rounded-lg p-3 space-y-2 border border-gray-200">
+          <div className="text-xs text-gray-500">输入多个标签名，每行一个或用逗号分隔</div>
+          <textarea
+            placeholder={"标签A\n标签B\n标签C"}
+            value={batchForm.names}
+            onChange={e => setBatchForm({ ...batchForm, names: e.target.value })}
+            rows={4}
+            className="w-full bg-white text-sm text-gray-900 rounded px-2 py-1.5 border border-gray-200 outline-none focus:ring-2 focus:ring-indigo-200 resize-none"
+          />
+          <div className="flex gap-2 items-center">
+            <select
+              value={batchForm.category}
+              onChange={e => setBatchForm({ ...batchForm, category: e.target.value })}
+              className="bg-white text-sm text-gray-700 rounded px-2 py-1 border border-gray-200"
+            >
+              {Object.entries(CATEGORY_LABELS).map(([k, v]) => (
+                <option key={k} value={k}>{v}</option>
+              ))}
+            </select>
+            <div className="flex gap-1">
+              {PRESET_COLORS.map(c => (
+                <button
+                  key={c}
+                  onClick={() => setBatchForm({ ...batchForm, color: c })}
+                  className="w-5 h-5 rounded-full border-2"
+                  style={{ backgroundColor: c, borderColor: batchForm.color === c ? '#111827' : 'transparent' }}
+                />
+              ))}
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={handleBatchCreate}
+              disabled={batchCreating}
+              className="text-xs px-3 py-1 bg-indigo-600 text-white rounded disabled:opacity-50"
+            >
+              {batchCreating ? '创建中...' : '批量创建'}
+            </button>
+            <button onClick={() => setShowBatchCreate(false)} className="text-xs px-3 py-1 bg-gray-200 text-gray-600 rounded">取消</button>
           </div>
         </div>
       )}
@@ -126,16 +270,25 @@ export function TagManagerPanel() {
         {tags.map(tag => (
           <div
             key={tag.id}
-            className="group flex items-center gap-1 px-2 py-1 rounded-full text-xs"
+            className={`group flex items-center gap-1 px-2 py-1 rounded-full text-xs ${batchMode && tag.owner_id ? 'cursor-pointer' : ''} ${selectedIds.has(tag.id) ? 'ring-2 ring-indigo-400' : ''}`}
             style={{ backgroundColor: tag.color + '33', border: `1px solid ${tag.color}` }}
+            onClick={batchMode && tag.owner_id ? () => toggleSelect(tag.id) : undefined}
           >
+            {batchMode && tag.owner_id && (
+              <input
+                type="checkbox"
+                checked={selectedIds.has(tag.id)}
+                onChange={() => toggleSelect(tag.id)}
+                onClick={e => e.stopPropagation()}
+                className="w-3 h-3 rounded accent-indigo-600"
+              />
+            )}
             <span style={{ color: tag.color }}>{tag.name}</span>
             <span className="text-gray-500 text-[10px]">{CATEGORY_LABELS[tag.category] || tag.category}</span>
-            {tag.is_shared && <span className="text-[10px] text-gray-500">公开</span>}
-            {tag.owner_id && (
+            {!batchMode && tag.owner_id && (
               <>
                 <button
-                  onClick={(e) => { e.stopPropagation(); setEditingId(tag.id); setForm({ name: tag.name, category: tag.category, color: tag.color, is_shared: tag.is_shared }) }}
+                  onClick={(e) => { e.stopPropagation(); setEditingId(tag.id); setForm({ name: tag.name, category: tag.category, color: tag.color }) }}
                   className="ml-1 cursor-pointer"
                   type="button"
                 >
