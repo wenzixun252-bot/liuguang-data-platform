@@ -615,6 +615,16 @@ async def structured_table_sync_job() -> None:
                     continue
 
                 await sync_table(db, table.id, user_access_token=user_token)
+
+                # 同步后重新应用清洗规则和提取规则
+                table_obj = await db.get(StructuredTable, table.id)
+                if table_obj and table_obj.cleaning_rule_id:
+                    from app.api.structured_tables import _apply_cleaning_after_import
+                    await _apply_cleaning_after_import(db, table.id, table_obj.cleaning_rule_id)
+                if table_obj and table_obj.extraction_rule_id:
+                    from app.api.structured_tables import _apply_extraction_after_import
+                    await _apply_extraction_after_import(db, table.id, table_obj.extraction_rule_id)
+
                 synced += 1
                 logger.info("同步结构化数据表: %s (id=%d)", table.name, table.id)
         except Exception as e:

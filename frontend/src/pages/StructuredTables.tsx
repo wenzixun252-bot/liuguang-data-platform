@@ -601,6 +601,7 @@ export default function StructuredTables() {
           detailPageSize={detailPageSize}
           loading={detailLoading}
           activeSheet={activeSheet}
+          rulesList={rulesList}
           onSheetChange={(sn) => {
             setActiveSheet(sn)
             setDetailPage(1)
@@ -614,6 +615,16 @@ export default function StructuredTables() {
           onDelete={() => handleDelete(detail.id)}
           onExport={handleExport}
           onDownloadOriginal={handleDownloadOriginal}
+          onRuleChange={async (ruleId) => {
+            try {
+              await api.patch(`/structured-tables/${detail.id}/extraction-rule`, { extraction_rule_id: ruleId })
+              toast.success(ruleId ? '提取规则已应用' : '已解除提取规则')
+              openDetail(detail.id)
+              setRefreshKey(k => k + 1)
+            } catch (err: any) {
+              toast.error(err?.response?.data?.detail || '操作失败')
+            }
+          }}
         />
       )}
 
@@ -631,8 +642,8 @@ export default function StructuredTables() {
 
 function TableDetailPanel({
   detail, rows, rowsTotal, rowPage, rowSearch, detailPageSize, loading,
-  activeSheet, onSheetChange,
-  onClose, onPageChange, onSearchChange, onSync, onDelete, onExport, onDownloadOriginal,
+  activeSheet, rulesList, onSheetChange,
+  onClose, onPageChange, onSearchChange, onSync, onDelete, onExport, onDownloadOriginal, onRuleChange,
 }: {
   detail: StructuredTableDetail
   rows: RowItem[]
@@ -642,6 +653,7 @@ function TableDetailPanel({
   detailPageSize: number
   loading: boolean
   activeSheet: string
+  rulesList: any[] | undefined
   onSheetChange: (sheetName: string) => void
   onClose: () => void
   onPageChange: (p: number) => void
@@ -650,6 +662,7 @@ function TableDetailPanel({
   onDelete: () => void
   onExport: (id: number, name: string) => void
   onDownloadOriginal: (id: number, name: string) => void
+  onRuleChange: (ruleId: number | null) => void
 }) {
   const sheetNames = detail.sheet_names || []
   const isMultiSheet = sheetNames.length > 1
@@ -697,6 +710,16 @@ function TableDetailPanel({
               ) : (
                 <span className="px-2 py-0.5 rounded-full text-xs bg-gray-50 text-gray-400 border border-gray-200">未清洗</span>
               )}
+              <select
+                value={detail.extraction_rule_id ?? ''}
+                onChange={(e) => onRuleChange(e.target.value ? Number(e.target.value) : null)}
+                className="px-2 py-0.5 rounded-full text-xs border border-violet-200 bg-violet-50 text-violet-600 cursor-pointer focus:outline-none focus:ring-1 focus:ring-violet-300"
+              >
+                <option value="">无提取规则</option>
+                {Array.isArray(rulesList) && rulesList.map((r: any) => (
+                  <option key={r.id} value={r.id}>{r.name}</option>
+                ))}
+              </select>
             </div>
           </div>
           <div className="flex items-center gap-2">
