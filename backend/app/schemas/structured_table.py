@@ -55,7 +55,7 @@ class StructuredTableDetail(BaseModel):
     feishu_record_id: str | None = None
     file_name: str | None = None
     file_path: str | None = None
-    schema_info: list | None = None
+    schema_info: list | dict | None = None
     row_count: int = 0
     column_count: int = 0
     key_info: dict | None = None
