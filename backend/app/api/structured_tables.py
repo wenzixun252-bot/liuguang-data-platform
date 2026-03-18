@@ -32,6 +32,41 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/structured-tables", tags=["结构化数据表"])
 
 
+async def _apply_extraction_after_import(
+    db: AsyncSession, table_id: int, extraction_rule_id: int
+) -> None:
+    """导入完成后自动应用提取规则（内部辅助函数）。"""
+    from app.services.etl.enricher import extract_key_info
+
+    result = await db.execute(
+        select(StructuredTable).where(StructuredTable.id == table_id)
+    )
+    table_obj = result.scalar_one_or_none()
+    if not table_obj:
+        logger.warning("表格 %d 不存在，跳过提取规则应用", table_id)
+        return
+
+    # 使用 content_text 作为提取内容（整个表格汇总文本）
+    content = table_obj.content_text or ""
+    if not content and table_obj.summary:
+        content = table_obj.summary
+    if not content:
+        logger.warning("表格 %d 无内容文本，跳过提取规则应用", table_id)
+        return
+
+    try:
+        key_info = await extract_key_info(
+            content, extraction_rule_id, db,
+            title=table_obj.name,
+        )
+        table_obj.extraction_rule_id = extraction_rule_id
+        table_obj.key_info = key_info
+        await db.commit()
+        logger.info("提取规则 %d 已应用到表格 %d", extraction_rule_id, table_id)
+    except Exception as e:
+        logger.error("应用提取规则失败 (rule=%d, table=%d): %s", extraction_rule_id, table_id, e)
+
+
 async def _apply_cleaning_after_import(
     db: AsyncSession, table_id: int, cleaning_rule_id: int
 ) -> None:
@@ -75,6 +110,10 @@ async def import_bitable(
         if body.cleaning_rule_id:
             await _apply_cleaning_after_import(db, table.id, body.cleaning_rule_id)
             await db.refresh(table)
+        # 如果指定了提取规则，导入完成后自动应用
+        if body.extraction_rule_id:
+            await _apply_extraction_after_import(db, table.id, body.extraction_rule_id)
+            await db.refresh(table)
         # LLM 自动标签推荐
         await _auto_tag_structured_table(db, table, current_user.feishu_open_id)
         return table
@@ -105,6 +144,10 @@ async def import_spreadsheet(
         if body.cleaning_rule_id:
             await _apply_cleaning_after_import(db, table.id, body.cleaning_rule_id)
             await db.refresh(table)
+        # 如果指定了提取规则，导入完成后自动应用
+        if body.extraction_rule_id:
+            await _apply_extraction_after_import(db, table.id, body.extraction_rule_id)
+            await db.refresh(table)
         # LLM 自动标签推荐
         await _auto_tag_structured_table(db, table, current_user.feishu_open_id)
         return table
@@ -117,6 +160,7 @@ async def import_spreadsheet(
 async def import_upload(
     file: UploadFile = File(...),
     cleaning_rule_id: int | None = Query(None, description="清洗规则 ID"),
+    extraction_rule_id: int | None = Query(None, description="提取规则 ID"),
     current_user: Annotated[User, Depends(get_current_user)] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ):
@@ -141,6 +185,10 @@ async def import_upload(
         # 如果指定了清洗规则，导入完成后自动应用
         if cleaning_rule_id:
             await _apply_cleaning_after_import(db, table.id, cleaning_rule_id)
+            await db.refresh(table)
+        # 如果指定了提取规则，导入完成后自动应用
+        if extraction_rule_id:
+            await _apply_extraction_after_import(db, table.id, extraction_rule_id)
             await db.refresh(table)
         # LLM 自动标签推荐
         await _auto_tag_structured_table(db, table, current_user.feishu_open_id)
@@ -353,6 +401,9 @@ async def import_from_url(
             if body.cleaning_rule_id:
                 await _apply_cleaning_after_import(db, table.id, body.cleaning_rule_id)
                 await db.refresh(table)
+            if body.extraction_rule_id:
+                await _apply_extraction_after_import(db, table.id, body.extraction_rule_id)
+                await db.refresh(table)
             return table
 
         elif parsed["type"] == "spreadsheet":
@@ -373,6 +424,9 @@ async def import_from_url(
             await db.refresh(table)
             if body.cleaning_rule_id:
                 await _apply_cleaning_after_import(db, table.id, body.cleaning_rule_id)
+                await db.refresh(table)
+            if body.extraction_rule_id:
+                await _apply_extraction_after_import(db, table.id, body.extraction_rule_id)
                 await db.refresh(table)
             return table
 
@@ -805,6 +859,9 @@ async def sync_table(
         table_obj = await db.get(StructuredTable, table_id)
         if table_obj and table_obj.cleaning_rule_id:
             await _apply_cleaning_after_import(db, table_id, table_obj.cleaning_rule_id)
+        # 如果表格已绑定提取规则，同步后自动重新应用
+        if table_obj and table_obj.extraction_rule_id:
+            await _apply_extraction_after_import(db, table_id, table_obj.extraction_rule_id)
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -9,6 +9,7 @@ from app.api.deps import get_current_user, get_db, get_visible_owner_ids
 from app.models.extraction_rule import ExtractionRule
 from app.models.document import Document
 from app.models.communication import Communication
+from app.models.structured_table import StructuredTable
 from app.models.user import User
 from app.schemas.extraction_rule import (
     ExtractionRuleCreate,
@@ -155,6 +156,19 @@ async def get_rule_data(
     if visible_ids is not None:
         comm_q = comm_q.where(Communication.owner_id.in_(visible_ids))
 
+    # 构建结构化表格查询
+    table_q = select(
+        StructuredTable.id.label("source_id"),
+        literal("structured_table").label("source_type"),
+        StructuredTable.name.label("source_title"),
+        StructuredTable.key_info.label("key_info"),
+    ).where(
+        StructuredTable.extraction_rule_id == rule_id,
+        StructuredTable.key_info.isnot(None),
+    )
+    if visible_ids is not None:
+        table_q = table_q.where(StructuredTable.owner_id.in_(visible_ids))
+
     # 搜索过滤
     if search:
         like = f"%{search}%"
@@ -164,9 +178,12 @@ async def get_rule_data(
         comm_q = comm_q.where(
             Communication.title.ilike(like) | cast(Communication.key_info, String).ilike(like)
         )
+        table_q = table_q.where(
+            StructuredTable.name.ilike(like) | cast(StructuredTable.key_info, String).ilike(like)
+        )
 
     # 合并查询
-    combined = union_all(doc_q, comm_q).subquery()
+    combined = union_all(doc_q, comm_q, table_q).subquery()
 
     # 总数
     total = (await db.execute(select(func.count()).select_from(combined))).scalar() or 0
@@ -248,6 +265,18 @@ async def export_rule_data(
     if visible_ids is not None:
         comm_q = comm_q.where(Communication.owner_id.in_(visible_ids))
 
+    table_q = select(
+        StructuredTable.id.label("source_id"),
+        literal("structured_table").label("source_type"),
+        StructuredTable.name.label("source_title"),
+        StructuredTable.key_info.label("key_info"),
+    ).where(
+        StructuredTable.extraction_rule_id == rule_id,
+        StructuredTable.key_info.isnot(None),
+    )
+    if visible_ids is not None:
+        table_q = table_q.where(StructuredTable.owner_id.in_(visible_ids))
+
     if search:
         like = f"%{search}%"
         doc_q = doc_q.where(
@@ -256,8 +285,11 @@ async def export_rule_data(
         comm_q = comm_q.where(
             Communication.title.ilike(like) | cast(Communication.key_info, String).ilike(like)
         )
+        table_q = table_q.where(
+            StructuredTable.name.ilike(like) | cast(StructuredTable.key_info, String).ilike(like)
+        )
 
-    combined = union_all(doc_q, comm_q).subquery()
+    combined = union_all(doc_q, comm_q, table_q).subquery()
     rows = (await db.execute(select(combined))).all()
 
     # 构建列头：来源 + 规则字段
@@ -274,7 +306,7 @@ async def export_rule_data(
         cell.fill = header_fill
         cell.font = header_font
 
-    source_type_labels = {"document": "文档", "communication": "沟通记录"}
+    source_type_labels = {"document": "文档", "communication": "沟通记录", "structured_table": "结构化表格"}
     for row_idx, row in enumerate(rows, 2):
         ws.cell(row=row_idx, column=1, value=row.source_title or "")
         ws.cell(row=row_idx, column=2, value=source_type_labels.get(row.source_type, row.source_type))

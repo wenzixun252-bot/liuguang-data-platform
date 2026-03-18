@@ -78,6 +78,9 @@ class StructuredTable(Base):
     quality_score: Mapped[float | None] = mapped_column(Float)
     duplicate_of: Mapped[int | None] = mapped_column(Integer)
     content_hash: Mapped[str | None] = mapped_column(String(64))
+    # -- 提取规则字段 --
+    key_info: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    extraction_rule_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # -- 清洗规则字段 --
     cleaning_rule_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     asset_owner_name: Mapped[str | None] = mapped_column(String(256))  # 飞书资产所有人名字（文档/表格的原始创建者）

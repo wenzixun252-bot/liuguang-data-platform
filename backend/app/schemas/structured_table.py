@@ -19,6 +19,8 @@ class StructuredTableOut(BaseModel):
     file_path: str | None = None
     row_count: int = 0
     column_count: int = 0
+    key_info: dict | None = None
+    extraction_rule_id: int | None = None
     cleaning_rule_id: int | None = None
     cleaning_rule_name: str | None = None
     keywords: list = []
@@ -56,6 +58,8 @@ class StructuredTableDetail(BaseModel):
     schema_info: list | None = None
     row_count: int = 0
     column_count: int = 0
+    key_info: dict | None = None
+    extraction_rule_id: int | None = None
     cleaning_rule_id: int | None = None
     cleaning_rule_name: str | None = None
     keywords: list = []
@@ -99,6 +103,7 @@ class ImportBitableRequest(BaseModel):
     app_token: str
     table_id: str
     cleaning_rule_id: int | None = None
+    extraction_rule_id: int | None = None
 
 
 class ImportSpreadsheetRequest(BaseModel):
@@ -106,6 +111,7 @@ class ImportSpreadsheetRequest(BaseModel):
     spreadsheet_token: str
     sheet_id: str
     cleaning_rule_id: int | None = None
+    extraction_rule_id: int | None = None
 
 
 class SearchResultItem(BaseModel):
@@ -129,6 +135,7 @@ class ImportFromURLRequest(BaseModel):
     """通过飞书链接导入请求。"""
     url: str
     cleaning_rule_id: int | None = None
+    extraction_rule_id: int | None = None
 
 
 class URLParseResult(BaseModel):
