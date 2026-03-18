@@ -108,9 +108,38 @@ class TestAssetSchemas:
 
         resp = AssetStatsResponse(
             total=100,
-            by_type={"conversation": 60, "document": 40},
+            by_table={"documents": 60, "communications": 40, "tables": 0},
+            today_new={"documents": 1, "communications": 0, "tables": 0},
             recent_trend=[{"date": "2024-01-01", "count": 5}],
         )
         data = resp.model_dump()
         assert data["total"] == 100
-        assert data["by_type"]["conversation"] == 60
+        assert data["by_table"]["documents"] == 60
+
+    def test_asset_score_response_schema(self):
+        """AssetScoreResponse schema 可正确序列化（含子指标）。"""
+        from app.schemas.asset import AssetScoreResponse, ScoreDimension, SubScoreDetail
+
+        dim = ScoreDimension(
+            key="quality",
+            label="内容质量",
+            weight=0.30,
+            score=62,
+            detail="质量均分 0.68",
+            sub_scores=[
+                SubScoreDetail(
+                    key="quality_avg",
+                    label="ETL 质量均分",
+                    weight=0.4,
+                    score=34,
+                    max_score=40,
+                    value="0.68",
+                    criteria=["≥0.85 → 36-40分", "<0.3 → 0-12分"],
+                )
+            ],
+        )
+        resp = AssetScoreResponse(total_score=52, level="良好", dimensions=[dim])
+        data = resp.model_dump()
+        assert data["total_score"] == 52
+        assert data["dimensions"][0]["weight"] == 0.30
+        assert data["dimensions"][0]["sub_scores"][0]["max_score"] == 40

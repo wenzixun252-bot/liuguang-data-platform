@@ -16,11 +16,24 @@ class ScoreAction(BaseModel):
     route: str
 
 
+class SubScoreDetail(BaseModel):
+    """子指标详情。"""
+    key: str
+    label: str
+    weight: float
+    score: int
+    max_score: int
+    value: str
+    criteria: list[str]
+
+
 class ScoreDimension(BaseModel):
     key: str
     label: str
+    weight: float
     score: int
     detail: str
+    sub_scores: list[SubScoreDetail] = []
     action: ScoreAction | None = None
 
 
