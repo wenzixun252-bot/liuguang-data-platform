@@ -1,5 +1,4 @@
 import GlobalSearch from '../components/GlobalSearch'
-import { TagManagerPanel } from '../components/TagManager'
 
 export default function SearchPage() {
   return (
@@ -12,11 +11,6 @@ export default function SearchPage() {
       {/* 全局搜索 */}
       <div className="bg-white rounded-xl border border-gray-200 p-6">
         <GlobalSearch />
-      </div>
-
-      {/* 标签管理 */}
-      <div className="bg-white rounded-xl border border-gray-200 p-6">
-        <TagManagerPanel />
       </div>
     </div>
   )

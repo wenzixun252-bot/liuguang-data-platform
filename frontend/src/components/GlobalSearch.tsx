@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Search, FileText, MessageSquare, Database, Network } from 'lucide-react'
 import api from '../lib/api'
 import toast from 'react-hot-toast'
@@ -71,11 +71,32 @@ export default function GlobalSearch({
       navigate(`${route}?highlight=${item.id}`)
     }
   }
+  const [searchParams] = useSearchParams()
   const [keyword, setKeyword] = useState('')
   const [results, setResults] = useState<SearchResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [tagFilter, setTagFilter] = useState<number[]>([])
   const [typeFilter, setTypeFilter] = useState('')
+
+  // 从 URL 参数初始化搜索状态并自动搜索
+  useEffect(() => {
+    const q = searchParams.get('q')
+    const tagIds = searchParams.get('tag_ids')
+    const contentTypes = searchParams.get('content_types')
+    if (q || tagIds) {
+      if (q) setKeyword(q)
+      const tags = tagIds ? tagIds.split(',').map(Number).filter(Boolean) : []
+      if (tags.length) setTagFilter(tags)
+      if (contentTypes) setTypeFilter(contentTypes)
+      // 直接执行搜索
+      const params: Record<string, string> = {}
+      if (q) params.q = q
+      if (tags.length) params.tag_ids = tags.join(',')
+      if (contentTypes) params.content_types = contentTypes
+      setLoading(true)
+      api.get('/search', { params }).then(({ data }) => setResults(data)).catch(() => toast.error('搜索失败')).finally(() => setLoading(false))
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const doSearch = async (overrideTagIds?: number[]) => {
     const tags = overrideTagIds ?? tagFilter

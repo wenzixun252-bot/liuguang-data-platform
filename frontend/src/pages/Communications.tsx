@@ -209,9 +209,9 @@ export default function Communications() {
     return (
       <div className="flex flex-wrap gap-1">
         {Object.entries(item.key_info).slice(0, 3).map(([k, v]) => (
-          <span key={k} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-violet-100 text-violet-800 border border-violet-200" title={`${k}: ${v}`}>
+          <span key={k} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-violet-100 text-violet-800 border border-violet-200" title={`${k}: ${v == null || v === 'null' ? '-' : typeof v === 'object' ? JSON.stringify(v) : String(v)}`}>
             <span className="text-violet-500 mr-0.5">{k}:</span>
-            <span className="truncate max-w-[90px]"><HighlightText text={String(v)} keyword={search} /></span>
+            <span className="truncate max-w-[90px]"><HighlightText text={v == null || v === 'null' ? '-' : typeof v === 'object' ? JSON.stringify(v) : String(v)} keyword={search} /></span>
           </span>
         ))}
         {Object.keys(item.key_info).length > 3 && <span className="text-xs text-violet-400">+{Object.keys(item.key_info).length - 3}</span>}
@@ -688,7 +688,7 @@ function CommunicationDetail({
                 {Object.entries(item.key_info).map(([k, v]) => (
                   <div key={k} className="bg-violet-50 rounded-lg p-3">
                     <p className="text-xs text-violet-500 font-medium mb-0.5">{k}</p>
-                    <p className="text-sm text-gray-800 whitespace-pre-wrap">{String(v)}</p>
+                    <p className="text-sm text-gray-800 whitespace-pre-wrap">{v == null || v === 'null' ? '-' : typeof v === 'object' ? JSON.stringify(v) : String(v)}</p>
                   </div>
                 ))}
               </div>

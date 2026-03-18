@@ -231,9 +231,9 @@ export default function Documents() {
         return (
           <div className="flex flex-wrap gap-1">
             {Object.entries(item.key_info).slice(0, 3).map(([k, v]) => (
-              <span key={k} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-violet-100 text-violet-800 border border-violet-200" title={`${k}: ${v}`}>
+              <span key={k} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-violet-100 text-violet-800 border border-violet-200" title={`${k}: ${v == null || v === 'null' ? '-' : typeof v === 'object' ? JSON.stringify(v) : String(v)}`}>
                 <span className="text-violet-500 mr-0.5">{k}:</span>
-                <span className="truncate max-w-[90px]"><HighlightText text={String(v)} keyword={search} /></span>
+                <span className="truncate max-w-[90px]"><HighlightText text={v == null || v === 'null' ? '-' : typeof v === 'object' ? JSON.stringify(v) : String(v)} keyword={search} /></span>
               </span>
             ))}
             {Object.keys(item.key_info).length > 3 && (
@@ -622,7 +622,7 @@ function DocumentDetail({ doc, onClose, onDelete }: { doc: DocumentItem; onClose
                 {Object.entries(doc.key_info).map(([k, v]) => (
                   <div key={k} className="flex items-start gap-2 text-sm">
                     <span className="text-indigo-600 font-medium shrink-0">{k}:</span>
-                    <span className="text-gray-800">{String(v)}</span>
+                    <span className="text-gray-800">{v == null || v === 'null' ? '-' : typeof v === 'object' ? JSON.stringify(v) : String(v)}</span>
                   </div>
                 ))}
               </div>
