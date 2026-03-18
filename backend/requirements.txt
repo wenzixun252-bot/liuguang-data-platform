@@ -36,6 +36,7 @@ pymupdf>=1.24,<2
 python-docx>=1.1,<2
 python-pptx>=1.0,<2
 openpyxl>=3.1,<4
+xlrd>=2.0,<3
 
 # Graph analysis
 networkx>=3.0,<4

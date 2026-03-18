@@ -412,10 +412,12 @@ async def import_from_local_file(
         headers, data_rows = _parse_csv(file_content)
     elif lower_name.endswith(".tsv"):
         headers, data_rows = _parse_csv(file_content, delimiter="\t")
-    elif lower_name.endswith((".xlsx", ".xls")):
-        headers, data_rows = _parse_excel(file_content)
+    elif lower_name.endswith(".xlsx"):
+        headers, data_rows = _parse_excel_xlsx(file_content)
+    elif lower_name.endswith(".xls"):
+        headers, data_rows = _parse_excel_xls(file_content)
     else:
-        raise ValueError(f"不支持的文件格式: {file_name}，请上传 .csv / .tsv / .xlsx 文件")
+        raise ValueError(f"不支持的文件格式: {file_name}，请上传 .csv / .tsv / .xlsx / .xls 文件")
 
     if not headers:
         raise ValueError("文件为空或无法解析列名")
@@ -495,8 +497,8 @@ def _parse_csv(content: bytes, delimiter: str = ",") -> tuple[list[str], list[li
     return headers, data_rows
 
 
-def _parse_excel(content: bytes) -> tuple[list[str], list[list]]:
-    """解析 Excel 文件，返回 (列名列表, 数据行列表)。"""
+def _parse_excel_xlsx(content: bytes) -> tuple[list[str], list[list]]:
+    """解析 .xlsx 文件（Excel 2007+），返回 (列名列表, 数据行列表)。"""
     import openpyxl
 
     wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
@@ -512,6 +514,24 @@ def _parse_excel(content: bytes) -> tuple[list[str], list[list]]:
 
     headers = [str(h) if h is not None else f"列{i+1}" for i, h in enumerate(rows[0])]
     data_rows = [list(row) for row in rows[1:]]
+    return headers, data_rows
+
+
+def _parse_excel_xls(content: bytes) -> tuple[list[str], list[list]]:
+    """解析 .xls 文件（Excel 97-2003），返回 (列名列表, 数据行列表)。"""
+    import xlrd
+
+    wb = xlrd.open_workbook(file_contents=content)
+    ws = wb.sheet_by_index(0)
+
+    if ws.nrows == 0:
+        return [], []
+
+    headers = [str(ws.cell_value(0, c)) if ws.cell_value(0, c) != "" else f"列{c+1}" for c in range(ws.ncols)]
+    data_rows = []
+    for r in range(1, ws.nrows):
+        row = [ws.cell_value(r, c) for c in range(ws.ncols)]
+        data_rows.append(row)
     return headers, data_rows
 
 
