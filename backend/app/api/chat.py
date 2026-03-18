@@ -5,7 +5,7 @@ import io
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
@@ -61,14 +61,14 @@ QUERY_REWRITE_PROMPT = """请将用户的口语化问题改写为更适合搜索
 1. 提取核心意图和关键词
 2. 去掉口语化表达（如"那个"、"来着"、"啥"）
 3. 补充可能的同义词
-4. 如果用户提到时间相关词（如"最近"、"本周"、"上周"、"这个月"），请换算成具体日期范围
+4. 如果用户提到时间相关词（如"最近"、"本周"、"上周"、"这个月"），请根据今天的日期换算成具体日期范围
 5. "本周"指本周一到本周日，"上周"指上周一到上周日，"最近"默认为最近7天，"这个月"指本月1日到月末
 6. 严格输出以下 JSON 格式，不要输出其他任何内容：
 
 {{"query": "改写后的搜索关键词", "time_start": "YYYY-MM-DD 或 null", "time_end": "YYYY-MM-DD 或 null"}}
 
-示例：
-- 用户问"总结我本周的工作" -> {{"query": "工作总结 会议 文档", "time_start": "2026-03-09", "time_end": "2026-03-15"}}
+示例（注意：日期必须根据今天 {today} 计算，以下仅为格式参考）：
+- 用户问"总结我本周的工作" -> {{"query": "工作总结 会议 文档", "time_start": "{this_week_mon}", "time_end": "{this_week_sun}"}}
 - 用户问"RAG怎么实现的" -> {{"query": "RAG 实现 检索增强生成", "time_start": null, "time_end": null}}
 
 用户问题：{question}"""
@@ -94,14 +94,17 @@ async def _rewrite_query(question: str) -> RewriteResult:
         return RewriteResult(query=question)
 
     try:
-        from datetime import date
         today = date.today()
         weekday = _WEEKDAY_CN[today.weekday()]
+        # 动态计算本周一和本周日，让示例中的日期与当前日期一致
+        this_week_mon = today - timedelta(days=today.weekday())
+        this_week_sun = this_week_mon + timedelta(days=6)
         from app.services.llm import llm_client
         response = await llm_client.chat_client.chat.completions.create(
             model=settings.llm_model,
             messages=[{"role": "user", "content": QUERY_REWRITE_PROMPT.format(
                 question=question, today=today.isoformat(), weekday=weekday,
+                this_week_mon=this_week_mon.isoformat(), this_week_sun=this_week_sun.isoformat(),
             )}],
             temperature=0.0,
             max_tokens=200,
