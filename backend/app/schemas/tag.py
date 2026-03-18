@@ -16,6 +16,7 @@ class TagDefinitionBatchCreate(BaseModel):
     names: list[str]
     category: str = "custom"
     color: str = "#6366f1"
+    colors: list[str] | None = None  # 每个标签独立颜色，长度需与 names 一致
 
 
 class TagDefinitionBatchDelete(BaseModel):

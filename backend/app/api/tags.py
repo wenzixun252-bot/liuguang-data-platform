@@ -91,6 +91,10 @@ async def batch_create_tags(
         )
     )
     existing_names = {r for r in existing.scalars().all()}
+    # 构建颜色映射：优先使用 colors 列表，否则统一用 color
+    color_map = {}
+    if body.colors and len(body.colors) == len(names):
+        color_map = {name: c for name, c in zip(names, body.colors)}
     created = []
     for name in names:
         if name in existing_names:
@@ -99,7 +103,7 @@ async def batch_create_tags(
             owner_id=current_user.feishu_open_id,
             category=body.category,
             name=name,
-            color=body.color,
+            color=color_map.get(name, body.color),
             is_shared=False,
         )
         db.add(tag)

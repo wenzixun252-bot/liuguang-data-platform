@@ -53,10 +53,11 @@ export function TagManagerPanel() {
     if (names.length === 0) return toast.error('请输入至少一个标签名')
     setBatchCreating(true)
     try {
+      const colors = names.map(() => PRESET_COLORS[Math.floor(Math.random() * PRESET_COLORS.length)])
       const { data } = await api.post('/tags/batch-create', {
         names,
         category: batchForm.category,
-        color: batchForm.color,
+        colors,
       })
       const created = data.length
       const skipped = names.length - created
@@ -242,16 +243,7 @@ export function TagManagerPanel() {
                 <option key={k} value={k}>{v}</option>
               ))}
             </select>
-            <div className="flex gap-1">
-              {PRESET_COLORS.map(c => (
-                <button
-                  key={c}
-                  onClick={() => setBatchForm({ ...batchForm, color: c })}
-                  className="w-5 h-5 rounded-full border-2"
-                  style={{ backgroundColor: c, borderColor: batchForm.color === c ? '#111827' : 'transparent' }}
-                />
-              ))}
-            </div>
+            <span className="text-xs text-gray-400">颜色自动随机分配</span>
           </div>
           <div className="flex gap-2">
             <button
@@ -284,7 +276,6 @@ export function TagManagerPanel() {
               />
             )}
             <span style={{ color: tag.color }}>{tag.name}</span>
-            <span className="text-gray-500 text-[10px]">{CATEGORY_LABELS[tag.category] || tag.category}</span>
             {!batchMode && tag.owner_id && (
               <>
                 <button
