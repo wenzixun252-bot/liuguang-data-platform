@@ -221,7 +221,7 @@ class FileUploadService:
 
     # ── 音频文件 → 沟通资产 ──────────────────────────────────
 
-    AUDIO_EXTENSIONS = {"mp3", "wav", "m4a", "aac", "ogg", "flac"}
+    AUDIO_EXTENSIONS = {"mp3", "wav", "m4a", "mp4", "aac", "ogg", "flac"}
 
     async def _generate_title_fallback(self, content: str) -> str | None:
         """当标题缺失时，用 LLM 从内容生成标题。"""
@@ -273,7 +273,7 @@ class FileUploadService:
         ext = self._validate(file.filename or "unknown", file_size)
 
         if ext not in self.AUDIO_EXTENSIONS:
-            raise FileUploadError(f"沟通资产仅支持音频文件，不支持 .{ext}")
+            raise FileUploadError(f"沟通资产仅支持音视频文件，不支持 .{ext}")
 
         meta = user_metadata or {}
 

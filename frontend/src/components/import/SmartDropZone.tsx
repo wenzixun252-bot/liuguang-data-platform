@@ -84,7 +84,7 @@ export default function SmartDropZone({ onFilesDetected, activeCategory }: Smart
         multiple
         onChange={handleFileSelect}
         className="hidden"
-        accept=".mp3,.wav,.m4a,.aac,.ogg,.flac,.pdf,.doc,.docx,.md,.markdown,.txt,.ppt,.pptx,.xls,.xlsx,.csv,.tsv,.json,.xml,.sql"
+        accept=".mp3,.wav,.m4a,.mp4,.aac,.ogg,.flac,.pdf,.doc,.docx,.md,.markdown,.txt,.ppt,.pptx,.xls,.xlsx,.csv,.tsv,.json,.xml,.sql"
       />
 
       <div className="flex flex-col items-center justify-center text-center">

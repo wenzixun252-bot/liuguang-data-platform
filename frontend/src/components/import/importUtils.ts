@@ -22,6 +22,7 @@ const EXTENSION_MAP: Record<string, ImportCategory> = {
   aac: 'communication',
   ogg: 'communication',
   flac: 'communication',
+  mp4: 'communication',
 
   // 专业文档：文本类
   pdf: 'document',
@@ -53,7 +54,7 @@ export const CATEGORY_CONFIG: Record<ImportCategory, FileClassification> = {
   communication: {
     category: 'communication',
     categoryName: '沟通数据',
-    extensions: ['MP3', 'WAV', 'M4A', '飞书/钉钉导出'],
+    extensions: ['MP3', 'WAV', 'M4A', 'MP4'],
     icon: 'AudioWaveform',
     description: '将语音或聊天转化为知识',
   },

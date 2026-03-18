@@ -17,7 +17,7 @@ declare module 'react' {
 
 // 每种分类对应的 accept 过滤
 const CATEGORY_ACCEPT: Record<ImportCategory, string> = {
-  communication: '.mp3,.wav,.m4a,.aac,.ogg,.flac',
+  communication: '.mp3,.wav,.m4a,.mp4,.aac,.ogg,.flac',
   document: '.pdf,.doc,.docx,.md,.markdown,.txt,.ppt,.pptx,.png,.jpg,.jpeg',
   structured: '.xls,.xlsx,.csv,.tsv,.json,.xml,.sql',
   unknown: '*',
