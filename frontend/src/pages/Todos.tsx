@@ -55,7 +55,6 @@ const STATUS_LABELS: Record<string, string> = {
 const TABS = [
   { key: 'in_progress', label: '进行中' },
   { key: 'completed', label: '已完成' },
-  { key: 'cancelled', label: '已取消' },
 ]
 
 interface SourceDetail {
