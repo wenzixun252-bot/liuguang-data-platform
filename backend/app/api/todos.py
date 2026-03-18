@@ -288,7 +288,7 @@ async def batch_delete_todos(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
-    """批量删除待办。"""
+    """批量删除待办，同步删除飞书任务，然后从数据库彻底移除。"""
     result = await db.execute(
         select(TodoItem).where(
             TodoItem.id.in_(body.ids),
@@ -298,6 +298,8 @@ async def batch_delete_todos(
     rows = result.scalars().all()
 
     for row in rows:
+        if row.feishu_task_id:
+            await feishu_client.delete_task(row.feishu_task_id)
         await db.delete(row)
 
     await db.commit()
