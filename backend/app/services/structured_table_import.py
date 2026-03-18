@@ -422,6 +422,18 @@ async def import_from_local_file(
     if not headers:
         raise ValueError("文件为空或无法解析列名")
 
+    # 处理重复列名：加序号后缀
+    seen: dict[str, int] = {}
+    unique_headers: list[str] = []
+    for h in headers:
+        if h in seen:
+            seen[h] += 1
+            unique_headers.append(f"{h}_{seen[h]}")
+        else:
+            seen[h] = 0
+            unique_headers.append(h)
+    headers = unique_headers
+
     # 保存原始文件到磁盘
     ext = Path(file_name).suffix
     save_dir = os.path.join(settings.upload_dir, owner_id, "structured")
@@ -464,6 +476,12 @@ async def import_from_local_file(
             row_text=build_row_text(row_data),
         ))
 
+    # 生成 content_text（前50行拼接文本，供提取规则和 RAG 使用）
+    text_rows = []
+    for rd in row_dicts[:50]:
+        text_rows.append(" | ".join(f"{k}: {v}" for k, v in rd.items() if v))
+    table_obj.content_text = "\n".join(text_rows)
+
     summary, display_name = await _generate_summary_and_name(row_dicts, file_name)
     table_obj.summary = summary
     if display_name != file_name:
@@ -498,23 +516,82 @@ def _parse_csv(content: bytes, delimiter: str = ",") -> tuple[list[str], list[li
 
 
 def _parse_excel_xlsx(content: bytes) -> tuple[list[str], list[list]]:
-    """解析 .xlsx 文件（Excel 2007+），返回 (列名列表, 数据行列表)。"""
+    """解析 .xlsx 文件（Excel 2007+），返回 (列名列表, 数据行列表)。
+
+    智能处理：
+    - 自动检测表头行（跳过标题、公司信息等合并行）
+    - 处理合并单元格（填充合并区域的值）
+    - 多工作表时读取第一个 sheet
+    """
     import openpyxl
 
-    wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+    # 不用 read_only 模式，以便读取合并单元格信息
+    wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
     ws = wb.active
     if ws is None:
+        wb.close()
         return [], []
 
-    rows = list(ws.iter_rows(values_only=True))
+    # 1. 填充合并单元格的值（让合并区域内所有格子都有值）
+    merge_ranges = list(ws.merged_cells.ranges)
+    for mr in merge_ranges:
+        top_left_value = ws.cell(mr.min_row, mr.min_col).value
+        ws.unmerge_cells(str(mr))
+        for row in range(mr.min_row, mr.max_row + 1):
+            for col in range(mr.min_col, mr.max_col + 1):
+                ws.cell(row=row, column=col, value=top_left_value)
+
+    # 2. 读取所有行
+    all_rows = []
+    for row in ws.iter_rows(values_only=True):
+        all_rows.append(list(row))
     wb.close()
 
-    if not rows:
+    if not all_rows:
         return [], []
 
-    headers = [str(h) if h is not None else f"列{i+1}" for i, h in enumerate(rows[0])]
-    data_rows = [list(row) for row in rows[1:]]
+    # 3. 智能检测表头行：找到第一个「多数格有值且无明显合并标题」的行
+    header_idx = _detect_header_row(all_rows)
+
+    headers = [str(h).strip() if h is not None else f"列{i+1}" for i, h in enumerate(all_rows[header_idx])]
+    data_rows = [list(row) for row in all_rows[header_idx + 1:]]
+
+    # 4. 过滤掉全空行
+    data_rows = [r for r in data_rows if any(v is not None and str(v).strip() != "" for v in r)]
+
     return headers, data_rows
+
+
+def _detect_header_row(rows: list[list], max_scan: int = 10) -> int:
+    """智能检测表头行索引。
+
+    策略：扫描前 max_scan 行，找到第一个满足以下条件的行：
+    - 至少有 2 个不同的非空值（排除合并标题行）
+    - 全部为字符串类型（不含数字）
+    - 非空值占比 >= 50%
+    如果都不满足，回退到第 0 行。
+    """
+    col_count = max(len(r) for r in rows) if rows else 0
+    if col_count == 0:
+        return 0
+
+    for idx in range(min(max_scan, len(rows))):
+        row = rows[idx]
+        non_empty = [v for v in row if v is not None and str(v).strip() != ""]
+        if len(non_empty) < 2:
+            continue
+        # 跳过不同值太少的行（合并单元格标题行、公司信息行等）
+        unique_vals = set(str(v).strip() for v in non_empty)
+        if len(unique_vals) < max(2, col_count * 0.4):
+            continue
+        # 检查是否全为文本（不含纯数字）
+        all_text = all(isinstance(v, str) or (v is not None and not isinstance(v, (int, float))) for v in non_empty)
+        # 非空比例
+        fill_ratio = len(non_empty) / col_count
+        if all_text and fill_ratio >= 0.5:
+            return idx
+
+    return 0
 
 
 def _parse_excel_xls(content: bytes) -> tuple[list[str], list[list]]:
@@ -527,11 +604,17 @@ def _parse_excel_xls(content: bytes) -> tuple[list[str], list[list]]:
     if ws.nrows == 0:
         return [], []
 
-    headers = [str(ws.cell_value(0, c)) if ws.cell_value(0, c) != "" else f"列{c+1}" for c in range(ws.ncols)]
-    data_rows = []
-    for r in range(1, ws.nrows):
+    # 读取所有行用于智能表头检测
+    all_rows = []
+    for r in range(ws.nrows):
         row = [ws.cell_value(r, c) for c in range(ws.ncols)]
-        data_rows.append(row)
+        all_rows.append(row)
+
+    header_idx = _detect_header_row(all_rows)
+
+    headers = [str(v).strip() if v is not None and str(v).strip() != "" else f"列{c+1}" for c, v in enumerate(all_rows[header_idx])]
+    data_rows = all_rows[header_idx + 1:]
+    data_rows = [r for r in data_rows if any(v is not None and str(v) != "" for v in r)]
     return headers, data_rows
 
 
