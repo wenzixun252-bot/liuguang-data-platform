@@ -25,9 +25,9 @@ const CATEGORY_ACCEPT: Record<ImportCategory, string> = {
 
 // 分类中文名
 const CATEGORY_LABELS: Record<ImportCategory, string> = {
-  communication: '沟通资产导入',
-  document: '文档资产导入',
-  structured: '表格资产导入',
+  communication: '沟通数据导入',
+  document: '文档数据导入',
+  structured: '表格数据导入',
   unknown: '文件导入',
 }
 

@@ -260,7 +260,7 @@ export default function ETLAdmin() {
                 <input type="text" value={form.table_name} onChange={e => setForm({ ...form, table_name: e.target.value })} placeholder="例如：客户对话记录" className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none" />
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">资产类型</label>
+                <label className="block text-xs text-gray-500 mb-1">数据类型</label>
                 <select value={form.asset_type} onChange={e => setForm({ ...form, asset_type: e.target.value })} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 outline-none bg-white">
                   {ASSET_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                 </select>

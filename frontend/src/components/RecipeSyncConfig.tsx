@@ -95,7 +95,7 @@ export default function RecipeSyncConfig({
 
   const existingKeys = new Set(sources.map((s) => `${s.app_token}:${s.table_id}`))
 
-  // 是否为沟通资产配方模式（需要筛选会议/会话表格）
+  // 是否为沟通数据配方模式（需要筛选会议/会话表格）
   const isRecipeMode = assetType === 'communication' && recipeUrl !== ''
 
   /* ── 加载数据源 ─────────────────────────── */
@@ -615,7 +615,7 @@ export default function RecipeSyncConfig({
                           {s.records_synced ? ` · ${s.records_synced} 条记录` : ''}
                         </p>
                       </div>
-                      {/* 提取规则选择器（仅沟通资产模式显示） */}
+                      {/* 提取规则选择器（仅沟通数据模式显示） */}
                       {isRecipeMode && (
                         matchedRule ? (
                           <span

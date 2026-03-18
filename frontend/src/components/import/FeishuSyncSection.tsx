@@ -71,7 +71,7 @@ function SyncStatusBadge({ status, syncing }: { status: string | null; syncing: 
   return null
 }
 
-// 沟通资产配方配置 — 增强引导流程
+// 沟通数据配方配置 — 增强引导流程
 const RECIPE_CONFIGS = {
   meeting: {
     title: '会议纪要导入配置',
@@ -165,7 +165,7 @@ export default function FeishuSyncSection({ extractionRuleId, cleaningRuleId }: 
       const globalId = `feishu-import-${task.id}`
       const isRunning = task.status === 'running' || task.status === 'pending'
       const label =
-        task.task_type === 'communication' ? '沟通资产导入' :
+        task.task_type === 'communication' ? '沟通数据导入' :
         task.task_type === 'cloud_doc' ? '云文档导入' :
         task.task_type === 'folder_sync' ? '文件夹同步' :
         task.task_type === 'bitable_sync' ? '多维表格同步' : '同步任务'
@@ -206,11 +206,11 @@ export default function FeishuSyncSection({ extractionRuleId, cleaningRuleId }: 
     return { commSources: comm, structuredSources: structured }
   }, [syncStatus])
 
-  // 沟通资产统计
+  // 沟通数据统计
   const commRecords = commSources.reduce((sum, s) => sum + (s.records_synced || 0), 0)
   const commLatestStatus = commSources.find(s => s.last_sync_time)?.last_sync_status || null
 
-  // 表格资产统计
+  // 表格数据统计
   const structuredRecords = structuredSources.reduce((sum, s) => sum + (s.records_synced || 0), 0)
   const structuredLatestStatus = structuredSources.find(s => s.last_sync_time)?.last_sync_status || null
   const structuredLatestTime = structuredSources
@@ -266,7 +266,7 @@ export default function FeishuSyncSection({ extractionRuleId, cleaningRuleId }: 
       const isBitable = configTarget !== 'structured-spreadsheet'
       return {
         title: configTarget === 'structured-bitable' ? '多维表格导入' :
-               configTarget === 'structured-spreadsheet' ? '飞书表格导入' : '配置表格资产数据源',
+               configTarget === 'structured-spreadsheet' ? '飞书表格导入' : '配置表格数据数据源',
         recipeUrl: '',
         assetType: 'structured' as const,
         recipeKeywords: [] as string[],
@@ -309,15 +309,15 @@ export default function FeishuSyncSection({ extractionRuleId, cleaningRuleId }: 
         <h2 className="font-semibold text-gray-900">飞书同步</h2>
       </div>
 
-      {/* 卡片网格 - 3列：沟通资产 | 表格资产 | 文档资产 */}
+      {/* 卡片网格 - 3列：沟通数据 | 表格数据 | 文档数据 */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
-        {/* ═══ 卡片1：沟通资产（配方引导） ═══ */}
+        {/* ═══ 卡片1：沟通数据（配方引导） ═══ */}
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="p-4">
             <div className="flex items-center gap-2 mb-1">
               <Table2 className="w-5 h-5 text-purple-600" />
-              <span className="font-medium text-gray-900">沟通资产</span>
+              <span className="font-medium text-gray-900">沟通数据</span>
             </div>
             <p className="text-xs text-gray-400 mb-3">通过飞书工作配方自动归档会议和群聊</p>
 
@@ -387,7 +387,7 @@ export default function FeishuSyncSection({ extractionRuleId, cleaningRuleId }: 
                 </div>
                 <div className="min-w-0 flex-1">
                   <span className="text-sm font-medium text-gray-700">导入会议纪要或文字记录</span>
-                  <p className="text-xs text-gray-400 truncate">搜索含纪要/记录的云文档，智能提取为沟通资产</p>
+                  <p className="text-xs text-gray-400 truncate">搜索含纪要/记录的云文档，智能提取为沟通数据</p>
                 </div>
                 <Plus className="w-3.5 h-3.5 text-gray-300 group-hover:text-purple-400 transition-colors shrink-0" />
               </div>
@@ -403,7 +403,7 @@ export default function FeishuSyncSection({ extractionRuleId, cleaningRuleId }: 
               </div>
             )}
 
-            {/* 沟通资产汇总 */}
+            {/* 沟通数据汇总 */}
             {commSources.length > 0 && (
               <div className="mt-3 pt-2 border-t border-gray-100 text-xs text-gray-500 space-y-0.5">
                 <p>{commSources.length} 个数据源 · {commRecords.toLocaleString()} 条记录</p>
@@ -426,12 +426,12 @@ export default function FeishuSyncSection({ extractionRuleId, cleaningRuleId }: 
           </div>
         </div>
 
-        {/* ═══ 卡片2：表格资产（多维表格 + 飞书表格） ═══ */}
+        {/* ═══ 卡片2：表格数据（多维表格 + 飞书表格） ═══ */}
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="p-4">
             <div className="flex items-center gap-2 mb-1">
               <Table2 className="w-5 h-5 text-amber-600" />
-              <span className="font-medium text-gray-900">表格资产</span>
+              <span className="font-medium text-gray-900">表格数据</span>
             </div>
             <p className="text-xs text-gray-400 mb-3">自由关联任意飞书多维表格</p>
 
@@ -514,12 +514,12 @@ export default function FeishuSyncSection({ extractionRuleId, cleaningRuleId }: 
           </div>
         </div>
 
-        {/* ═══ 卡片3：文档资产（云文档导入 + 文件夹同步） ═══ */}
+        {/* ═══ 卡片3：文档数据（云文档导入 + 文件夹同步） ═══ */}
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="p-4">
             <div className="flex items-center gap-2 mb-1">
               <FileText className="w-5 h-5 text-blue-600" />
-              <span className="font-medium text-gray-900">文档资产</span>
+              <span className="font-medium text-gray-900">文档数据</span>
             </div>
             <p className="text-xs text-gray-400 mb-3">从飞书云文档或文件夹导入文档</p>
 

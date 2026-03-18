@@ -91,7 +91,7 @@ export default function AssetScoreWidget({ onClose, compact }: { onClose?: () =>
   return (
     <WidgetContainer
       id="asset-score"
-      title="数据资产评分"
+      title="数据评分"
       icon={<Shield size={20} />}
       loading={loading}
       error={error}

@@ -48,7 +48,7 @@ export default function Login() {
             <span className="text-white text-2xl font-bold">LG</span>
           </div>
           <h1 className="text-2xl font-bold text-gray-800">流光智能数据平台</h1>
-          <p className="text-gray-500 mt-2">飞书企业级数据资产管理与智能问答</p>
+          <p className="text-gray-500 mt-2">飞书企业级数据管理与智能问答</p>
         </div>
 
         <div className="bg-white rounded-2xl shadow-lg p-8">

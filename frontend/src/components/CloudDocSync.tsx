@@ -38,7 +38,7 @@ const DOC_TYPE_LABELS: Record<string, string> = {
   file: '文件',
 }
 
-// 沟通资产关键词（匹配标题时推荐归类为沟通资产）
+// 沟通数据关键词（匹配标题时推荐归类为沟通数据）
 const COMM_KEYWORDS = ['纪要', '会议', '记录', '摘要', '沟通', '对话', '讨论', '录音', '转写', '智能纪要', '文字记录', 'meeting', 'minutes', 'transcript']
 
 function suggestCategory(docName: string): 'communication' | 'document' {
@@ -47,8 +47,8 @@ function suggestCategory(docName: string): 'communication' | 'document' {
 }
 
 const CATEGORY_LABELS = {
-  communication: { label: '沟通资产', className: 'bg-purple-50 text-purple-600 border-purple-200' },
-  document: { label: '文档资产', className: 'bg-blue-50 text-blue-600 border-blue-200' },
+  communication: { label: '沟通数据', className: 'bg-purple-50 text-purple-600 border-purple-200' },
+  document: { label: '文档数据', className: 'bg-blue-50 text-blue-600 border-blue-200' },
 } as const
 
 type ImportMode = 'cloud-doc' | 'folder-sync'
@@ -144,7 +144,7 @@ export default function CloudDocSync({ onClose, onImportComplete, initialMode = 
     return () => clearInterval(timer)
   }, [folderPolling, onImportComplete])
 
-  // 自动加载文档列表（沟通资产模式自动搜索关键词）
+  // 自动加载文档列表（沟通数据模式自动搜索关键词）
   useEffect(() => {
     if (isCommMode) {
       setDocSearch('纪要 记录')
@@ -211,7 +211,7 @@ export default function CloudDocSync({ onClose, onImportComplete, initialMode = 
         .map((d) => ({ token: d.token, name: d.name, type: d.doc_type, owner_id: d.owner_id || '', owner_name: d.owner_name || '' }))
       const endpoint = isCommMode ? '/import/feishu-docs/communication' : '/import/feishu-docs'
       await api.post(endpoint, { items, extraction_rule_id: extractionRuleId })
-      const label = isCommMode ? '沟通资产' : '文档'
+      const label = isCommMode ? '沟通数据' : '文档'
       toast.success(`${items.length} 个${label}已提交后台导入，稍后可在列表中查看`)
       onImportComplete?.()
       onClose()
@@ -327,7 +327,7 @@ export default function CloudDocSync({ onClose, onImportComplete, initialMode = 
         target: isCommMode ? 'communication' : 'document',
         extraction_rule_id: extractionRuleId,
       })
-      const label = isCommMode ? '沟通资产' : '文档'
+      const label = isCommMode ? '沟通数据' : '文档'
       toast.success(`已提交后台导入为${label}`)
       setPasteUrl('')
       onImportComplete?.()
@@ -408,7 +408,7 @@ export default function CloudDocSync({ onClose, onImportComplete, initialMode = 
                         className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs hover:bg-green-700 disabled:opacity-50"
                       >
                         {importing ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
-                        {importing ? '提交中...' : `${isCommMode ? '导入为沟通资产' : '导入选中'} (${selectedTokens.size})`}
+                        {importing ? '提交中...' : `${isCommMode ? '导入为沟通数据' : '导入选中'} (${selectedTokens.size})`}
                       </button>
                     )}
                   </div>
@@ -437,14 +437,14 @@ export default function CloudDocSync({ onClose, onImportComplete, initialMode = 
               <div className="bg-gray-50 rounded-lg p-2 text-xs text-gray-500 flex items-center gap-2">
                 {isCommMode ? (
                   <>
-                    <span className="px-1.5 py-0.5 rounded-full bg-purple-50 text-purple-600 text-[10px]">沟通资产</span>
-                    <span>选中的文档将由 AI 智能提取为沟通资产（标题、参与人、结论、待办等），导入后可点击查看原文档</span>
+                    <span className="px-1.5 py-0.5 rounded-full bg-purple-50 text-purple-600 text-[10px]">沟通数据</span>
+                    <span>选中的文档将由 AI 智能提取为沟通数据（标题、参与人、结论、待办等），导入后可点击查看原文档</span>
                   </>
                 ) : (
                   <>
-                    <span className="px-1.5 py-0.5 rounded-full bg-purple-50 text-purple-600 text-[10px]">沟通资产</span>
+                    <span className="px-1.5 py-0.5 rounded-full bg-purple-50 text-purple-600 text-[10px]">沟通数据</span>
                     <span>= 含"纪要/会议/记录/摘要"等关键词</span>
-                    <span className="px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 text-[10px] ml-2">文档资产</span>
+                    <span className="px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 text-[10px] ml-2">文档数据</span>
                     <span>= 其他文档</span>
                   </>
                 )}

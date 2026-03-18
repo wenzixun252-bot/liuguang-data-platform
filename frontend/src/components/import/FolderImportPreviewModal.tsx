@@ -199,7 +199,7 @@ export default function FolderImportPreviewModal({
             <div className="flex gap-2 p-3 bg-blue-50 border border-blue-100 rounded-xl">
               <Info className="w-4 h-4 text-blue-500 shrink-0 mt-0.5" />
               <p className="text-xs text-blue-700 leading-relaxed">
-                音频文件将以默认元数据导入（标题取自文件名，类型为「其他」）。如需补充参与人、时间等信息，可在导入后到沟通资产页面编辑。
+                音频文件将以默认元数据导入（标题取自文件名，类型为「其他」）。如需补充参与人、时间等信息，可在导入后到沟通数据页面编辑。
               </p>
             </div>
           )}

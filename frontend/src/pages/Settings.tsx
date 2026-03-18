@@ -26,7 +26,7 @@ import ETLAdmin from './ETLAdmin'
 
 const BASE_TABS = [
   { key: 'data-permission', label: '数据权限', icon: Shield },
-  { key: 'tags', label: '资产标签', icon: Tag },
+  { key: 'tags', label: '数据标签', icon: Tag },
   { key: 'notifications', label: '通知偏好', icon: Bell },
 ] as const
 
@@ -461,7 +461,7 @@ function FeishuDeptNode({
 }
 
 // ════════════════════════════════════════
-// Tab 3: 资产标签（复用 TagManagerPanel）
+// Tab 3: 数据标签（复用 TagManagerPanel）
 // ════════════════════════════════════════
 function TagsTab() {
   return (
@@ -480,7 +480,7 @@ function TagsTab() {
 const NOTIFICATION_ITEMS = [
   { key: 'on_sync_completed', label: '同步完成', desc: '数据源同步完成时通知' },
   { key: 'on_sync_failed', label: '同步失败', desc: '数据源同步出错时通知' },
-  { key: 'on_new_data', label: '新数据到达', desc: '有新的数据资产入库时通知' },
+  { key: 'on_new_data', label: '新数据到达', desc: '有新的数据入库时通知' },
   { key: 'on_tag_suggestion', label: '标签建议', desc: '系统推荐新标签时通知' },
   { key: 'on_share_received', label: '收到分享', desc: '有人将数据分享给你时通知' },
 ] as const

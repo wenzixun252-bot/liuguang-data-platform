@@ -524,7 +524,7 @@ export default function Communications() {
       {/* 页面标题和工具栏 */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold text-gray-800">沟通资产</h1>
+          <h1 className="text-2xl font-bold text-gray-800">沟通数据</h1>
           <button
             type="button"
             onClick={() => navigate('/data-import')}

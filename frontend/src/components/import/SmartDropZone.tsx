@@ -117,7 +117,7 @@ export default function SmartDropZone({ onFilesDetected, activeCategory }: Smart
       {/* 活跃分类指示器 */}
       {activeCategory && dropState === 'drag-hover' && (
         <div className="absolute -top-2 -right-2 px-2 py-1 bg-indigo-600 text-white text-xs rounded-full">
-          归类至: {activeCategory === 'communication' ? '沟通资产' : activeCategory === 'document' ? '文档资产' : '表格资产'}
+          归类至: {activeCategory === 'communication' ? '沟通数据' : activeCategory === 'document' ? '文档数据' : '表格数据'}
         </div>
       )}
     </div>

@@ -33,7 +33,7 @@ const EXTENSION_MAP: Record<string, ImportCategory> = {
   ppt: 'document',
   pptx: 'document',
 
-  // 图片：归入文档资产（后端用视觉模型识别内容）
+  // 图片：归入文档数据（后端用视觉模型识别内容）
   png: 'document',
   jpg: 'document',
   jpeg: 'document',
@@ -52,21 +52,21 @@ const EXTENSION_MAP: Record<string, ImportCategory> = {
 export const CATEGORY_CONFIG: Record<ImportCategory, FileClassification> = {
   communication: {
     category: 'communication',
-    categoryName: '沟通资产',
+    categoryName: '沟通数据',
     extensions: ['MP3', 'WAV', 'M4A', '飞书/钉钉导出'],
     icon: 'AudioWaveform',
     description: '将语音或聊天转化为知识',
   },
   document: {
     category: 'document',
-    categoryName: '文档资产',
+    categoryName: '文档数据',
     extensions: ['PDF', 'Word', 'PPT', 'Image'],
     icon: 'FileText',
     description: '归档您的重要文档资料',
   },
   structured: {
     category: 'structured',
-    categoryName: '表格资产',
+    categoryName: '表格数据',
     extensions: ['Excel', 'CSV', 'SQL导出'],
     icon: 'Table2',
     description: '精准提取行列数据',

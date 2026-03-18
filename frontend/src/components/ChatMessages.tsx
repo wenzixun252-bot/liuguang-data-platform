@@ -91,7 +91,7 @@ export default function ChatMessages({ messages, promptTemplates, onTemplateClic
           <Sparkles size={48} className="text-indigo-300/60 mb-4" />
         </motion.div>
         <p className="text-lg mb-2" style={{ color: 'var(--color-text-tertiary)' }}>有什么我能帮你的？</p>
-        <p className="text-sm mb-6" style={{ color: 'var(--color-text-quaternary)' }}>基于你的数据资产为你提供智能问答</p>
+        <p className="text-sm mb-6" style={{ color: 'var(--color-text-quaternary)' }}>基于你的数据为你提供智能问答</p>
         <div className="grid grid-cols-2 gap-3 max-w-lg w-full">
           {promptTemplates.map((t) => (
             <motion.button
@@ -117,7 +117,7 @@ export default function ChatMessages({ messages, promptTemplates, onTemplateClic
         <div className="flex flex-col items-center justify-center h-full space-y-4" style={{ color: 'var(--color-text-tertiary)' }}>
           <Sparkles size={48} className="text-indigo-300/60" />
           <p className="text-lg">有什么我能帮你的？</p>
-          <p className="text-sm">基于你的数据资产为你提供智能问答</p>
+          <p className="text-sm">基于你的数据为你提供智能问答</p>
         </div>
       )}
 

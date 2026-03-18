@@ -57,12 +57,12 @@ const NAV_ITEMS: NavEntry[] = [
   { path: '/data-import', label: '数据归档', icon: Upload },
   {
     key: 'data-assets',
-    label: '数据资产',
+    label: '数据',
     icon: FolderOpen,
     children: [
-      { path: '/communications', label: '沟通资产', icon: MessageSquare },
-      { path: '/documents', label: '文档资产', icon: FileText },
-      { path: '/structured-tables', label: '表格资产', icon: Table2 },
+      { path: '/communications', label: '沟通数据', icon: MessageSquare },
+      { path: '/documents', label: '文档数据', icon: FileText },
+      { path: '/structured-tables', label: '表格数据', icon: Table2 },
     ],
   },
   { path: '/chat', label: '智能助手', icon: Bot },

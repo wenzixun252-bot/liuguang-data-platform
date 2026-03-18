@@ -107,7 +107,7 @@ export default function ImportConfirmModal({
   const handleConfirm = async () => {
     setUploading(true)
     try {
-      // 构建音频元数据（仅沟通资产时传递）
+      // 构建音频元数据（仅沟通数据时传递）
       const metadata: AudioMetadata | undefined = showAudioForm
         ? {
             title: audioTitle || undefined,
@@ -215,7 +215,7 @@ export default function ImportConfirmModal({
             </div>
           )}
 
-          {/* 音频补充信息表单 — 仅沟通资产时显示 */}
+          {/* 音频补充信息表单 — 仅沟通数据时显示 */}
           {showAudioForm && (
             <div className="mb-5 border border-indigo-100 rounded-xl bg-indigo-50/30 p-4">
               <p className="text-sm font-medium text-gray-700 mb-3">

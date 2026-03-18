@@ -197,7 +197,7 @@ export default function StructuredTables() {
     },
     {
       key: 'asset_owner_name',
-      label: '资产所有人',
+      label: '数据所有人',
       width: 130,
       headerClassName: 'text-indigo-700 font-semibold bg-indigo-50/50',
       cellClassName: () => 'bg-indigo-50/30',

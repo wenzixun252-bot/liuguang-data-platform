@@ -298,7 +298,7 @@ export default function Documents() {
     },
     {
       key: 'asset_owner_name',
-      label: '资产所有人',
+      label: '数据所有人',
       width: 130,
       headerClassName: 'text-indigo-700 font-semibold bg-indigo-50/50',
       cellClassName: (item) => search && item.matched_fields?.includes('asset_owner_name') ? 'bg-amber-50' : 'bg-indigo-50/30',
@@ -591,7 +591,7 @@ function DocumentDetail({ doc, onClose, onDelete }: { doc: DocumentItem; onClose
           <Field label="标题" value={doc.title || '无标题'} />
           {doc.original_filename && <Field label="原始文件名" value={doc.original_filename} />}
           <Field label="来源" value={getSourceLabel(doc)} />
-          {doc.asset_owner_name && <Field label="资产所有人" value={doc.asset_owner_name} icon={<User size={14} />} />}
+          {doc.asset_owner_name && <Field label="数据所有人" value={doc.asset_owner_name} icon={<User size={14} />} />}
           {doc.uploader_name && <Field label="上传人" value={doc.uploader_name} icon={<User size={14} />} />}
           {doc.file_type && <Field label="文件类型" value={doc.file_type.toUpperCase()} />}
           <Field label="时间" value={new Date(doc.synced_at || doc.created_at).toLocaleString('zh-CN')} />

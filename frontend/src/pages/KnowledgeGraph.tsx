@@ -800,7 +800,7 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
       setRelatedNodes([])
     }
 
-    // 加载关联资产
+    // 加载关联数据
     api.get(`/knowledge-graph/entities/${node.id}/linked-assets`)
       .then(res => setLinkedAssets(res.data))
       .catch(() => setLinkedAssets([]))
@@ -1181,10 +1181,10 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
                   </div>
                 )}
 
-                {/* 关联资产 */}
+                {/* 关联数据 */}
                 {linkedAssets.filter(a => a.asset_type !== 'communication').length > 0 && (
                   <div>
-                    <p className="text-sm font-medium text-gray-700 mb-2">关联资产</p>
+                    <p className="text-sm font-medium text-gray-700 mb-2">关联数据</p>
                     <div className="space-y-1">
                       {linkedAssets.filter(a => a.asset_type !== 'communication').map(asset => (
                         <div
@@ -1668,7 +1668,7 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
         </div>
       )}
 
-      {/* 资产详情弹窗 */}
+      {/* 数据详情弹窗 */}
       {showAssetModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex justify-end" onClick={() => setShowAssetModal(false)}>
           <div className="w-full max-w-lg bg-white h-full overflow-y-auto shadow-xl" onClick={(e) => e.stopPropagation()}>
@@ -1693,7 +1693,7 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
                 </div>
 
                 {meetingDetail.asset_owner_name && (
-                  <div><p className="text-sm text-indigo-600 font-medium">资产所有人</p><p className="text-sm text-gray-800 font-medium">{meetingDetail.asset_owner_name}</p></div>
+                  <div><p className="text-sm text-indigo-600 font-medium">数据所有人</p><p className="text-sm text-gray-800 font-medium">{meetingDetail.asset_owner_name}</p></div>
                 )}
                 {meetingDetail.initiator && (
                   <div><p className="text-sm text-gray-500">组织者/发送者</p><p className="text-sm text-gray-800 font-medium">{meetingDetail.initiator}</p></div>
@@ -1817,7 +1817,7 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
                   <p className="text-sm text-gray-800 font-medium">{SOURCE_TYPE_LABELS[assetDetail.source_type] || assetDetail.source_type}</p>
                 </div>
                 {assetDetail.asset_owner_name && (
-                  <div><p className="text-sm text-indigo-600 font-medium">资产所有人</p><p className="text-sm text-gray-800 font-medium">{assetDetail.asset_owner_name}</p></div>
+                  <div><p className="text-sm text-indigo-600 font-medium">数据所有人</p><p className="text-sm text-gray-800 font-medium">{assetDetail.asset_owner_name}</p></div>
                 )}
                 {assetDetail.author && (
                   <div><p className="text-sm text-gray-500">作者</p><p className="text-sm text-gray-800 font-medium">{assetDetail.author}</p></div>
