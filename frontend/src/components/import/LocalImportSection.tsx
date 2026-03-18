@@ -77,9 +77,8 @@ export default function LocalImportSection({ extractionRuleId, cleaningRuleId, e
         const params: Record<string, number> = {}
         if (category === 'structured') {
           if (cleaningRuleId) params.cleaning_rule_id = cleaningRuleId
-        } else {
-          if (extractionRuleId) params.extraction_rule_id = extractionRuleId
         }
+        if (extractionRuleId) params.extraction_rule_id = extractionRuleId
         if (category === 'communication') {
           formData.append('metadata', JSON.stringify({
             title: file.name.replace(/\.\w+$/, ''),
@@ -191,7 +190,7 @@ export default function LocalImportSection({ extractionRuleId, cleaningRuleId, e
       </div>
 
       {/* 分类卡片 — 点击直接弹出文件选择器 */}
-      <div className="space-y-3">
+      <div className="space-y-2">
         <CategoryCard
           category="communication"
           isActive={activeCategory === 'communication'}
@@ -212,7 +211,7 @@ export default function LocalImportSection({ extractionRuleId, cleaningRuleId, e
       {/* 文件夹导入 */}
       {supportsWebkitDirectory && (
         <>
-          <div className="flex items-center gap-3 my-4">
+          <div className="flex items-center gap-3 my-2.5">
             <div className="flex-1 border-t border-gray-300" />
             <span className="text-xs text-gray-400">或者</span>
             <div className="flex-1 border-t border-gray-300" />
@@ -220,7 +219,7 @@ export default function LocalImportSection({ extractionRuleId, cleaningRuleId, e
           <button
             type="button"
             onClick={() => folderInputRef.current?.click()}
-            className="w-full flex items-center gap-3 px-4 py-3 bg-white border-2 border-dashed border-gray-300 rounded-xl hover:border-indigo-400 hover:bg-indigo-50/30 transition-colors group"
+            className="w-full flex items-center gap-3 px-4 py-2 bg-white border-2 border-dashed border-gray-300 rounded-xl hover:border-indigo-400 hover:bg-indigo-50/30 transition-colors group"
           >
             <FolderOpen className="w-5 h-5 text-gray-400 group-hover:text-indigo-500 transition-colors" />
             <div className="text-left">
