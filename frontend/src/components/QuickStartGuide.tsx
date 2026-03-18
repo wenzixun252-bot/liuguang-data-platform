@@ -78,10 +78,25 @@ export default function QuickStartGuide() {
     return 'locked'
   }
 
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const [panelPos, setPanelPos] = useState({ top: 0, right: 0 })
+
+  // 计算面板位置
+  useEffect(() => {
+    if (open && buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect()
+      setPanelPos({
+        top: rect.bottom + 8,
+        right: window.innerWidth - rect.right,
+      })
+    }
+  }, [open])
+
   return (
-    <div className="relative shrink-0 z-50" ref={containerRef}>
+    <div className="relative shrink-0" ref={containerRef}>
       {/* 触发按钮 */}
       <button
+        ref={buttonRef}
         onClick={() => {
           setOpen(prev => !prev)
           if (!open) refetchAll()
@@ -101,7 +116,7 @@ export default function QuickStartGuide() {
         )}
       </button>
 
-      {/* Popover 浮动面板 */}
+      {/* Popover 浮动面板 - fixed 定位避免遮挡页面内容 */}
       <AnimatePresence>
         {open && (
           <motion.div
@@ -109,7 +124,8 @@ export default function QuickStartGuide() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -8, scale: 0.96 }}
             transition={{ duration: 0.15 }}
-            className="absolute right-0 top-full mt-2 w-80 bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden z-[60]"
+            className="fixed w-80 bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden z-[9999]"
+            style={{ top: panelPos.top, right: panelPos.right }}
           >
             {/* 头部 */}
             <div className="px-4 pt-4 pb-3 flex items-center justify-between">
