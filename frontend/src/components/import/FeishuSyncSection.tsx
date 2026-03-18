@@ -629,7 +629,7 @@ export default function FeishuSyncSection({ extractionRuleId, cleaningRuleId }: 
           <RecipeSyncConfig
             {...props}
             cleaningRuleId={cleaningRuleId}
-            extractionRuleId={extractionRuleId}
+            extractionRuleId={configTarget === 'chat' ? null : extractionRuleId}
             onClose={() => setConfigTarget(null)}
             onSyncComplete={() => {
               queryClient.invalidateQueries({ queryKey: ['sync-status'] })

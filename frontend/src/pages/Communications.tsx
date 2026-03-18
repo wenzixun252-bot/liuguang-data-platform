@@ -440,14 +440,6 @@ export default function Communications() {
         </div>
       ),
     },
-    {
-      key: 'key_info',
-      label: '自定义提取内容',
-      width: 300,
-      headerClassName: 'text-violet-700 font-semibold bg-violet-50/50',
-      cellClassName: (item) => search && item.matched_fields?.includes('key_info') ? 'bg-amber-50' : 'bg-violet-50/30',
-      cell: keyInfoCell,
-    },
     { key: 'actions', label: '操作', width: 100, minWidth: 80, cell: actionsCell },
   ], [search, tagsMap, rulesMap, columnFilters, dateFilters, reloadTags])
 
@@ -689,7 +681,7 @@ function CommunicationDetail({
               </div>
             </div>
           )}
-          {item.key_info && Object.keys(item.key_info).length > 0 && (
+          {isMeetingLike && item.key_info && Object.keys(item.key_info).length > 0 && (
             <div>
               <p className="text-sm text-gray-500 mb-1">自定义提取内容</p>
               <div className="space-y-2">

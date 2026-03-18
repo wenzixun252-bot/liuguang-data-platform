@@ -78,7 +78,7 @@ export default function DataRuleSection({ onRulesChange, activeExtractionRuleId,
             <Sparkles className="w-4 h-4 text-indigo-600" />
             <span className="text-sm font-semibold text-gray-800">提取规则</span>
             <span className="text-xs text-gray-400">从文档中提取结构化字段</span>
-            <span className="ml-auto text-xs text-indigo-400 bg-indigo-50 px-2 py-0.5 rounded-full">本地文档 · 飞书文档（含会议文档） · 会议记录表 · 会话记录表</span>
+            <span className="ml-auto text-xs text-indigo-400 bg-indigo-50 px-2 py-0.5 rounded-full">本地文档 · 飞书文档（含会议文档） · 会议记录表 · 本地表格</span>
           </div>
           <div className="flex flex-wrap gap-2">
             {extractionRules.filter((r: any) => r.is_builtin).map((rule: any) => {

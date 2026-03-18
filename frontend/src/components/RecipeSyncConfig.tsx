@@ -615,8 +615,8 @@ export default function RecipeSyncConfig({
                           {s.records_synced ? ` · ${s.records_synced} 条记录` : ''}
                         </p>
                       </div>
-                      {/* 提取规则选择器（仅沟通数据模式显示） */}
-                      {isRecipeMode && (
+                      {/* 提取规则选择器（仅会议记录数据源显示，会话记录不支持） */}
+                      {isRecipeMode && sourceType !== 'chat' && (
                         matchedRule ? (
                           <span
                             title="点击移除提取规则"
