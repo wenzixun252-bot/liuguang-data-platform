@@ -28,6 +28,7 @@ interface StructuredTableItem {
   row_count: number
   column_count: number
   import_count: number
+  key_info?: Record<string, string> | null
   cleaning_rule_id?: number | null
   cleaning_rule_name?: string | null
   asset_owner_name: string | null
@@ -42,6 +43,7 @@ interface StructuredTableDetail extends StructuredTableItem {
   source_table_id: string | null
   schema_info: { field_id: string; field_name: string; field_type: string | number }[] | null
   keywords: string[]
+  key_info?: Record<string, string> | null
 }
 
 interface RowItem {
@@ -183,6 +185,31 @@ export default function StructuredTables() {
       label: '摘要',
       width: 220,
       cell: (item) => <span className="text-gray-500">{item.summary || '-'}</span>,
+    },
+    {
+      key: 'key_info',
+      label: '自定义提取内容',
+      width: 300,
+      headerClassName: 'text-violet-700 font-semibold bg-violet-50/50',
+      cellClassName: () => 'bg-violet-50/30',
+      cell: (item) => {
+        if (!item.key_info || Object.keys(item.key_info).length === 0) {
+          return <span className="text-gray-300 text-xs">-</span>
+        }
+        return (
+          <div className="flex flex-wrap gap-1">
+            {Object.entries(item.key_info).slice(0, 3).map(([k, v]) => (
+              <span key={k} className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-violet-100 text-violet-800 border border-violet-200" title={`${k}: ${v}`}>
+                <span className="text-violet-500 mr-0.5">{k}:</span>
+                <span className="truncate max-w-[90px]">{String(v)}</span>
+              </span>
+            ))}
+            {Object.keys(item.key_info).length > 3 && (
+              <span className="text-xs text-violet-400">+{Object.keys(item.key_info).length - 3}</span>
+            )}
+          </div>
+        )
+      },
     },
     {
       key: 'source_type',
@@ -637,6 +664,19 @@ function TableDetailPanel({
           <div className="px-6 py-3 border-b border-gray-100">
             <div className="flex flex-wrap gap-1.5">
               {detail.keywords.map((kw, i) => <span key={i} className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full text-xs">{kw}</span>)}
+            </div>
+          </div>
+        )}
+        {detail.key_info && Object.keys(detail.key_info).length > 0 && (
+          <div className="px-6 py-3 border-b border-gray-100">
+            <p className="text-sm text-gray-500 mb-1">自定义提取内容</p>
+            <div className="space-y-1.5 bg-violet-50 rounded-lg p-3">
+              {Object.entries(detail.key_info).map(([k, v]) => (
+                <div key={k} className="flex items-start gap-2 text-sm">
+                  <span className="text-violet-600 font-medium shrink-0">{k}:</span>
+                  <span className="text-gray-800">{String(v)}</span>
+                </div>
+              ))}
             </div>
           </div>
         )}
