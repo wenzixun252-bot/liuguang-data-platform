@@ -178,7 +178,7 @@ export default function DataInsights() {
 
       {/* 数据评分 + 智能待办 并排 */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <AssetScoreWidget compact />
+        <AssetScoreWidget />
         <Todos embedded />
       </div>
 
