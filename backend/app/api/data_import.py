@@ -291,6 +291,42 @@ async def _sync_structured_source(ds: ETLDataSource, user_access_token: str | No
                 except Exception as clean_err:
                     logger.warning("自动清洗失败: %s", clean_err)
 
+            # 如果表格已绑定提取规则，同步后自动重新应用
+            if table_obj and table_obj.extraction_rule_id:
+                try:
+                    from app.services.etl.enricher import extract_key_info
+                    content = table_obj.content_text or ""
+                    if not content and table_obj.summary:
+                        content = table_obj.summary
+                    if content:
+                        key_info = await extract_key_info(
+                            content, table_obj.extraction_rule_id, db,
+                            title=table_obj.name,
+                        )
+                        table_obj.key_info = key_info
+                        await db.commit()
+                        logger.info("提取规则已自动应用: table=%d, rule=%d", table_obj.id, table_obj.extraction_rule_id)
+                except Exception as extract_err:
+                    logger.warning("自动提取失败: %s", extract_err)
+            # 如果数据源配置了提取规则但表格未绑定（首次通过数据源同步），绑定并执行
+            elif table_obj and ds.extraction_rule_id and not table_obj.extraction_rule_id:
+                try:
+                    from app.services.etl.enricher import extract_key_info
+                    table_obj.extraction_rule_id = ds.extraction_rule_id
+                    content = table_obj.content_text or ""
+                    if not content and table_obj.summary:
+                        content = table_obj.summary
+                    if content:
+                        key_info = await extract_key_info(
+                            content, ds.extraction_rule_id, db,
+                            title=table_obj.name,
+                        )
+                        table_obj.key_info = key_info
+                    await db.commit()
+                    logger.info("提取规则已从数据源配置应用: table=%d, rule=%d", table_obj.id, ds.extraction_rule_id)
+                except Exception as extract_err:
+                    logger.warning("自动提取失败: %s", extract_err)
+
             # LLM 自动标签推荐
             if table_obj:
                 try:
