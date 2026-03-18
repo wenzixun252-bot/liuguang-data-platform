@@ -4,7 +4,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock,
-  Send,
   Sparkles,
   X,
   Edit3,
@@ -13,7 +12,6 @@ import {
   Trash2,
   ExternalLink,
   Loader2,
-  AlertTriangle,
 } from 'lucide-react'
 import api from '../lib/api'
 import { DateRangeFilter } from '../components/DateRangeFilter'
@@ -33,29 +31,39 @@ interface TodoItem {
   source_time: string | null
   status: string
   confidence: number | null
-  feishu_task_id: string | null
-  pushed_at: string | null
-  cancelled_at: string | null
   created_at: string
   updated_at: string
 }
 
 const PRIORITY_COLORS = {
   low: 'bg-gray-100 text-gray-600',
-  medium: 'bg-yellow-100 text-yellow-700',
+  medium: 'bg-orange-100 text-orange-700',
   high: 'bg-red-100 text-red-700',
+}
+
+const PRIORITY_LABELS: Record<string, string> = {
+  low: '不紧急',
+  medium: '一般',
+  high: '紧急',
 }
 
 const STATUS_LABELS: Record<string, string> = {
   in_progress: '进行中',
   completed: '已完成',
-  cancelled: '已取消',
 }
 
 const TABS = [
   { key: 'in_progress', label: '进行中' },
   { key: 'completed', label: '已完成' },
 ]
+
+const getImportanceLabel = (confidence: number | null): { text: string; className: string } => {
+  const c = confidence ?? 0.5
+  if (c >= 0.9) return { text: '非常重要', className: 'bg-red-100 text-red-700' }
+  if (c >= 0.7) return { text: '比较重要', className: 'bg-orange-100 text-orange-700' }
+  if (c >= 0.5) return { text: '一般', className: 'bg-blue-100 text-blue-600' }
+  return { text: '参考', className: 'bg-gray-100 text-gray-500' }
+}
 
 interface SourceDetail {
   id: number
@@ -96,7 +104,6 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
   })
   const [savingId, setSavingId] = useState<number | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
-  const [cancelConfirm, setCancelConfirm] = useState<{ show: boolean; ids: number[] }>({ show: false, ids: [] })
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
@@ -134,17 +141,16 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
 
   // Escape 键关闭弹窗
   useEffect(() => {
-    if (!sourceModal.open && !deleteConfirm && !cancelConfirm.show) return
+    if (!sourceModal.open && !deleteConfirm) return
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (cancelConfirm.show) setCancelConfirm({ show: false, ids: [] })
-        else if (deleteConfirm) setDeleteConfirm(false)
+        if (deleteConfirm) setDeleteConfirm(false)
         else if (sourceModal.open) setSourceModal({ open: false, loading: false, data: null })
       }
     }
     document.addEventListener('keydown', handleKey)
     return () => document.removeEventListener('keydown', handleKey)
-  }, [sourceModal.open, deleteConfirm, cancelConfirm.show])
+  }, [sourceModal.open, deleteConfirm])
 
   const handleExtract = async () => {
     if (extracting) return
@@ -154,22 +160,20 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
     updateTask(taskId, { message: '正在分析数据...' })
     try {
       await api.post('/todos/extract', { days })
-      const poll = async (): Promise<{ count: number; pushed: number }> => {
+      const poll = async (): Promise<number> => {
         for (let i = 0; i < 120; i++) {
           await new Promise(r => setTimeout(r, 2000))
           const statusRes = await api.get('/todos/extract-status')
           const st = statusRes.data
-          if (st.status === 'done') return { count: st.count ?? 0, pushed: st.pushed ?? 0 }
+          if (st.status === 'done') return st.count ?? 0
           if (st.status === 'error') throw new Error(st.message || '提取失败')
           updateTask(taskId, { message: st.message || '提取中...' })
         }
         throw new Error('提取超时')
       }
-      const { count, pushed } = await poll()
-      let msg = `提取到 ${count} 条待办`
-      if (pushed > 0) msg += `，${pushed} 条已自动推送飞书`
-      updateTask(taskId, { status: 'done', progress: 100, message: msg })
-      toast.success(msg)
+      const count = await poll()
+      updateTask(taskId, { status: 'done', progress: 100, message: `提取到 ${count} 条` })
+      toast.success(`提取到 ${count} 条待办`)
       setTab('in_progress')
       fetchTodos()
     } catch (err: any) {
@@ -234,42 +238,6 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
     }
   }
 
-  const handleCancelSingle = (id: number) => {
-    setCancelConfirm({ show: true, ids: [id] })
-  }
-
-  const handleBatchCancel = () => {
-    if (selected.size === 0) return
-    setCancelConfirm({ show: true, ids: Array.from(selected) })
-  }
-
-  const confirmCancel = async () => {
-    const ids = cancelConfirm.ids
-    setCancelConfirm({ show: false, ids: [] })
-    try {
-      if (ids.length === 1) {
-        await api.patch(`/todos/${ids[0]}`, { status: 'cancelled' })
-      } else {
-        await api.post('/todos/batch-status', { ids, status: 'cancelled' })
-      }
-      toast.success(`已取消 ${ids.length} 条待办`)
-      setSelected(new Set())
-      fetchTodos()
-    } catch {
-      toast.error('取消操作失败')
-    }
-  }
-
-  const handlePushSingle = async (id: number) => {
-    try {
-      await api.post(`/todos/${id}/push-feishu`)
-      toast.success('已推送到飞书')
-      fetchTodos()
-    } catch {
-      toast.error('推送失败')
-    }
-  }
-
   const handleViewSource = async (sourceId: number) => {
     setSourceModal({ open: true, loading: true, data: null })
     try {
@@ -305,9 +273,6 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
     })
     setPage(1)
   }
-
-  // 检查取消确认弹窗中是否有已推送飞书的待办
-  const cancelHasFeishuItems = cancelConfirm.ids.some(id => items.find(i => i.id === id)?.feishu_task_id)
 
   return (
     <div className="space-y-4">
@@ -387,22 +352,13 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
             <>
               <span className="text-sm text-gray-400">已选 {selected.size} 条</span>
               {tab === 'in_progress' && (
-                <>
-                  <button
-                    onClick={() => handleBatchStatus('completed')}
-                    className="flex items-center gap-1 px-3 py-1.5 bg-green-50 text-green-700 rounded-lg hover:bg-green-100 text-sm"
-                  >
-                    <CheckCircle size={14} />
-                    批量完成
-                  </button>
-                  <button
-                    onClick={handleBatchCancel}
-                    className="flex items-center gap-1 px-3 py-1.5 bg-gray-50 text-gray-600 rounded-lg hover:bg-gray-100 text-sm"
-                  >
-                    <X size={14} />
-                    批量取消
-                  </button>
-                </>
+                <button
+                  onClick={() => handleBatchStatus('completed')}
+                  className="flex items-center gap-1 px-3 py-1.5 bg-green-50 text-green-700 rounded-lg hover:bg-green-100 text-sm"
+                >
+                  <CheckCircle size={14} />
+                  批量完成
+                </button>
               )}
               <button
                 onClick={handleBatchDelete}
@@ -425,148 +381,119 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
             暂无{STATUS_LABELS[tab]}的待办
           </div>
         ) : (
-          items.map((item) => (
-            <div
-              key={item.id}
-              className={`bg-white rounded-xl shadow-sm p-4 flex items-start gap-3 hover:shadow-md transition-shadow ${embedded ? 'border border-gray-100' : ''}`}
-            >
-              <input
-                type="checkbox"
-                checked={selected.has(item.id)}
-                onChange={() => toggleSelect(item.id)}
-                className="mt-1 rounded"
-              />
+          items.map((item) => {
+            const importance = getImportanceLabel(item.confidence)
+            return (
+              <div
+                key={item.id}
+                className={`bg-white rounded-xl shadow-sm p-4 flex items-start gap-3 hover:shadow-md transition-shadow ${embedded ? 'border border-gray-100' : ''}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={selected.has(item.id)}
+                  onChange={() => toggleSelect(item.id)}
+                  className="mt-1 rounded"
+                />
 
-              <div className="flex-1 min-w-0">
-                {editingId === item.id ? (
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={editTitle}
-                      onChange={(e) => setEditTitle(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !savingId) handleSaveEdit(item.id)
-                        if (e.key === 'Escape') setEditingId(null)
-                      }}
-                      disabled={savingId === item.id}
-                      className="flex-1 border border-gray-200 rounded px-2 py-1 text-sm disabled:opacity-50"
-                      autoFocus
-                    />
-                    <button
-                      onClick={() => handleSaveEdit(item.id)}
-                      disabled={savingId === item.id}
-                      className="p-1 text-green-600 hover:bg-green-50 rounded disabled:opacity-50"
-                    >
-                      {savingId === item.id ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
-                    </button>
-                    <button
-                      onClick={() => setEditingId(null)}
-                      disabled={savingId === item.id}
-                      className="p-1 text-gray-400 hover:bg-gray-100 rounded disabled:opacity-50"
-                    >
-                      <X size={16} />
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
+                <div className="flex-1 min-w-0">
+                  {editingId === item.id ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={editTitle}
+                        onChange={(e) => setEditTitle(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !savingId) handleSaveEdit(item.id)
+                          if (e.key === 'Escape') setEditingId(null)
+                        }}
+                        disabled={savingId === item.id}
+                        className="flex-1 border border-gray-200 rounded px-2 py-1 text-sm disabled:opacity-50"
+                        autoFocus
+                      />
+                      <button
+                        onClick={() => handleSaveEdit(item.id)}
+                        disabled={savingId === item.id}
+                        className="p-1 text-green-600 hover:bg-green-50 rounded disabled:opacity-50"
+                      >
+                        {savingId === item.id ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
+                      </button>
+                      <button
+                        onClick={() => setEditingId(null)}
+                        disabled={savingId === item.id}
+                        className="p-1 text-gray-400 hover:bg-gray-100 rounded disabled:opacity-50"
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                  ) : (
                     <p className="text-sm font-medium text-gray-800">{item.title}</p>
-                    {tab === 'in_progress' && !item.feishu_task_id && (item.confidence ?? 0) < 0.7 && (
-                      <span className="px-1.5 py-0.5 bg-orange-100 text-orange-600 rounded text-[10px] font-medium shrink-0">
-                        AI 建议
+                  )}
+
+                  {item.description && (
+                    <p className="text-xs text-gray-500 mt-1 line-clamp-2">{item.description}</p>
+                  )}
+
+                  <div className="flex items-center gap-2 mt-2 flex-wrap">
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${importance.className}`}>
+                      {importance.text}
+                    </span>
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${PRIORITY_COLORS[item.priority]}`}>
+                      {PRIORITY_LABELS[item.priority] || item.priority}
+                    </span>
+                    {item.source_id ? (
+                      <button
+                        onClick={() => handleViewSource(item.source_id!)}
+                        className="text-xs text-indigo-500 hover:text-indigo-700 hover:underline transition-colors"
+                      >
+                        来源: 沟通记录
+                      </button>
+                    ) : (
+                      <span className="text-xs text-gray-400">
+                        来源: 沟通记录
+                      </span>
+                    )}
+                    {item.source_time && (
+                      <span className="text-xs text-gray-400 flex items-center gap-1">
+                        <Clock size={12} />
+                        {new Date(item.source_time).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    )}
+                    {item.due_date && (
+                      <span className="text-xs text-gray-400 flex items-center gap-1">
+                        <Clock size={12} />
+                        截止 {new Date(item.due_date).toLocaleDateString('zh-CN')}
                       </span>
                     )}
                   </div>
-                )}
+                </div>
 
-                {item.description && (
-                  <p className="text-xs text-gray-500 mt-1 line-clamp-2">{item.description}</p>
-                )}
-
-                <div className="flex items-center gap-3 mt-2 flex-wrap">
-                  <span className={`px-2 py-0.5 rounded-full text-xs ${PRIORITY_COLORS[item.priority]}`}>
-                    {item.priority === 'high' ? '高' : item.priority === 'medium' ? '中' : '低'}
-                  </span>
-                  {item.source_id ? (
-                    <button
-                      onClick={() => handleViewSource(item.source_id!)}
-                      className="text-xs text-indigo-500 hover:text-indigo-700 hover:underline transition-colors"
-                    >
-                      来源: 沟通记录
-                    </button>
-                  ) : (
-                    <span className="text-xs text-gray-400">
-                      来源: 沟通记录
-                    </span>
-                  )}
-                  {item.source_time && (
-                    <span className="text-xs text-gray-400 flex items-center gap-1">
-                      <Clock size={12} />
-                      {new Date(item.source_time).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  )}
-                  {item.due_date && (
-                    <span className="text-xs text-gray-400 flex items-center gap-1">
-                      <Clock size={12} />
-                      {new Date(item.due_date).toLocaleDateString('zh-CN')}
-                    </span>
-                  )}
-                  {item.feishu_task_id && (
-                    <span className="text-xs text-green-600 flex items-center gap-1">
-                      <CheckCircle size={12} />
-                      已推送飞书
-                    </span>
-                  )}
-                  {item.pushed_at && !item.feishu_task_id && (
-                    <span className="text-xs text-green-600 flex items-center gap-1">
-                      <CheckCircle size={12} />
-                      已推送 {new Date(item.pushed_at).toLocaleDateString('zh-CN')}
-                    </span>
+                {/* Actions */}
+                <div className="flex items-center gap-1 shrink-0">
+                  {tab === 'in_progress' && (
+                    <>
+                      <button
+                        onClick={() => handleUpdateStatus(item.id, 'completed')}
+                        className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg"
+                        title="标记完成"
+                      >
+                        <CheckCircle size={16} />
+                      </button>
+                      <button
+                        onClick={() => {
+                          setEditingId(item.id)
+                          setEditTitle(item.title)
+                        }}
+                        className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-lg"
+                        title="编辑"
+                      >
+                        <Edit3 size={16} />
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
-
-              {/* Actions */}
-              <div className="flex items-center gap-1 shrink-0">
-                {tab === 'in_progress' && (
-                  <>
-                    <button
-                      onClick={() => handleUpdateStatus(item.id, 'completed')}
-                      className="p-1.5 text-green-600 hover:bg-green-50 rounded-lg"
-                      title="标记完成"
-                    >
-                      <CheckCircle size={16} />
-                    </button>
-                    <button
-                      onClick={() => handleCancelSingle(item.id)}
-                      className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-lg"
-                      title="取消"
-                    >
-                      <X size={16} />
-                    </button>
-                    <button
-                      onClick={() => {
-                        setEditingId(item.id)
-                        setEditTitle(item.title)
-                      }}
-                      className="p-1.5 text-gray-400 hover:bg-gray-100 rounded-lg"
-                      title="编辑"
-                    >
-                      <Edit3 size={16} />
-                    </button>
-                    {!item.feishu_task_id && (
-                      <button
-                        onClick={() => handlePushSingle(item.id)}
-                        className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg"
-                        title="推送到飞书"
-                      >
-                        <Send size={16} />
-                      </button>
-                    )}
-                  </>
-                )}
-              </div>
-            </div>
-          ))
+            )
+          })
         )}
       </div>
 
@@ -641,38 +568,6 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
         </div>
       )}
 
-      {/* 取消确认弹窗 */}
-      {cancelConfirm.show && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setCancelConfirm({ show: false, ids: [] })}>
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 p-6" onClick={(e) => e.stopPropagation()}>
-            <h3 className="text-base font-semibold text-gray-800 mb-2">确认取消待办</h3>
-            <p className="text-sm text-gray-500 mb-3">
-              确定要取消{cancelConfirm.ids.length > 1 ? `选中的 ${cancelConfirm.ids.length} 条` : '这条'}待办吗？
-            </p>
-            {cancelHasFeishuItems && (
-              <div className="flex items-start gap-2 p-3 mb-3 bg-red-50 rounded-lg">
-                <AlertTriangle size={16} className="text-red-500 shrink-0 mt-0.5" />
-                <p className="text-xs text-red-600">已推送到飞书的任务将被同步删除</p>
-              </div>
-            )}
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={() => setCancelConfirm({ show: false, ids: [] })}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50"
-              >
-                返回
-              </button>
-              <button
-                onClick={confirmCancel}
-                className="px-4 py-2 text-sm font-medium text-white bg-gray-600 rounded-lg hover:bg-gray-700"
-              >
-                确认取消
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* 来源详情弹窗 */}
       {sourceModal.open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setSourceModal({ open: false, loading: false, data: null })}>
@@ -680,7 +575,6 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
             className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 max-h-[80vh] overflow-hidden flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* 弹窗头部 */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
               <h3 className="text-base font-semibold text-gray-800">来源详情</h3>
               <button
@@ -693,7 +587,6 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
               </button>
             </div>
 
-            {/* 弹窗内容 */}
             <div className="flex-1 overflow-y-auto p-5">
               {sourceModal.loading ? (
                 <div className="flex items-center justify-center py-12 text-gray-400">
@@ -702,7 +595,6 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
                 </div>
               ) : sourceModal.data ? (
                 <div className="space-y-4">
-                  {/* 标题 */}
                   {sourceModal.data.title && (
                     <div>
                       <span className="text-xs font-medium text-gray-400">标题</span>
@@ -710,7 +602,6 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
                     </div>
                   )}
 
-                  {/* 基本信息 */}
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <span className="text-xs font-medium text-gray-400">类型</span>
@@ -738,7 +629,6 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
                     </div>
                   </div>
 
-                  {/* 参与人 */}
                   {sourceModal.data.participants.length > 0 && (
                     <div>
                       <span className="text-xs font-medium text-gray-400">参与人</span>
@@ -752,7 +642,6 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
                     </div>
                   )}
 
-                  {/* 摘要 */}
                   {sourceModal.data.summary && (
                     <div>
                       <span className="text-xs font-medium text-gray-400">摘要</span>
@@ -760,7 +649,6 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
                     </div>
                   )}
 
-                  {/* 结论 */}
                   {sourceModal.data.conclusions && (
                     <div>
                       <span className="text-xs font-medium text-gray-400">结论</span>
@@ -768,7 +656,6 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
                     </div>
                   )}
 
-                  {/* 待办事项 */}
                   {sourceModal.data.action_items.length > 0 && (
                     <div>
                       <span className="text-xs font-medium text-gray-400">待办事项</span>
@@ -797,7 +684,6 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
                     </div>
                   )}
 
-                  {/* 原文内容 */}
                   <div>
                     <span className="text-xs font-medium text-gray-400">原文内容</span>
                     <p className="text-sm text-gray-600 mt-0.5 whitespace-pre-wrap max-h-40 overflow-y-auto bg-gray-50 rounded-lg p-3">
@@ -805,7 +691,6 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
                     </p>
                   </div>
 
-                  {/* 关键词 */}
                   {sourceModal.data.keywords.length > 0 && (
                     <div>
                       <span className="text-xs font-medium text-gray-400">关键词</span>
@@ -819,7 +704,6 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
                     </div>
                   )}
 
-                  {/* 飞书源链接 */}
                   {sourceModal.data.bitable_url && (
                     <a
                       href={sourceModal.data.bitable_url}

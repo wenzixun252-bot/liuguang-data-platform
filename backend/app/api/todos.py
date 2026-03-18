@@ -21,8 +21,7 @@ from app.schemas.todo import (
     TodoStatusUpdate,
     TodoUpdate,
 )
-from app.services.feishu import feishu_client, FeishuAPIError
-from app.services.todo_extractor import extract_and_save, auto_push_high_confidence_todos
+from app.services.todo_extractor import extract_and_save
 
 logger = logging.getLogger(__name__)
 
@@ -34,22 +33,8 @@ _extract_tasks: dict[str, dict] = {}
 
 # 允许的状态转换
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
-    "in_progress": {"completed", "cancelled"},
+    "in_progress": {"completed"},
 }
-
-
-async def _ensure_fresh_token(user: User, db: AsyncSession) -> str:
-    """确保用户飞书 token 有效，如需要则刷新。返回可用的 access_token。"""
-    if not user.feishu_refresh_token:
-        raise HTTPException(status_code=400, detail="缺少飞书 refresh_token，请重新登录")
-    try:
-        token_data = await feishu_client.refresh_user_access_token(user.feishu_refresh_token)
-        user.feishu_access_token = token_data["access_token"]
-        user.feishu_refresh_token = token_data.get("refresh_token", user.feishu_refresh_token)
-        await db.commit()
-        return user.feishu_access_token
-    except FeishuAPIError:
-        raise HTTPException(status_code=401, detail="飞书 token 刷新失败，请重新登录")
 
 
 @router.get("/summary", summary="待办摘要（看板用）")
@@ -68,14 +53,14 @@ async def todo_summary(
     )
     status_counts = dict(count_result.all())
 
-    # 最近5条（排除已驳回的）
+    # 最近5条（按重要性排序）
     recent_result = await db.execute(
         select(TodoItem)
         .where(and_(
             TodoItem.owner_id == owner_id,
-            TodoItem.status != "cancelled",
+            TodoItem.status == "in_progress",
         ))
-        .order_by(TodoItem.created_at.desc())
+        .order_by(TodoItem.confidence.desc().nullslast(), TodoItem.created_at.desc())
         .limit(5)
     )
     recent = recent_result.scalars().all()
@@ -92,24 +77,10 @@ async def _run_extract_task(owner_id: str, owner_name: str, days: int) -> None:
         _extract_tasks[owner_id] = {"status": "running", "message": "正在提取待办..."}
         async with async_session() as db:
             items = await extract_and_save(db, owner_id, owner_name, days)
-            # 自动推送高置信度待办到飞书
-            pushed = 0
-            if items:
-                from app.models.user import User
-                result = await db.execute(
-                    select(User).where(User.feishu_open_id == owner_id)
-                )
-                user = result.scalar_one_or_none()
-                user_token = user.feishu_access_token if user else None
-                pushed = await auto_push_high_confidence_todos(db, items, user_token)
-            msg = f"提取完成，共 {len(items)} 条"
-            if pushed:
-                msg += f"，{pushed} 条已自动推送飞书"
             _extract_tasks[owner_id] = {
                 "status": "done",
-                "message": msg,
+                "message": f"提取完成，共 {len(items)} 条",
                 "count": len(items),
-                "pushed": pushed,
             }
     except Exception as e:
         logger.exception("后台待办提取失败: %s", e)
@@ -150,11 +121,11 @@ async def list_todos(
     search: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    date_field: str | None = Query(None, description="时间筛选字段: created_at, due_date, pushed_at"),
+    date_field: str | None = Query(None, description="时间筛选字段: created_at, due_date"),
     date_from: datetime | None = Query(None, description="时间范围开始"),
     date_to: datetime | None = Query(None, description="时间范围结束"),
 ):
-    """获取待办列表，可按 status 过滤。"""
+    """获取待办列表，按重要性（confidence）降序排列。"""
     conditions = [TodoItem.owner_id == current_user.feishu_open_id]
     if status_filter:
         conditions.append(TodoItem.status == status_filter)
@@ -166,7 +137,6 @@ async def list_todos(
     _date_field_map = {
         "created_at": TodoItem.created_at,
         "due_date": TodoItem.due_date,
-        "pushed_at": TodoItem.pushed_at,
     }
     if date_field and date_field in _date_field_map:
         col = _date_field_map[date_field]
@@ -181,11 +151,11 @@ async def list_todos(
     )
     total = count_result.scalar() or 0
 
-    # 分页查询
+    # 分页查询 — 按重要性降序
     result = await db.execute(
         select(TodoItem)
         .where(and_(*conditions))
-        .order_by(TodoItem.created_at.desc())
+        .order_by(TodoItem.confidence.desc().nullslast(), TodoItem.created_at.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
@@ -194,14 +164,14 @@ async def list_todos(
     return TodoListResponse(items=items, total=total)
 
 
-@router.patch("/{todo_id}", response_model=TodoOut, summary="编辑/确认/驳回待办")
+@router.patch("/{todo_id}", response_model=TodoOut, summary="编辑待办")
 async def update_todo(
     todo_id: int,
     body: TodoUpdate,
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """编辑待办：修改标题、截止日期、优先级、确认或驳回。"""
+    """编辑待办：修改标题、截止日期、优先级、标记完成。"""
     todo = await db.get(TodoItem, todo_id)
     if not todo or todo.owner_id != current_user.feishu_open_id:
         raise HTTPException(status_code=404, detail="待办不存在")
@@ -224,14 +194,6 @@ async def update_todo(
         todo.status = body.status
         if body.status == "completed":
             todo.completed_at = datetime.utcnow()
-            if todo.feishu_task_id:
-                await feishu_client.complete_task(todo.feishu_task_id)
-        elif body.status == "cancelled":
-            todo.cancelled_at = datetime.utcnow()
-            if todo.feishu_task_id:
-                await feishu_client.delete_task(todo.feishu_task_id)
-                todo.feishu_task_id = None
-                todo.pushed_at = None
 
     await db.commit()
     await db.refresh(todo)
@@ -262,14 +224,6 @@ async def batch_status(
             item.status = body.status
             if body.status == "completed":
                 item.completed_at = datetime.utcnow()
-                if item.feishu_task_id:
-                    await feishu_client.complete_task(item.feishu_task_id)
-            elif body.status == "cancelled":
-                item.cancelled_at = datetime.utcnow()
-                if item.feishu_task_id:
-                    await feishu_client.delete_task(item.feishu_task_id)
-                    item.feishu_task_id = None
-                    item.pushed_at = None
             updated.append(item)
 
     await db.commit()
@@ -288,7 +242,7 @@ async def batch_delete_todos(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
-    """批量删除待办，同步删除飞书任务，然后从数据库彻底移除。"""
+    """批量删除待办，从数据库彻底移除。"""
     result = await db.execute(
         select(TodoItem).where(
             TodoItem.id.in_(body.ids),
@@ -298,43 +252,7 @@ async def batch_delete_todos(
     rows = result.scalars().all()
 
     for row in rows:
-        if row.feishu_task_id:
-            await feishu_client.delete_task(row.feishu_task_id)
         await db.delete(row)
 
     await db.commit()
     return {"deleted": len(rows)}
-
-
-@router.post("/{todo_id}/push-feishu", response_model=TodoOut, summary="推送到飞书任务")
-async def push_to_feishu(
-    todo_id: int,
-    current_user: Annotated[User, Depends(get_current_user)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-):
-    """推送单条待办到飞书任务。推送后自动进入 in_progress 状态。"""
-    todo = await db.get(TodoItem, todo_id)
-    if not todo or todo.owner_id != current_user.feishu_open_id:
-        raise HTTPException(status_code=404, detail="待办不存在")
-
-    if todo.status != "in_progress":
-        raise HTTPException(status_code=400, detail="只能推送进行中的待办")
-
-    access_token = await _ensure_fresh_token(current_user, db)
-
-    try:
-        task_id = await feishu_client.create_task(
-            title=todo.title,
-            description=todo.description or "",
-            due_date=todo.due_date,
-            user_access_token=access_token,
-            user_open_id=current_user.feishu_open_id,
-        )
-        todo.feishu_task_id = task_id
-        todo.status = "in_progress"
-        todo.pushed_at = datetime.utcnow()
-        await db.commit()
-        await db.refresh(todo)
-        return todo
-    except FeishuAPIError as e:
-        raise HTTPException(status_code=502, detail=f"飞书任务创建失败: {e}")
