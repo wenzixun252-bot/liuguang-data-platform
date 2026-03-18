@@ -124,7 +124,6 @@ export default function FeishuSyncSection({ extractionRuleId, cleaningRuleId }: 
   const [showCloudDocSync, setShowCloudDocSync] = useState(false)
   const [cloudDocInitMode, setCloudDocInitMode] = useState<DocImportMode>('cloud-doc')
   const [cloudDocTarget, setCloudDocTarget] = useState<ImportTarget>('document')
-  const [syncingType, setSyncingType] = useState<'bitable' | 'folder' | null>(null)
   const [configTarget, setConfigTarget] = useState<ConfigTarget>(null)
   const { addTask, updateTask } = useTaskProgress()
   const registeredTaskIds = useRef<Set<string>>(new Set())
@@ -219,10 +218,7 @@ export default function FeishuSyncSection({ extractionRuleId, cleaningRuleId }: 
 
   // 触发沟通数据同步（仅 communication 类型）
   const syncCommMutation = useMutation({
-    mutationFn: async () => {
-      setSyncingType('bitable')
-      return await api.post('/import/feishu-sync', null, { params: { asset_type: 'communication' } })
-    },
+    mutationFn: () => api.post('/import/feishu-sync', null, { params: { asset_type: 'communication' } }),
     onSuccess: () => {
       toast.success('沟通数据同步已触发')
       queryClient.invalidateQueries({ queryKey: ['sync-status'] })
@@ -230,17 +226,11 @@ export default function FeishuSyncSection({ extractionRuleId, cleaningRuleId }: 
     onError: (error: any) => {
       toast.error(error.response?.data?.detail || '同步失败')
     },
-    onSettled: () => {
-      setTimeout(() => setSyncingType(null), 2000)
-    },
   })
 
   // 触发表格数据同步（仅 structured 类型）
   const syncStructuredMutation = useMutation({
-    mutationFn: async () => {
-      setSyncingType('bitable')
-      return await api.post('/import/feishu-sync', null, { params: { asset_type: 'structured' } })
-    },
+    mutationFn: () => api.post('/import/feishu-sync', null, { params: { asset_type: 'structured' } }),
     onSuccess: () => {
       toast.success('表格数据同步已触发')
       queryClient.invalidateQueries({ queryKey: ['sync-status'] })
@@ -248,17 +238,11 @@ export default function FeishuSyncSection({ extractionRuleId, cleaningRuleId }: 
     onError: (error: any) => {
       toast.error(error.response?.data?.detail || '同步失败')
     },
-    onSettled: () => {
-      setTimeout(() => setSyncingType(null), 2000)
-    },
   })
 
   // 触发云文件夹同步
   const syncFolderMutation = useMutation({
-    mutationFn: async () => {
-      setSyncingType('folder')
-      return await api.post('/import/cloud-folders/sync')
-    },
+    mutationFn: () => api.post('/import/cloud-folders/sync'),
     onSuccess: () => {
       toast.success('文件夹同步已触发，可在下方任务面板查看进度')
       queryClient.invalidateQueries({ queryKey: ['cloud-folders'] })
@@ -267,15 +251,23 @@ export default function FeishuSyncSection({ extractionRuleId, cleaningRuleId }: 
     onError: (error: any) => {
       toast.error(error.response?.data?.detail || '同步失败')
     },
-    onSettled: () => {
-      setTimeout(() => setSyncingType(null), 2000)
-    },
   })
+
+  const commSyncing = syncCommMutation.isPending
+  const structuredSyncing = syncStructuredMutation.isPending
+  const folderSyncPending = syncFolderMutation.isPending
+
+  // 一键同步所有飞书数据
+  const handleSyncAll = () => {
+    if (commSources.length > 0) syncCommMutation.mutate()
+    if (structuredSources.length > 0) syncStructuredMutation.mutate()
+    if (totalFolders > 0) syncFolderMutation.mutate()
+    toast.success('已触发全部飞书数据同步')
+  }
+  const anySyncing = commSyncing || structuredSyncing || folderSyncPending
 
   const totalFolders = cloudFolders.length
   const totalFiles = cloudFolders.reduce((sum, f) => sum + (f.files_synced || 0), 0)
-  const folderSyncing = syncingType === 'folder'
-  const bitableSyncing = syncingType === 'bitable'
 
   // 构建 RecipeSyncConfig 的 props
   const getConfigProps = () => {
@@ -322,9 +314,20 @@ export default function FeishuSyncSection({ extractionRuleId, cleaningRuleId }: 
   return (
     <div className="bg-[#EEF6FF] rounded-2xl p-5 h-full">
       {/* 标题栏 */}
-      <div className="flex items-center gap-2 mb-4">
-        <Cloud className="w-5 h-5 text-indigo-600" />
-        <h2 className="font-semibold text-gray-900">飞书同步</h2>
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <Cloud className="w-5 h-5 text-indigo-600" />
+          <h2 className="font-semibold text-gray-900">飞书同步</h2>
+        </div>
+        <button
+          type="button"
+          onClick={handleSyncAll}
+          disabled={anySyncing}
+          className="px-4 py-1.5 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg disabled:opacity-50 flex items-center gap-1.5 transition-colors"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${anySyncing ? 'animate-spin' : ''}`} />
+          一键同步
+        </button>
       </div>
 
       {/* 卡片网格 - 3列：沟通数据 | 表格数据 | 文档数据 */}
@@ -431,14 +434,14 @@ export default function FeishuSyncSection({ extractionRuleId, cleaningRuleId }: 
 
           {/* 同步按钮 */}
           <div className="px-4 py-2.5 border-t border-gray-100 bg-gray-50/50 flex items-center justify-between">
-            <SyncStatusBadge status={commLatestStatus} syncing={bitableSyncing} />
+            <SyncStatusBadge status={commLatestStatus} syncing={commSyncing} />
             <button
               type="button"
               onClick={() => syncCommMutation.mutate()}
-              disabled={bitableSyncing || commSources.length === 0}
+              disabled={commSyncing || commSources.length === 0}
               className="px-3 py-1.5 text-xs font-medium text-indigo-600 hover:bg-indigo-50 rounded-lg disabled:opacity-40 disabled:hover:bg-transparent flex items-center gap-1 transition-colors"
             >
-              <RefreshCw className={`w-3 h-3 ${bitableSyncing ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`w-3 h-3 ${commSyncing ? 'animate-spin' : ''}`} />
               同步
             </button>
           </div>
@@ -516,14 +519,14 @@ export default function FeishuSyncSection({ extractionRuleId, cleaningRuleId }: 
             <div className="flex items-center gap-2">
               {structuredSources.length > 0 && (
                 <>
-                  <SyncStatusBadge status={structuredLatestStatus} syncing={bitableSyncing} />
+                  <SyncStatusBadge status={structuredLatestStatus} syncing={structuredSyncing} />
                   <button
                     type="button"
                     onClick={() => syncStructuredMutation.mutate()}
-                    disabled={bitableSyncing}
+                    disabled={structuredSyncing}
                     className="px-3 py-1.5 text-xs font-medium text-indigo-600 hover:bg-indigo-50 rounded-lg disabled:opacity-40 flex items-center gap-1 transition-colors"
                   >
-                    <RefreshCw className={`w-3 h-3 ${bitableSyncing ? 'animate-spin' : ''}`} />
+                    <RefreshCw className={`w-3 h-3 ${structuredSyncing ? 'animate-spin' : ''}`} />
                     同步
                   </button>
                 </>
@@ -602,10 +605,10 @@ export default function FeishuSyncSection({ extractionRuleId, cleaningRuleId }: 
                     <button
                       type="button"
                       onClick={() => syncFolderMutation.mutate()}
-                      disabled={folderSyncing}
+                      disabled={folderSyncPending}
                       className="text-xs text-indigo-600 hover:text-indigo-700 flex items-center gap-1 disabled:opacity-40"
                     >
-                      <RefreshCw className={`w-3 h-3 ${folderSyncing ? 'animate-spin' : ''}`} />
+                      <RefreshCw className={`w-3 h-3 ${folderSyncPending ? 'animate-spin' : ''}`} />
                       同步文件夹
                     </button>
                   </div>
