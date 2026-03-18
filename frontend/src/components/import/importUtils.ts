@@ -174,3 +174,47 @@ export function formatFileSize(bytes: number): string {
   const i = Math.floor(Math.log(bytes) / Math.log(k))
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
 }
+
+// 常见垃圾目录（webkitdirectory 递归扫描时需排除）
+const IGNORED_DIRS = ['node_modules', '.git', '__pycache__', 'dist', 'build', '.venv', '.next', '.cache', 'vendor']
+
+/**
+ * 过滤系统文件和垃圾目录下的文件
+ */
+export function filterSystemFiles(files: File[]): File[] {
+  return files.filter(f => {
+    const path = f.webkitRelativePath || f.name
+    const name = path.split('/').pop() || ''
+    // 过滤系统隐藏文件
+    if (name.startsWith('.') || name === 'Thumbs.db' || name === 'desktop.ini') return false
+    // 过滤垃圾目录下的文件
+    return !IGNORED_DIRS.some(dir => path.includes(`/${dir}/`))
+  })
+}
+
+/**
+ * 按分类分组文件
+ */
+export function groupFilesByCategory(files: File[]): Record<ImportCategory, File[]> {
+  const groups: Record<ImportCategory, File[]> = {
+    communication: [],
+    document: [],
+    structured: [],
+    unknown: [],
+  }
+  for (const file of files) {
+    const { category } = classifyFile(file)
+    groups[category].push(file)
+  }
+  return groups
+}
+
+/**
+ * 从 webkitRelativePath 提取根文件夹名
+ */
+export function extractFolderName(files: File[]): string {
+  if (files.length === 0) return '未知文件夹'
+  const path = files[0].webkitRelativePath
+  if (!path) return '未知文件夹'
+  return path.split('/')[0] || '未知文件夹'
+}

@@ -73,6 +73,8 @@ export default function DataImport() {
           <LocalImportSection
             extractionRuleId={activeExtractionRuleId}
             cleaningRuleId={activeCleaningRuleId}
+            extractionRuleName={activeExtractionRule?.name}
+            cleaningRuleName={activeCleaningRule?.name}
           />
         </div>
 

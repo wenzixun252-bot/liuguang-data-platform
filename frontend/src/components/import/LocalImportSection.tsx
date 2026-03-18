@@ -1,10 +1,18 @@
 import { useState, useCallback, useRef } from 'react'
-import { Upload, CheckCircle, XCircle, Loader2, ChevronDown, ChevronRight, Trash2, File } from 'lucide-react'
+import { Upload, CheckCircle, XCircle, Loader2, ChevronDown, ChevronRight, Trash2, File, FolderOpen } from 'lucide-react'
 import toast from 'react-hot-toast'
 import type { ImportCategory } from './importUtils'
-import { formatFileSize } from './importUtils'
+import { formatFileSize, filterSystemFiles } from './importUtils'
 import CategoryCard from './CategoryCard'
+import FolderImportPreviewModal from './FolderImportPreviewModal'
 import api from '../../lib/api'
+
+declare module 'react' {
+  interface InputHTMLAttributes<T> extends HTMLAttributes<T> {
+    webkitdirectory?: string
+    directory?: string
+  }
+}
 
 // 每种分类对应的 accept 过滤
 const CATEGORY_ACCEPT: Record<ImportCategory, string> = {
@@ -37,13 +45,21 @@ interface LocalUploadTask {
 interface LocalImportSectionProps {
   extractionRuleId: number | null
   cleaningRuleId: number | null
+  extractionRuleName?: string
+  cleaningRuleName?: string
 }
 
-export default function LocalImportSection({ extractionRuleId, cleaningRuleId }: LocalImportSectionProps) {
+// 检测浏览器是否支持 webkitdirectory
+const supportsWebkitDirectory = typeof document !== 'undefined' && 'webkitdirectory' in document.createElement('input')
+
+export default function LocalImportSection({ extractionRuleId, cleaningRuleId, extractionRuleName, cleaningRuleName }: LocalImportSectionProps) {
   const [activeCategory, setActiveCategory] = useState<ImportCategory | null>(null)
   const [uploadTasks, setUploadTasks] = useState<LocalUploadTask[]>([])
   const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null)
   const categoryInputRef = useRef<HTMLInputElement>(null)
+  const folderInputRef = useRef<HTMLInputElement>(null)
+  const [folderFiles, setFolderFiles] = useState<File[]>([])
+  const [showFolderPreview, setShowFolderPreview] = useState(false)
 
   // 根据分类选择上传接口
   const getUploadUrl = (category: ImportCategory): string => {
@@ -83,8 +99,17 @@ export default function LocalImportSection({ extractionRuleId, cleaningRuleId }:
 
       try {
         const params: Record<string, number> = {}
-        if (category === 'structured' && cleaningRuleId) params.cleaning_rule_id = cleaningRuleId
-        else if (extractionRuleId) params.extraction_rule_id = extractionRuleId
+        if (category === 'structured') {
+          if (cleaningRuleId) params.cleaning_rule_id = cleaningRuleId
+        } else {
+          if (extractionRuleId) params.extraction_rule_id = extractionRuleId
+        }
+        if (category === 'communication') {
+          formData.append('metadata', JSON.stringify({
+            title: file.name.replace(/\.\w+$/, ''),
+            comm_type: 'other',
+          }))
+        }
         await api.post(url, formData, { params })
         successCount++
       } catch (error: any) {
@@ -130,6 +155,31 @@ export default function LocalImportSection({ extractionRuleId, cleaningRuleId }:
     setActiveCategory(null)
   }
 
+  // 文件夹选择处理
+  const handleFolderSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const rawFiles = Array.from(e.target.files || [])
+    const filtered = filterSystemFiles(rawFiles)
+    if (filtered.length === 0) {
+      toast('文件夹为空或没有可导入的文件', { icon: '📂', duration: 3000 })
+    } else {
+      setFolderFiles(filtered)
+      setShowFolderPreview(true)
+    }
+    e.target.value = ''
+  }
+
+  // 文件夹预览确认
+  const handleFolderConfirm = (categorizedFiles: Record<ImportCategory, File[]>) => {
+    setShowFolderPreview(false)
+    setFolderFiles([])
+    const categories: ImportCategory[] = ['communication', 'document', 'structured']
+    for (const cat of categories) {
+      if (categorizedFiles[cat].length > 0) {
+        startBackgroundUpload(cat, categorizedFiles[cat])
+      }
+    }
+  }
+
   // 删除任务记录
   const removeTask = (taskId: string) => {
     setUploadTasks(prev => prev.filter(t => t.id !== taskId))
@@ -150,6 +200,19 @@ export default function LocalImportSection({ extractionRuleId, cleaningRuleId }:
         title="选择文件"
         onChange={handleCategoryFileSelect}
       />
+      {/* 隐藏的文件夹选择器 */}
+      {supportsWebkitDirectory && (
+        <input
+          ref={folderInputRef}
+          type="file"
+          webkitdirectory=""
+          directory=""
+          multiple
+          className="hidden"
+          title="选择文件夹"
+          onChange={handleFolderSelect}
+        />
+      )}
 
       {/* 标题栏 */}
       <div className="flex items-center justify-between mb-4">
@@ -177,6 +240,40 @@ export default function LocalImportSection({ extractionRuleId, cleaningRuleId }:
           onClick={() => handleCategoryClick('structured')}
         />
       </div>
+
+      {/* 文件夹导入 */}
+      {supportsWebkitDirectory && (
+        <>
+          <div className="flex items-center gap-3 my-4">
+            <div className="flex-1 border-t border-gray-300" />
+            <span className="text-xs text-gray-400">或者</span>
+            <div className="flex-1 border-t border-gray-300" />
+          </div>
+          <button
+            type="button"
+            onClick={() => folderInputRef.current?.click()}
+            className="w-full flex items-center gap-3 px-4 py-3 bg-white border-2 border-dashed border-gray-300 rounded-xl hover:border-indigo-400 hover:bg-indigo-50/30 transition-colors group"
+          >
+            <FolderOpen className="w-5 h-5 text-gray-400 group-hover:text-indigo-500 transition-colors" />
+            <div className="text-left">
+              <p className="text-sm font-medium text-gray-700 group-hover:text-indigo-700 transition-colors">整个文件夹导入</p>
+              <p className="text-xs text-gray-400">自动识别文件类型，批量归档</p>
+            </div>
+          </button>
+        </>
+      )}
+
+      {/* 文件夹预览弹窗 */}
+      <FolderImportPreviewModal
+        open={showFolderPreview}
+        files={folderFiles}
+        extractionRuleId={extractionRuleId}
+        cleaningRuleId={cleaningRuleId}
+        extractionRuleName={extractionRuleName}
+        cleaningRuleName={cleaningRuleName}
+        onConfirm={handleFolderConfirm}
+        onClose={() => { setShowFolderPreview(false); setFolderFiles([]) }}
+      />
 
       {/* 导入任务列表 — 卡片下方 */}
       {uploadTasks.length > 0 && (
