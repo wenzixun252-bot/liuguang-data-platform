@@ -217,14 +217,32 @@ export default function FeishuSyncSection({ extractionRuleId, cleaningRuleId }: 
     .filter(s => s.last_sync_time)
     .sort((a, b) => new Date(b.last_sync_time!).getTime() - new Date(a.last_sync_time!).getTime())[0]?.last_sync_time || null
 
-  // 触发多维表格同步
-  const syncMutation = useMutation({
+  // 触发沟通数据同步（仅 communication 类型）
+  const syncCommMutation = useMutation({
     mutationFn: async () => {
       setSyncingType('bitable')
-      return await api.post('/import/feishu-sync')
+      return await api.post('/import/feishu-sync', null, { params: { asset_type: 'communication' } })
     },
     onSuccess: () => {
-      toast.success('同步任务已触发')
+      toast.success('沟通数据同步已触发')
+      queryClient.invalidateQueries({ queryKey: ['sync-status'] })
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.detail || '同步失败')
+    },
+    onSettled: () => {
+      setTimeout(() => setSyncingType(null), 2000)
+    },
+  })
+
+  // 触发表格数据同步（仅 structured 类型）
+  const syncStructuredMutation = useMutation({
+    mutationFn: async () => {
+      setSyncingType('bitable')
+      return await api.post('/import/feishu-sync', null, { params: { asset_type: 'structured' } })
+    },
+    onSuccess: () => {
+      toast.success('表格数据同步已触发')
       queryClient.invalidateQueries({ queryKey: ['sync-status'] })
     },
     onError: (error: any) => {
@@ -416,7 +434,7 @@ export default function FeishuSyncSection({ extractionRuleId, cleaningRuleId }: 
             <SyncStatusBadge status={commLatestStatus} syncing={bitableSyncing} />
             <button
               type="button"
-              onClick={() => syncMutation.mutate()}
+              onClick={() => syncCommMutation.mutate()}
               disabled={bitableSyncing || commSources.length === 0}
               className="px-3 py-1.5 text-xs font-medium text-indigo-600 hover:bg-indigo-50 rounded-lg disabled:opacity-40 disabled:hover:bg-transparent flex items-center gap-1 transition-colors"
             >
@@ -501,7 +519,7 @@ export default function FeishuSyncSection({ extractionRuleId, cleaningRuleId }: 
                   <SyncStatusBadge status={structuredLatestStatus} syncing={bitableSyncing} />
                   <button
                     type="button"
-                    onClick={() => syncMutation.mutate()}
+                    onClick={() => syncStructuredMutation.mutate()}
                     disabled={bitableSyncing}
                     className="px-3 py-1.5 text-xs font-medium text-indigo-600 hover:bg-indigo-50 rounded-lg disabled:opacity-40 flex items-center gap-1 transition-colors"
                   >

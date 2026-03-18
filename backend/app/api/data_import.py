@@ -154,14 +154,16 @@ async def get_my_sync_status(
 async def trigger_my_sync(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    asset_type: str | None = None,
 ) -> dict:
-    """触发当前用户的数据源同步。"""
-    result = await db.execute(
-        select(ETLDataSource).where(
-            ETLDataSource.owner_id == current_user.feishu_open_id,
-            ETLDataSource.is_enabled == True,  # noqa: E712
-        )
-    )
+    """触发当前用户的数据源同步。可选 asset_type 过滤：communication 或 structured。"""
+    conditions = [
+        ETLDataSource.owner_id == current_user.feishu_open_id,
+        ETLDataSource.is_enabled == True,  # noqa: E712
+    ]
+    if asset_type:
+        conditions.append(ETLDataSource.asset_type == asset_type)
+    result = await db.execute(select(ETLDataSource).where(*conditions))
     sources = result.scalars().all()
     if not sources:
         raise HTTPException(400, "没有已启用的数据源")
@@ -180,7 +182,10 @@ async def trigger_my_sync(
         state.last_sync_time = datetime.utcnow()
     await db.commit()
 
-    asyncio.create_task(etl_sync_job(triggered_by=current_user.name))
+    if asset_type == "structured":
+        asyncio.create_task(structured_table_sync_job())
+    else:
+        asyncio.create_task(etl_sync_job(triggered_by=current_user.name))
     return {"message": "同步任务已触发", "sources_count": len(sources)}
 
 
