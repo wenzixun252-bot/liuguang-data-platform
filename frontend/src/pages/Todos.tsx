@@ -43,8 +43,8 @@ const PRIORITY_COLORS = {
 }
 
 const PRIORITY_LABELS: Record<string, string> = {
-  low: '不紧急',
-  medium: '一般',
+  low: '不急',
+  medium: '较急',
   high: '紧急',
 }
 
