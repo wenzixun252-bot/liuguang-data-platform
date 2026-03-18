@@ -29,6 +29,7 @@ interface TodoItem {
   source_id: number | null
   source_text: string | null
   source_time: string | null
+  source_comm_type: string | null
   status: string
   confidence: number | null
   created_at: string
@@ -445,11 +446,11 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
                         onClick={() => handleViewSource(item.source_id!)}
                         className="text-xs text-indigo-500 hover:text-indigo-700 hover:underline transition-colors"
                       >
-                        来源: {item.source_type === 'chat' ? '会话记录' : '会议录音'}
+                        来源: {item.source_comm_type === 'chat' ? '会话记录' : '会议录音'}
                       </button>
                     ) : (
                       <span className="text-xs text-gray-400">
-                        来源: {item.source_type === 'chat' ? '会话记录' : '会议录音'}
+                        来源: {item.source_comm_type === 'chat' ? '会话记录' : '会议录音'}
                       </span>
                     )}
                     {item.source_time && (

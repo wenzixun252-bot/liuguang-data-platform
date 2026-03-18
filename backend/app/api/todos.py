@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db
 from app.database import async_session
+from app.models.communication import Communication
 from app.models.todo_item import TodoItem
 from app.models.user import User
 from app.schemas.todo import (
@@ -26,6 +27,26 @@ from app.services.todo_extractor import extract_and_save
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/todos", tags=["待办事项"])
+
+
+async def _enrich_comm_type(items: list, db: AsyncSession) -> list[TodoOut]:
+    """为 todo 列表附加 source_comm_type（从 communications 表查询）。"""
+    source_ids = [t.source_id for t in items if t.source_type == "communication" and t.source_id]
+    comm_type_map: dict[int, str] = {}
+    if source_ids:
+        result = await db.execute(
+            select(Communication.id, Communication.comm_type)
+            .where(Communication.id.in_(source_ids))
+        )
+        comm_type_map = dict(result.all())
+
+    enriched = []
+    for t in items:
+        out = TodoOut.model_validate(t)
+        if t.source_id and t.source_id in comm_type_map:
+            out.source_comm_type = comm_type_map[t.source_id]
+        enriched.append(out)
+    return enriched
 
 # ── 待办提取任务状态（进程内存） ──
 # key: owner_id, value: {status, message, count?}
@@ -67,7 +88,7 @@ async def todo_summary(
 
     return {
         "status_counts": status_counts,
-        "recent": [TodoOut.model_validate(t) for t in recent],
+        "recent": await _enrich_comm_type(recent, db),
     }
 
 
@@ -161,7 +182,7 @@ async def list_todos(
     )
     items = result.scalars().all()
 
-    return TodoListResponse(items=items, total=total)
+    return TodoListResponse(items=await _enrich_comm_type(items, db), total=total)
 
 
 @router.patch("/{todo_id}", response_model=TodoOut, summary="编辑待办")
