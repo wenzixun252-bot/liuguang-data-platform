@@ -674,6 +674,47 @@ async def search_rows(
     return SearchResponse(keyword=keyword, total=total, results=results)
 
 
+@router.get("/{table_id}/archivers", summary="表格归档人列表")
+async def get_table_archivers(
+    table_id: int,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """查询该表格的所有归档人（按 source_app_token + source_table_id 聚合）。"""
+    row = (await db.execute(
+        select(StructuredTable.source_app_token, StructuredTable.source_table_id)
+        .where(StructuredTable.id == table_id)
+    )).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="表格不存在")
+    if not row.source_app_token or not row.source_table_id:
+        return {"archivers": []}
+
+    rows = (await db.execute(
+        select(
+            StructuredTable.owner_id,
+            func.coalesce(User.name, StructuredTable.asset_owner_name).label("name"),
+            User.avatar_url,
+            func.min(StructuredTable.created_at).label("archived_at"),
+        )
+        .outerjoin(User, StructuredTable.owner_id == User.feishu_open_id)
+        .where(
+            StructuredTable.source_app_token == row.source_app_token,
+            StructuredTable.source_table_id == row.source_table_id,
+        )
+        .group_by(StructuredTable.owner_id, User.name, StructuredTable.asset_owner_name, User.avatar_url)
+    )).all()
+
+    return {"archivers": [
+        {
+            "name": r.name or "未知用户",
+            "avatar_url": r.avatar_url,
+            "archived_at": r.archived_at.isoformat() if r.archived_at else None,
+        }
+        for r in rows
+    ]}
+
+
 @router.get("/{table_id}", response_model=StructuredTableDetail, summary="表格详情")
 async def get_table(
     request: Request,

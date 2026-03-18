@@ -207,6 +207,43 @@ async def list_documents(
     )
 
 
+@router.get("/{doc_id}/archivers", summary="文档归档人列表")
+async def get_document_archivers(
+    doc_id: int,
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """查询该文档的所有归档人（按 feishu_record_id 聚合）。"""
+    doc = (await db.execute(
+        select(Document.feishu_record_id).where(Document.id == doc_id)
+    )).scalar_one_or_none()
+    if doc is None:
+        raise HTTPException(status_code=404, detail="文档不存在")
+    if not doc:
+        return {"archivers": []}
+
+    rows = (await db.execute(
+        select(
+            Document.owner_id,
+            func.coalesce(User.name, Document.asset_owner_name).label("name"),
+            User.avatar_url,
+            func.min(Document.created_at).label("archived_at"),
+        )
+        .outerjoin(User, Document.owner_id == User.feishu_open_id)
+        .where(Document.feishu_record_id == doc)
+        .group_by(Document.owner_id, User.name, Document.asset_owner_name, User.avatar_url)
+    )).all()
+
+    return {"archivers": [
+        {
+            "name": r.name or "未知用户",
+            "avatar_url": r.avatar_url,
+            "archived_at": r.archived_at.isoformat() if r.archived_at else None,
+        }
+        for r in rows
+    ]}
+
+
 @router.get("/{doc_id}", response_model=DocumentOut, summary="文档详情")
 async def get_document(
     request: Request,

@@ -11,6 +11,7 @@ import { ColumnFilter } from '../components/ColumnFilter'
 import { DateRangeFilter } from '../components/DateRangeFilter'
 import { HighlightText } from '../components/HighlightText'
 import { DataTable, type DataTableColumn, getPersistedDisplayCount } from '../components/DataTable'
+import ArchiverPopover from '../components/ArchiverPopover'
 
 /* ── 类型定义 ────────────────────────────────── */
 
@@ -151,18 +152,7 @@ export default function StructuredTables() {
         <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
           <span className="text-gray-800 font-medium truncate">{item.name}</span>
           {(item.import_count ?? 1) > 1 && (
-            <span
-              className={`shrink-0 px-1.5 py-0.5 rounded text-xs border ${
-                item.import_count >= 10
-                  ? 'bg-amber-50 text-amber-700 border-amber-300 font-semibold'
-                  : item.import_count >= 5
-                    ? 'bg-purple-50 text-purple-600 border-purple-200'
-                    : 'bg-indigo-50 text-indigo-600 border-indigo-200'
-              }`}
-              title={`${item.import_count} 人已归档此表格`}
-            >
-              {item.import_count >= 10 ? '\ud83d\udd25 ' : ''}{item.import_count} 人归档
-            </span>
+            <ArchiverPopover contentType="structured_table" contentId={item.id} importCount={item.import_count} />
           )}
           {item.cleaning_rule_id ? (
             <span className="shrink-0 px-1.5 py-0.5 rounded text-xs bg-green-50 text-green-600 border border-green-200" title={item.cleaning_rule_name || '已清洗'}>

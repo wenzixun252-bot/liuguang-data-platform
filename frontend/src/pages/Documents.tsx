@@ -12,6 +12,7 @@ import { DateRangeFilter } from '../components/DateRangeFilter'
 import { HighlightText } from '../components/HighlightText'
 import ExtractionRuleSlicer from '../components/ExtractionRuleSlicer'
 import ExtractionFieldView from '../components/ExtractionFieldView'
+import ArchiverPopover from '../components/ArchiverPopover'
 import { DataTable, type DataTableColumn, getPersistedDisplayCount } from '../components/DataTable'
 
 interface AttachmentMeta {
@@ -173,18 +174,7 @@ export default function Documents() {
             <span className="shrink-0 px-1.5 py-0.5 rounded text-xs bg-red-50 text-red-500 border border-red-200">解析失败</span>
           )}
           {(item.import_count ?? 1) > 1 && (
-            <span
-              className={`shrink-0 px-1.5 py-0.5 rounded text-xs border ${
-                item.import_count >= 10
-                  ? 'bg-amber-50 text-amber-700 border-amber-300 font-semibold'
-                  : item.import_count >= 5
-                    ? 'bg-purple-50 text-purple-600 border-purple-200'
-                    : 'bg-indigo-50 text-indigo-600 border-indigo-200'
-              }`}
-              title={`${item.import_count} 人已归档此文档`}
-            >
-              {item.import_count >= 10 ? '\ud83d\udd25 ' : ''}{item.import_count} 人归档
-            </span>
+            <ArchiverPopover contentType="document" contentId={item.id} importCount={item.import_count} />
           )}
           {item.extraction_rule_id && rulesMap[item.extraction_rule_id] && (
             <span className="shrink-0 px-1.5 py-0.5 rounded text-xs bg-violet-50 text-violet-700 border border-violet-200 font-medium">
