@@ -35,6 +35,7 @@ class ExtractionRuleOut(BaseModel):
     fields: list[dict]
     prompt_hint: str
     is_active: bool
+    is_builtin: bool = False
     created_at: datetime
     updated_at: datetime
 

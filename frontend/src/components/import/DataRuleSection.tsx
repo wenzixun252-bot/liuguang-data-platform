@@ -1,6 +1,6 @@
 import { useState, lazy, Suspense } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Settings, Sparkles, Trash2, Plus, Edit3, Zap, Check } from 'lucide-react'
+import { Settings, Sparkles, Trash2, Plus, Edit3, Zap, Check, Lock } from 'lucide-react'
 import { getExtractionRules, deleteExtractionRule, getCleaningRules, deleteCleaningRule } from '../../lib/api'
 import toast from 'react-hot-toast'
 
@@ -81,7 +81,25 @@ export default function DataRuleSection({ onRulesChange, activeExtractionRuleId,
             <span className="ml-auto text-xs text-indigo-400 bg-indigo-50 px-2 py-0.5 rounded-full">本地文档 · 飞书文档（含会议文档） · 会议记录表 · 会话记录表</span>
           </div>
           <div className="flex flex-wrap gap-2">
-            {extractionRules.map((rule: any) => {
+            {extractionRules.filter((r: any) => r.is_builtin).map((rule: any) => {
+              const isActive = activeExtractionRuleId === rule.id
+              return (
+                <div
+                  key={rule.id}
+                  onClick={() => onExtractionRuleChange(isActive ? null : rule.id)}
+                  className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm cursor-pointer transition-all ${
+                    isActive
+                      ? 'bg-gradient-to-r from-indigo-50 to-purple-50 border-2 border-indigo-400 ring-2 ring-indigo-100 shadow-sm'
+                      : 'bg-gradient-to-r from-indigo-50/50 to-purple-50/50 border border-indigo-200 hover:border-indigo-300'
+                  }`}
+                >
+                  {isActive ? <Check className="w-3.5 h-3.5 text-indigo-600 shrink-0" /> : <Lock className="w-3 h-3 text-indigo-400 shrink-0" />}
+                  <span className={`font-medium ${isActive ? 'text-indigo-700' : 'text-gray-800'}`}>{rule.name}</span>
+                  <span className="text-gray-400 text-xs">{rule.fields?.length || 0}字段</span>
+                </div>
+              )
+            })}
+            {extractionRules.filter((r: any) => !r.is_builtin).map((rule: any) => {
               const isActive = activeExtractionRuleId === rule.id
               return (
                 <div
@@ -125,7 +143,27 @@ export default function DataRuleSection({ onRulesChange, activeExtractionRuleId,
             <span className="ml-auto text-xs text-purple-400 bg-purple-50 px-2 py-0.5 rounded-full">本地表格 · 飞书表格 · 飞书多维表格</span>
           </div>
           <div className="flex flex-wrap gap-2">
-            {cleaningRules.map((rule: any) => {
+            {cleaningRules.filter((r: any) => r.is_builtin).map((rule: any) => {
+              const opts = rule.options || {}
+              const enabledCount = Object.values(opts).filter(v => v === true).length
+              const isActive = activeCleaningRuleId === rule.id
+              return (
+                <div
+                  key={rule.id}
+                  onClick={() => onCleaningRuleChange(isActive ? null : rule.id)}
+                  className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm cursor-pointer transition-all ${
+                    isActive
+                      ? 'bg-gradient-to-r from-purple-50 to-pink-50 border-2 border-purple-400 ring-2 ring-purple-100 shadow-sm'
+                      : 'bg-gradient-to-r from-purple-50/50 to-pink-50/50 border border-purple-200 hover:border-purple-300'
+                  }`}
+                >
+                  {isActive ? <Check className="w-3.5 h-3.5 text-purple-600 shrink-0" /> : <Lock className="w-3 h-3 text-purple-400 shrink-0" />}
+                  <span className={`font-medium ${isActive ? 'text-purple-700' : 'text-gray-800'}`}>{rule.name}</span>
+                  <span className="text-gray-400 text-xs">{enabledCount}项开启</span>
+                </div>
+              )
+            })}
+            {cleaningRules.filter((r: any) => !r.is_builtin).map((rule: any) => {
               const opts = rule.options || {}
               const enabledCount = Object.values(opts).filter(v => v === true).length
               const isActive = activeCleaningRuleId === rule.id

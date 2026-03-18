@@ -35,6 +35,7 @@ class CleaningRuleOut(BaseModel):
     options: dict
     field_hint: str
     is_active: bool
+    is_builtin: bool = False
     created_at: datetime
     updated_at: datetime
 

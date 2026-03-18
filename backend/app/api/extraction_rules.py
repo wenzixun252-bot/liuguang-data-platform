@@ -19,6 +19,7 @@ from app.schemas.extraction_rule import (
     ExtractionDataResponse,
 )
 from app.services.extraction_templates import SECTOR_LABELS, SECTOR_TEMPLATES, get_template_fields
+from app.services.builtin_rules import BUILTIN_EXTRACTION_RULES, get_builtin_extraction_rule
 
 router = APIRouter(prefix="/api/extraction-rules", tags=["extraction-rules"])
 
@@ -33,7 +34,9 @@ async def list_rules(
         .where(ExtractionRule.owner_id == user.feishu_open_id)
         .order_by(ExtractionRule.updated_at.desc())
     )
-    return result.scalars().all()
+    user_rules = [ExtractionRuleOut.model_validate(r) for r in result.scalars().all()]
+    builtin = [ExtractionRuleOut(**r) for r in BUILTIN_EXTRACTION_RULES]
+    return builtin + user_rules
 
 
 @router.post("", response_model=ExtractionRuleOut)
@@ -62,6 +65,8 @@ async def update_rule(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
+    if rule_id < 0:
+        raise HTTPException(403, "内置规则不可修改")
     result = await db.execute(
         select(ExtractionRule).where(
             ExtractionRule.id == rule_id,
@@ -92,6 +97,8 @@ async def delete_rule(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
+    if rule_id < 0:
+        raise HTTPException(403, "内置规则不可删除")
     result = await db.execute(
         select(ExtractionRule).where(
             ExtractionRule.id == rule_id,
@@ -117,16 +124,22 @@ async def get_rule_data(
     page_size: int = Query(50, ge=1, le=200),
 ) -> ExtractionDataResponse:
     """获取某个提取规则下所有文档和沟通记录的 key_info 汇总数据。"""
-    # 加载规则
-    result = await db.execute(
-        select(ExtractionRule).where(
-            ExtractionRule.id == rule_id,
-            ExtractionRule.owner_id == user.feishu_open_id,
+    # 加载规则：支持内置规则（负数 ID）
+    if rule_id < 0:
+        builtin = get_builtin_extraction_rule(rule_id)
+        if not builtin:
+            raise HTTPException(404, "规则不存在")
+        rule = type("BuiltinRule", (), builtin)()
+    else:
+        result = await db.execute(
+            select(ExtractionRule).where(
+                ExtractionRule.id == rule_id,
+                ExtractionRule.owner_id == user.feishu_open_id,
+            )
         )
-    )
-    rule = result.scalar_one_or_none()
-    if not rule:
-        raise HTTPException(404, "规则不存在")
+        rule = result.scalar_one_or_none()
+        if not rule:
+            raise HTTPException(404, "规则不存在")
 
     visible_ids = await get_visible_owner_ids(user, db, request)
 
@@ -202,8 +215,9 @@ async def get_rule_data(
         for row in rows
     ]
 
+    rule_out = ExtractionRuleOut(**rule.__dict__) if rule_id < 0 else ExtractionRuleOut.model_validate(rule)
     return ExtractionDataResponse(
-        rule=ExtractionRuleOut.model_validate(rule),
+        rule=rule_out,
         items=items,
         total=total,
         page=page,
@@ -226,16 +240,22 @@ async def export_rule_data(
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill
 
-    # 加载规则
-    result = await db.execute(
-        select(ExtractionRule).where(
-            ExtractionRule.id == rule_id,
-            ExtractionRule.owner_id == user.feishu_open_id,
+    # 加载规则：支持内置规则（负数 ID）
+    if rule_id < 0:
+        builtin = get_builtin_extraction_rule(rule_id)
+        if not builtin:
+            raise HTTPException(404, "规则不存在")
+        rule = type("BuiltinRule", (), builtin)()
+    else:
+        result = await db.execute(
+            select(ExtractionRule).where(
+                ExtractionRule.id == rule_id,
+                ExtractionRule.owner_id == user.feishu_open_id,
+            )
         )
-    )
-    rule = result.scalar_one_or_none()
-    if not rule:
-        raise HTTPException(404, "规则不存在")
+        rule = result.scalar_one_or_none()
+        if not rule:
+            raise HTTPException(404, "规则不存在")
 
     visible_ids = await get_visible_owner_ids(user, db, request)
     fields = rule.fields or []

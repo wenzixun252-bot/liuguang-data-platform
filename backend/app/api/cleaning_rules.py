@@ -11,6 +11,7 @@ from app.schemas.cleaning_rule import (
     CleaningRuleOut,
     CleaningRuleUpdate,
 )
+from app.services.builtin_rules import BUILTIN_CLEANING_RULES
 
 router = APIRouter(prefix="/api/cleaning-rules", tags=["cleaning-rules"])
 
@@ -25,7 +26,9 @@ async def list_rules(
         .where(CleaningRule.owner_id == user.feishu_open_id)
         .order_by(CleaningRule.updated_at.desc())
     )
-    return result.scalars().all()
+    user_rules = [CleaningRuleOut.model_validate(r) for r in result.scalars().all()]
+    builtin = [CleaningRuleOut(**r) for r in BUILTIN_CLEANING_RULES]
+    return builtin + user_rules
 
 
 @router.post("", response_model=CleaningRuleOut)
@@ -53,6 +56,8 @@ async def update_rule(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
+    if rule_id < 0:
+        raise HTTPException(403, "内置规则不可修改")
     result = await db.execute(
         select(CleaningRule).where(
             CleaningRule.id == rule_id,
@@ -81,6 +86,8 @@ async def delete_rule(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
+    if rule_id < 0:
+        raise HTTPException(403, "内置规则不可删除")
     result = await db.execute(
         select(CleaningRule).where(
             CleaningRule.id == rule_id,

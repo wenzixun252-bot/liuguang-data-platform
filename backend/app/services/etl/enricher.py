@@ -223,21 +223,29 @@ async def extract_key_info(
         logger.info("LLM 未配置，跳过关键信息提取")
         return None
 
-    # 从数据库加载提取规则
-    try:
-        from sqlalchemy import select
-        from app.models.extraction_rule import ExtractionRule
-
-        result = await db.execute(
-            select(ExtractionRule).where(ExtractionRule.id == extraction_rule_id)
-        )
-        rule = result.scalar_one_or_none()
-        if rule is None:
-            logger.warning("提取规则 ID=%d 不存在，跳过关键信息提取", extraction_rule_id)
+    # 加载提取规则：支持内置规则（负数 ID）和数据库规则
+    if extraction_rule_id < 0:
+        from app.services.builtin_rules import get_builtin_extraction_rule
+        builtin = get_builtin_extraction_rule(extraction_rule_id)
+        if builtin is None:
+            logger.warning("内置提取规则 ID=%d 不存在，跳过关键信息提取", extraction_rule_id)
             return None
-    except Exception as e:
-        logger.warning("加载提取规则失败 (id=%d): %s", extraction_rule_id, e)
-        return None
+        rule = type("BuiltinRule", (), builtin)()
+    else:
+        try:
+            from sqlalchemy import select
+            from app.models.extraction_rule import ExtractionRule
+
+            result = await db.execute(
+                select(ExtractionRule).where(ExtractionRule.id == extraction_rule_id)
+            )
+            rule = result.scalar_one_or_none()
+            if rule is None:
+                logger.warning("提取规则 ID=%d 不存在，跳过关键信息提取", extraction_rule_id)
+                return None
+        except Exception as e:
+            logger.warning("加载提取规则失败 (id=%d): %s", extraction_rule_id, e)
+            return None
 
     # 构建字段描述
     fields = rule.fields or []
@@ -331,31 +339,50 @@ async def translate_key_info_batch(
     """
     from sqlalchemy import select as sa_select
     from app.models.extraction_rule import ExtractionRule
+    from app.services.builtin_rules import get_builtin_extraction_rule
 
     # 收集需要翻译的 rule_id
     rule_ids = set()
+    builtin_rule_ids = set()
     for item in items:
         rule_id = getattr(item, "extraction_rule_id", None)
         key_info = getattr(item, "key_info", None)
         if rule_id and key_info:
-            rule_ids.add(rule_id)
+            if rule_id < 0:
+                builtin_rule_ids.add(rule_id)
+            else:
+                rule_ids.add(rule_id)
 
-    if not rule_ids:
+    if not rule_ids and not builtin_rule_ids:
         return
 
-    # 批量加载提取规则
-    result = await db.execute(
-        sa_select(ExtractionRule).where(ExtractionRule.id.in_(rule_ids))
-    )
     rules_map: dict[int, dict[str, str]] = {}
-    for rule in result.scalars().all():
-        key_to_label = {}
-        for f in (rule.fields or []):
-            k = f.get("key", "")
-            label = f.get("label", "")
-            if k and label:
-                key_to_label[k] = label
-        rules_map[rule.id] = key_to_label
+
+    # 加载内置规则的字段映射
+    for bid in builtin_rule_ids:
+        builtin = get_builtin_extraction_rule(bid)
+        if builtin:
+            key_to_label = {}
+            for f in builtin.get("fields", []):
+                k = f.get("key", "")
+                label = f.get("label", "")
+                if k and label:
+                    key_to_label[k] = label
+            rules_map[bid] = key_to_label
+
+    # 批量加载数据库提取规则
+    if rule_ids:
+        result = await db.execute(
+            sa_select(ExtractionRule).where(ExtractionRule.id.in_(rule_ids))
+        )
+        for rule in result.scalars().all():
+            key_to_label = {}
+            for f in (rule.fields or []):
+                k = f.get("key", "")
+                label = f.get("label", "")
+                if k and label:
+                    key_to_label[k] = label
+            rules_map[rule.id] = key_to_label
 
     # 翻译 key_info
     for item in items:
