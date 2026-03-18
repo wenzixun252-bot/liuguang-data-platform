@@ -171,7 +171,7 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
       fetchTodos()
     } catch (err: any) {
       const detail = err?.response?.data?.detail || err?.message || '未知错误'
-      updateTask(taskId, { status: 'error', progress: 100, message: '提取失败' })
+      updateTask(taskId, { status: 'error', progress: 100, message: '提取失败', errorDetail: detail })
       toast.error(`提取待办失败: ${detail}`)
     } finally {
       setExtracting(false)

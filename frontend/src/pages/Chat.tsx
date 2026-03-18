@@ -351,7 +351,8 @@ export default function Chat() {
           ...prev.slice(0, -1),
           { role: 'assistant', content: '请求失败，请稍后重试。' },
         ])
-        updateTask(taskId, { status: 'error', message: '失败' })
+        const errMsg = err instanceof Error ? err.message : '未知错误'
+        updateTask(taskId, { status: 'error', message: '失败', errorDetail: errMsg })
         toast.error('AI 回复失败')
       }
     } finally {

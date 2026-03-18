@@ -8,14 +8,27 @@ import {
   X,
   ListTodo,
   ExternalLink,
+  Clock,
 } from 'lucide-react'
 import { useTaskProgress, type TaskItem } from '../hooks/useTaskProgress'
+
+/** 格式化时间戳为 MM-DD HH:mm:ss */
+function formatTime(ts: number): string {
+  const d = new Date(ts)
+  const MM = String(d.getMonth() + 1).padStart(2, '0')
+  const DD = String(d.getDate()).padStart(2, '0')
+  const HH = String(d.getHours()).padStart(2, '0')
+  const mm = String(d.getMinutes()).padStart(2, '0')
+  const ss = String(d.getSeconds()).padStart(2, '0')
+  return `${MM}-${DD} ${HH}:${mm}:${ss}`
+}
 
 function TaskRow({ task, onRemove, onCancel, onNavigate }: { task: TaskItem; onRemove: () => void; onCancel: () => void; onNavigate?: () => void }) {
   const isIndeterminate = task.progress === -1
   const isDone = task.status === 'done'
   const isError = task.status === 'error'
   const canNavigate = !!task.navigateTo
+  const errorReason = isError ? (task.errorDetail || task.message) : ''
 
   return (
     <motion.div
@@ -70,6 +83,25 @@ function TaskRow({ task, onRemove, onCancel, onNavigate }: { task: TaskItem; onR
           </button>
         )}
       </div>
+
+      {/* 时间信息 */}
+      <div className="mt-1 flex items-center gap-1.5 text-[10px]" style={{ color: 'var(--color-text-quaternary)' }}>
+        <Clock size={10} className="shrink-0" />
+        <span>{formatTime(task.createdAt)}</span>
+        {task.completedAt && (
+          <>
+            <span>→</span>
+            <span>{formatTime(task.completedAt)}</span>
+          </>
+        )}
+      </div>
+
+      {/* 失败原因 */}
+      {isError && errorReason && errorReason !== '已取消' && (
+        <div className="mt-1 px-2 py-1 rounded-md bg-red-50 text-[10px] text-red-600 leading-relaxed break-all">
+          {errorReason}
+        </div>
+      )}
 
       <div className="mt-1.5 flex items-center gap-2">
         <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--color-border-light, rgba(0,0,0,0.06))' }}>

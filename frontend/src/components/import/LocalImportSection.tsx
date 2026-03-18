@@ -102,7 +102,12 @@ export default function LocalImportSection({ extractionRuleId, cleaningRuleId, e
 
     const finalStatus = failCount === files.length ? 'error' : 'done'
     const finalMessage = `成功 ${successCount} · 失败 ${failCount}`
-    updateTask(taskId, { status: finalStatus as 'done' | 'error', progress: 100, message: finalMessage })
+    updateTask(taskId, {
+      status: finalStatus as 'done' | 'error',
+      progress: 100,
+      message: finalMessage,
+      ...(failCount > 0 && lastError ? { errorDetail: lastError } : {}),
+    })
 
     if (successCount > 0) toast.success(`${successCount} 个文件导入成功`)
     if (failCount > 0) toast.error(`${failCount} 个文件导入失败: ${lastError}`)

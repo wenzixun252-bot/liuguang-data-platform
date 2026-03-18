@@ -254,7 +254,7 @@ export default function CalendarAssistant() {
           done = true
         } else if (status === 'error') {
           toast.error(`简报生成失败: ${message}`)
-          updateTask(briefTaskId, { status: 'error', progress: 100, message: message || '失败' })
+          updateTask(briefTaskId, { status: 'error', progress: 100, message: '生成失败', errorDetail: message || '未知错误' })
           done = true
         } else if (status === 'cancelled') {
           toast('简报生成已取消', { icon: '🛑' })
@@ -269,7 +269,7 @@ export default function CalendarAssistant() {
     } catch (err: any) {
       const detail = err?.response?.data?.detail || err?.message || '未知错误'
       toast.error(`查询简报进度失败: ${detail}`)
-      updateTask(briefTaskId, { status: 'error', progress: 100, message: '查询失败' })
+      updateTask(briefTaskId, { status: 'error', progress: 100, message: '查询失败', errorDetail: detail })
     } finally {
       setBriefStreaming(false)
       pollingRef.current = false

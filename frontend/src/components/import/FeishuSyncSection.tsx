@@ -191,8 +191,9 @@ export default function FeishuSyncSection({ extractionRuleId, cleaningRuleId }: 
           const message = task.status === 'completed'
             ? `成功 ${task.imported_count} · 跳过 ${task.skipped_count}`
             : task.status === 'timeout' ? '超时'
-            : task.error_message || '失败'
-          updateTask(globalId, { status: finalStatus as 'done' | 'error', progress: 100, message })
+            : '失败'
+          const errorDetail = finalStatus === 'error' ? (task.error_message || undefined) : undefined
+          updateTask(globalId, { status: finalStatus as 'done' | 'error', progress: 100, message, errorDetail })
         }
       }
     }

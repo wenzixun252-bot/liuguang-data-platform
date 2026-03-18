@@ -8,13 +8,15 @@ export interface TaskItem {
   progress: number // 0-100, -1 表示不确定进度（indeterminate）
   message: string
   createdAt: number
+  completedAt?: number // 任务完成或失败的时间
+  errorDetail?: string // 失败原因详情
   navigateTo?: string // 任务完成后点击跳转的路径
 }
 
 interface TaskProgressContextValue {
   tasks: TaskItem[]
   addTask: (id: string, label: string, navigateTo?: string) => void
-  updateTask: (id: string, updates: Partial<Pick<TaskItem, 'status' | 'progress' | 'message' | 'navigateTo'>>) => void
+  updateTask: (id: string, updates: Partial<Pick<TaskItem, 'status' | 'progress' | 'message' | 'navigateTo' | 'errorDetail'>>) => void
   removeTask: (id: string) => void
   cancelTask: (id: string) => Promise<void>
   clearDone: () => void
@@ -40,9 +42,17 @@ export function TaskProgressProvider({ children }: { children: ReactNode }) {
     })
   }, [])
 
-  const updateTask = useCallback((id: string, updates: Partial<Pick<TaskItem, 'status' | 'progress' | 'message' | 'navigateTo'>>) => {
+  const updateTask = useCallback((id: string, updates: Partial<Pick<TaskItem, 'status' | 'progress' | 'message' | 'navigateTo' | 'errorDetail'>>) => {
     setTasks(prev =>
-      prev.map(t => (t.id === id ? { ...t, ...updates } : t))
+      prev.map(t => {
+        if (t.id !== id) return t
+        const merged = { ...t, ...updates }
+        // 状态变为 done 或 error 时自动记录完成时间
+        if ((updates.status === 'done' || updates.status === 'error') && !t.completedAt) {
+          merged.completedAt = Date.now()
+        }
+        return merged
+      })
     )
   }, [])
 
@@ -72,7 +82,7 @@ export function TaskProgressProvider({ children }: { children: ReactNode }) {
     }
     // 前端标记为已取消（用 error 状态 + 提示信息）
     setTasks(prev =>
-      prev.map(t => t.id === id ? { ...t, status: 'error', message: '已取消' } : t)
+      prev.map(t => t.id === id ? { ...t, status: 'error', message: '已取消', completedAt: Date.now() } : t)
     )
   }, [])
 
