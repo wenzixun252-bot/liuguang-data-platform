@@ -274,4 +274,11 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+  /* 加载指示器在减少动画模式下仍需旋转 */
+  .animate-spin {
+    animation: spin 1s linear infinite !important;
+  }
+  .animate-indeterminate {
+    animation: indeterminate-slide 1.4s ease-in-out infinite !important;
+  }
 }

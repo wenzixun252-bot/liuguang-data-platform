@@ -91,7 +91,7 @@ const RECIPE_CONFIGS = {
     desc: '自动同步飞书会议记录',
   },
   chat: {
-    title: '群聊摘要导入配置',
+    title: '会话记录导入配置',
     recipeUrl: 'https://recipes.feishu.cn/recipe?template_id=32',
     assetType: 'communication' as const,
     recipeKeywords: ['群聊摘要', '消息汇总', 'Chat', '聊天记录', '群消息', '会话'] as string[],
