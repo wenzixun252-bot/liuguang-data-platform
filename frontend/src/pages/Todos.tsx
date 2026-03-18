@@ -17,6 +17,7 @@ import api from '../lib/api'
 import { DateRangeFilter } from '../components/DateRangeFilter'
 import toast from 'react-hot-toast'
 import { useTaskProgress } from '../hooks/useTaskProgress'
+import WidgetContainer from '../components/insights/WidgetContainer'
 
 interface TodoItem {
   id: number
@@ -275,21 +276,20 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
     setPage(1)
   }
 
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold text-gray-800">智能待办</h1>
-        <div className="flex items-center gap-3 flex-wrap">
-          <div className="relative">
-            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              placeholder="搜索待办..."
-              className="pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm w-48 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
+  const toolbarContent = (
+    <div className="flex items-center gap-3 flex-wrap">
+      <div className="relative">
+        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+        <input
+          type="text"
+          placeholder="搜索待办..."
+          className="pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm w-48 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
+      {!embedded && (
+        <>
           <div className="flex items-center gap-1 text-xs text-gray-500">
             <span>创建时间</span>
             <DateRangeFilter from={dateFilters.created_at?.from || ''} to={dateFilters.created_at?.to || ''} onChange={(f, t) => updateDateFilter('created_at', f, t)} />
@@ -298,27 +298,38 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
             <span>截止日期</span>
             <DateRangeFilter from={dateFilters.due_date?.from || ''} to={dateFilters.due_date?.to || ''} onChange={(f, t) => updateDateFilter('due_date', f, t)} />
           </div>
-          <select
-            value={days}
-            onChange={(e) => setDays(Number(e.target.value))}
-            className="border border-gray-200 rounded-lg px-3 py-2 text-sm"
-          >
-            <option value={2}>近 2 天</option>
-            <option value={3}>近 3 天</option>
-            <option value={7}>近 7 天</option>
-            <option value={14}>近 14 天</option>
-            <option value={30}>近 30 天</option>
-          </select>
-          <button
-            onClick={handleExtract}
-            disabled={extracting}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm"
-          >
-            <Sparkles size={16} />
-            {extracting ? '提取中...' : '智能提取待办'}
-          </button>
+        </>
+      )}
+      <select
+        value={days}
+        onChange={(e) => setDays(Number(e.target.value))}
+        className="border border-gray-200 rounded-lg px-3 py-2 text-sm"
+      >
+        <option value={2}>近 2 天</option>
+        <option value={3}>近 3 天</option>
+        <option value={7}>近 7 天</option>
+        <option value={14}>近 14 天</option>
+        <option value={30}>近 30 天</option>
+      </select>
+      <button
+        onClick={handleExtract}
+        disabled={extracting}
+        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm"
+      >
+        <Sparkles size={16} />
+        {extracting ? '提取中...' : '智能提取待办'}
+      </button>
+    </div>
+  )
+
+  const innerContent = (
+    <div className="space-y-4">
+      {!embedded && (
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <h1 className="text-2xl font-bold text-gray-800">智能待办</h1>
+          {toolbarContent}
         </div>
-      </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit">
@@ -724,4 +735,19 @@ export default function Todos({ embedded = false }: { embedded?: boolean } = {})
       )}
     </div>
   )
+
+  if (embedded) {
+    return (
+      <WidgetContainer
+        id="smart-todos"
+        title="智能待办"
+        icon={<Sparkles size={20} />}
+        headerExtra={toolbarContent}
+      >
+        <div className="-mt-1">{innerContent}</div>
+      </WidgetContainer>
+    )
+  }
+
+  return innerContent
 }
