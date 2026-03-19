@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.database import async_session
-from app.models.asset import ETLSyncState
+from app.models.asset import ETLSyncState, ImportTask
 from app.models.user import User
 from app.services.etl.extractor import RegistryEntry, incremental_extractor, registry_reader
 from app.services.etl.loader import asset_loader
@@ -133,7 +133,29 @@ async def _mark_failed(app_token: str, table_id: str, error: str) -> None:
             await db.commit()
 
 
-async def etl_sync_job(triggered_by: str | None = None) -> None:
+async def _finish_import_task(
+    task_id: int, status: str, *,
+    imported_count: int = 0, skipped_count: int = 0, failed_count: int = 0,
+    error_message: str | None = None,
+) -> None:
+    """更新 ImportTask 最终状态的辅助函数。"""
+    try:
+        async with async_session() as db:
+            task_obj = await db.get(ImportTask, task_id)
+            if task_obj:
+                task_obj.status = status
+                task_obj.imported_count = imported_count
+                task_obj.skipped_count = skipped_count
+                task_obj.failed_count = failed_count
+                if error_message:
+                    task_obj.error_message = error_message[:500]
+                task_obj.completed_at = datetime.utcnow()
+                await db.commit()
+    except Exception as e:
+        logger.warning("更新 ImportTask %d 状态失败: %s", task_id, e)
+
+
+async def etl_sync_job(triggered_by: str | None = None, task_id: int | None = None) -> None:
     """定时任务入口：遍历注册中心 → 逐表增量抽取 → Transform → Load。"""
     logger.info("ETL 同步任务开始")
 
@@ -163,6 +185,8 @@ async def etl_sync_job(triggered_by: str | None = None) -> None:
         entries = await registry_reader.read()
     except Exception as e:
         logger.error("读取数据源列表失败: %s", e)
+        if task_id:
+            await _finish_import_task(task_id, "failed", error_message=str(e))
         return
 
     # 结构化数据源由 structured_table_sync_job 单独处理，ETL 管道跳过
@@ -170,6 +194,8 @@ async def etl_sync_job(triggered_by: str | None = None) -> None:
 
     if not entries:
         logger.info("数据源为空，跳过本轮同步")
+        if task_id:
+            await _finish_import_task(task_id, "completed")
         return
 
     total_extracted = 0
@@ -289,6 +315,14 @@ async def etl_sync_job(triggered_by: str | None = None) -> None:
         except Exception as e:
             logger.error("ETL 同步数据源 %s/%s 失败: %s", entry.app_token, entry.table_id, e, exc_info=True)
             await _mark_failed(entry.app_token, entry.table_id, str(e))
+
+    # 更新 ImportTask 最终状态
+    if task_id:
+        await _finish_import_task(
+            task_id, "completed",
+            imported_count=total_loaded,
+            skipped_count=total_extracted - total_loaded,
+        )
 
     logger.info(
         "ETL 同步任务完成，共抽取 %d 条, 入库 %d 条",
@@ -583,7 +617,7 @@ async def kg_build_job() -> None:
     return
 
 
-async def structured_table_sync_job() -> None:
+async def structured_table_sync_job(task_id: int | None = None) -> None:
     """定时任务：自动同步所有飞书来源的结构化数据表（多维表格 + 飞书表格）。"""
     from app.models.structured_table import StructuredTable
     from app.services.structured_table_import import sync_table
@@ -600,9 +634,12 @@ async def structured_table_sync_job() -> None:
 
     if not tables:
         logger.info("没有需要同步的结构化数据表")
+        if task_id:
+            await _finish_import_task(task_id, "completed")
         return
 
     synced = 0
+    failed = 0
     for table in tables:
         try:
             async with async_session() as db:
@@ -628,7 +665,17 @@ async def structured_table_sync_job() -> None:
                 synced += 1
                 logger.info("同步结构化数据表: %s (id=%d)", table.name, table.id)
         except Exception as e:
+            failed += 1
             logger.warning("同步结构化数据表 %s (id=%d) 失败: %s", table.name, table.id, e)
+
+    # 更新 ImportTask 最终状态
+    if task_id:
+        await _finish_import_task(
+            task_id, "completed" if synced > 0 or failed == 0 else "failed",
+            imported_count=synced,
+            skipped_count=len(tables) - synced - failed,
+            failed_count=failed,
+        )
 
     logger.info("结构化数据表同步完成，共同步 %d/%d 个表", synced, len(tables))
 

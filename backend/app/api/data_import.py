@@ -182,11 +182,36 @@ async def trigger_my_sync(
         state.last_sync_time = datetime.utcnow()
     await db.commit()
 
+    # 检查是否已有运行中的同类同步任务
+    task_type = "bitable_sync" if asset_type == "structured" else "communication"
+    existing = await db.execute(
+        select(ImportTask).where(
+            ImportTask.owner_id == current_user.feishu_open_id,
+            ImportTask.task_type == task_type,
+            ImportTask.status.in_(["running", "pending"]),
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(409, "已有同类同步任务正在运行，请稍后再试")
+
+    # 创建 ImportTask 记录，让任务中心能看到进度
+    task = ImportTask(
+        task_type=task_type,
+        status="running",
+        owner_id=current_user.feishu_open_id,
+        total_count=len(sources),
+        details={"sources": [s.table_name for s in sources[:10]]},
+        started_at=datetime.utcnow(),
+    )
+    db.add(task)
+    await db.commit()
+    await db.refresh(task)
+
     if asset_type == "structured":
-        asyncio.create_task(structured_table_sync_job())
+        asyncio.create_task(structured_table_sync_job(task_id=task.id))
     else:
-        asyncio.create_task(etl_sync_job(triggered_by=current_user.name))
-    return {"message": "同步任务已触发", "sources_count": len(sources)}
+        asyncio.create_task(etl_sync_job(triggered_by=current_user.name, task_id=task.id))
+    return {"message": "同步任务已触发", "sources_count": len(sources), "task_id": task.id}
 
 
 @router.post("/feishu-sync/{source_id}", summary="触发单个数据源同步")
@@ -1724,6 +1749,17 @@ async def trigger_cloud_folder_sync(
     folders = result.scalars().all()
     if not folders:
         raise HTTPException(400, "没有已启用的云文件夹源")
+
+    # 检查是否已有运行中的文件夹同步任务
+    existing = await db.execute(
+        select(ImportTask).where(
+            ImportTask.owner_id == current_user.feishu_open_id,
+            ImportTask.task_type == "folder_sync",
+            ImportTask.status.in_(["running", "pending"]),
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(409, "已有文件夹同步任务正在运行，请稍后再试")
 
     # 创建 ImportTask 记录，让前端能看到进度
     folder_names = [f.folder_name or f.folder_token for f in folders]

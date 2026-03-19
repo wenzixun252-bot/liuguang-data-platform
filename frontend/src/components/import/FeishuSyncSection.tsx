@@ -222,9 +222,12 @@ export default function FeishuSyncSection({ extractionRuleId, cleaningRuleId }: 
     onSuccess: () => {
       toast.success('沟通数据同步已触发')
       queryClient.invalidateQueries({ queryKey: ['sync-status'] })
+      queryClient.invalidateQueries({ queryKey: ['import-tasks'] })
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.detail || '同步失败')
+      const msg = error.response?.data?.detail || '同步失败'
+      if (error.response?.status === 409) toast('同步任务正在运行中', { icon: '⏳' })
+      else toast.error(msg)
     },
   })
 
@@ -234,9 +237,12 @@ export default function FeishuSyncSection({ extractionRuleId, cleaningRuleId }: 
     onSuccess: () => {
       toast.success('表格数据同步已触发')
       queryClient.invalidateQueries({ queryKey: ['sync-status'] })
+      queryClient.invalidateQueries({ queryKey: ['import-tasks'] })
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.detail || '同步失败')
+      const msg = error.response?.data?.detail || '同步失败'
+      if (error.response?.status === 409) toast('同步任务正在运行中', { icon: '⏳' })
+      else toast.error(msg)
     },
   })
 
@@ -244,18 +250,24 @@ export default function FeishuSyncSection({ extractionRuleId, cleaningRuleId }: 
   const syncFolderMutation = useMutation({
     mutationFn: () => api.post('/import/cloud-folders/sync'),
     onSuccess: () => {
-      toast.success('文件夹同步已触发，可在下方任务面板查看进度')
+      toast.success('文件夹同步已触发，可在任务中心查看进度')
       queryClient.invalidateQueries({ queryKey: ['cloud-folders'] })
       queryClient.invalidateQueries({ queryKey: ['import-tasks'] })
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.detail || '同步失败')
+      const msg = error.response?.data?.detail || '同步失败'
+      if (error.response?.status === 409) toast('文件夹同步正在运行中', { icon: '⏳' })
+      else toast.error(msg)
     },
   })
 
-  const commSyncing = syncCommMutation.isPending
-  const structuredSyncing = syncStructuredMutation.isPending
-  const folderSyncPending = syncFolderMutation.isPending
+  // 检查后台是否有正在运行的同类任务（防止重复触发）
+  const hasRunningTask = (taskType: string) =>
+    importTasks.some(t => t.task_type === taskType && (t.status === 'running' || t.status === 'pending'))
+
+  const commSyncing = syncCommMutation.isPending || hasRunningTask('communication')
+  const structuredSyncing = syncStructuredMutation.isPending || hasRunningTask('bitable_sync')
+  const folderSyncPending = syncFolderMutation.isPending || hasRunningTask('folder_sync')
 
   // 一键同步所有飞书数据
   const handleSyncAll = () => {
