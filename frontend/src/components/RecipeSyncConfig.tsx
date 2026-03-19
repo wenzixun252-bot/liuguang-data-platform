@@ -5,7 +5,7 @@ import {
   Sparkles, Video, MessageSquare,
 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
-import api, { getExtractionRules } from '../lib/api'
+import api, { getExtractionRules, getCleaningRules } from '../lib/api'
 import toast from 'react-hot-toast'
 
 /* ── 类型 ─────────────────────────────────── */
@@ -83,6 +83,7 @@ export default function RecipeSyncConfig({
 
   // 提取规则列表（用于已关联数据源的规则选择器）
   const { data: extractionRules = [] } = useQuery({ queryKey: ['extraction-rules'], queryFn: getExtractionRules })
+  const { data: cleaningRules = [] } = useQuery({ queryKey: ['cleaning-rules'], queryFn: getCleaningRules })
 
   // 粘贴链接
   const [showPasteUrl, setShowPasteUrl] = useState(false)
@@ -355,6 +356,24 @@ export default function RecipeSyncConfig({
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 space-y-5">
+          {/* 当前规则状态提示 */}
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            {extractionRuleId ? (
+              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-violet-50 text-violet-600 border border-violet-200">
+                <Sparkles size={10} />
+                提取规则：{(extractionRules as any[]).find((r: any) => r.id === extractionRuleId)?.name || `#${extractionRuleId}`}
+              </span>
+            ) : null}
+            {cleaningRuleId ? (
+              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-green-50 text-green-600 border border-green-200">
+                清洗规则：{(cleaningRules as any[]).find((r: any) => r.id === cleaningRuleId)?.name || `#${cleaningRuleId}`}
+              </span>
+            ) : null}
+            {!extractionRuleId && !cleaningRuleId && (
+              <span className="text-gray-400">未选择规则，可在上方数据处理规则区域选择</span>
+            )}
+          </div>
+
           {/* 区域 A: 配方引导教程（首次无数据源时显示） */}
           {hasNoSources && (
             <div className="bg-blue-50 rounded-lg p-4 space-y-3">

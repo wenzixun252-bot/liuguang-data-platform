@@ -371,6 +371,44 @@ async def batch_delete_documents(
     return {"deleted": len(rows)}
 
 
+@router.patch("/{doc_id}/extraction-rule", summary="绑定或修改文档提取规则")
+async def update_doc_extraction_rule(
+    request: Request,
+    doc_id: int,
+    body: dict,
+    current_user: Annotated[User, Depends(get_current_user)] = None,
+    db: Annotated[AsyncSession, Depends(get_db)] = None,
+):
+    """绑定、修改或解除文档的提取规则。body: { extraction_rule_id: int | null }"""
+    visible_ids = await get_visible_owner_ids(current_user, db, request)
+    stmt = select(Document).where(Document.id == doc_id)
+    stmt = _apply_visibility(stmt, visible_ids)
+    result = await db.execute(stmt)
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="文档不存在或无权操作")
+
+    new_rule_id = body.get("extraction_rule_id")
+    if new_rule_id is None:
+        doc.extraction_rule_id = None
+        doc.key_info = None
+        await db.commit()
+        return {"message": "已解除提取规则", "extraction_rule_id": None}
+
+    from app.services.etl.enricher import extract_key_info
+    content = doc.content_text or ""
+    if content:
+        key_info = await extract_key_info(content, new_rule_id, db, title=doc.title, original_filename=doc.original_filename)
+        doc.key_info = key_info
+    doc.extraction_rule_id = new_rule_id
+    await db.commit()
+    return {
+        "message": "提取规则已应用",
+        "extraction_rule_id": doc.extraction_rule_id,
+        "key_info": doc.key_info,
+    }
+
+
 async def _backfill_feishu_time(doc_ids: list[int], user_token: str | None, user_id: int) -> None:
     """后台回补缺失的飞书文档创建/修改时间，不阻塞 API 响应。"""
     try:

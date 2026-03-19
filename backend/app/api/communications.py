@@ -185,6 +185,47 @@ async def get_communication(
     return CommunicationOut.model_validate(row)
 
 
+@router.patch("/{comm_id}/extraction-rule", summary="绑定或修改会议提取规则")
+async def update_comm_extraction_rule(
+    request: Request,
+    comm_id: int,
+    body: dict,
+    current_user: Annotated[User, Depends(get_current_user)] = None,
+    db: Annotated[AsyncSession, Depends(get_db)] = None,
+):
+    """绑定、修改或解除会议的提取规则。body: { extraction_rule_id: int | null }"""
+    visible_ids = await get_visible_owner_ids(current_user, db, request)
+    stmt = select(Communication).where(Communication.id == comm_id)
+    stmt = _apply_visibility(stmt, visible_ids)
+    result = await db.execute(stmt)
+    comm = result.scalar_one_or_none()
+    if not comm:
+        raise HTTPException(status_code=404, detail="沟通记录不存在或无权操作")
+
+    if comm.comm_type == "chat":
+        raise HTTPException(status_code=400, detail="会话类型不支持提取规则")
+
+    new_rule_id = body.get("extraction_rule_id")
+    if new_rule_id is None:
+        comm.extraction_rule_id = None
+        comm.key_info = None
+        await db.commit()
+        return {"message": "已解除提取规则", "extraction_rule_id": None}
+
+    from app.services.etl.enricher import extract_key_info
+    content = comm.content_text or ""
+    if content:
+        key_info = await extract_key_info(content, new_rule_id, db, title=comm.title)
+        comm.key_info = key_info
+    comm.extraction_rule_id = new_rule_id
+    await db.commit()
+    return {
+        "message": "提取规则已应用",
+        "extraction_rule_id": comm.extraction_rule_id,
+        "key_info": comm.key_info,
+    }
+
+
 @router.delete("/{comm_id}", summary="删除沟通记录")
 async def delete_communication(
     request: Request,

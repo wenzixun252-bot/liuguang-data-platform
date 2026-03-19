@@ -614,6 +614,16 @@ export default function Communications() {
       {selected && (
         <CommunicationDetail
           item={selected}
+          rulesList={rulesList}
+          onRuleChange={async (ruleId) => {
+            try {
+              await api.patch(`/communications/${selected.id}/extraction-rule`, { extraction_rule_id: ruleId })
+              toast.success(ruleId ? '提取规则已应用' : '已解除提取规则')
+              setRefreshKey((k) => k + 1)
+              const { data } = await api.get(`/communications/${selected.id}`)
+              setSelected(data)
+            } catch { toast.error('操作失败') }
+          }}
           onClose={() => setSelected(null)}
           onDelete={async (id) => {
             if (!confirm('确定要删除这条数据吗？')) return
@@ -638,10 +648,14 @@ export default function Communications() {
 // ─── 详情侧栏 ──────────────────────────────────────────────
 function CommunicationDetail({
   item,
+  rulesList,
+  onRuleChange,
   onClose,
   onDelete,
 }: {
   item: CommunicationItem
+  rulesList?: any[]
+  onRuleChange?: (ruleId: number | null) => void
   onClose: () => void
   onDelete: (id: number) => void
 }) {
@@ -654,9 +668,25 @@ function CommunicationDetail({
     <div className="fixed inset-0 bg-black/50 z-50 flex justify-end" onClick={onClose}>
       <div className="w-full max-w-lg bg-white h-full overflow-y-auto shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <h2 className="text-lg font-semibold text-gray-800">{isMeetingLike ? '会议详情' : '消息详情'}</h2>
-            <CommTypeBadge type={item.comm_type} />
+          <div>
+            <div className="flex items-center gap-3">
+              <h2 className="text-lg font-semibold text-gray-800">{isMeetingLike ? '会议详情' : '消息详情'}</h2>
+              <CommTypeBadge type={item.comm_type} />
+            </div>
+            {isMeetingLike && onRuleChange && (
+              <div className="mt-1">
+                <select
+                  value={item.extraction_rule_id ?? ''}
+                  onChange={(e) => onRuleChange(e.target.value ? Number(e.target.value) : null)}
+                  className="px-2 py-0.5 rounded-full text-xs border border-violet-200 bg-violet-50 text-violet-600 cursor-pointer focus:outline-none focus:ring-1 focus:ring-violet-300"
+                >
+                  <option value="">无提取规则</option>
+                  {Array.isArray(rulesList) && rulesList.map((r: any) => (
+                    <option key={r.id} value={r.id}>{r.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-2">
             {canDelete && (

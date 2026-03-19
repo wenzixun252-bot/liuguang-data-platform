@@ -555,7 +555,16 @@ export default function Documents() {
       />
 
       {/* Detail panel */}
-      {selected && <DocumentDetail doc={selected} onClose={() => setSelected(null)} onDelete={async (id) => {
+      {selected && <DocumentDetail doc={selected} rulesList={rulesList} onRuleChange={async (ruleId) => {
+        try {
+          await api.patch(`/documents/${selected.id}/extraction-rule`, { extraction_rule_id: ruleId })
+          toast.success(ruleId ? '提取规则已应用' : '已解除提取规则')
+          setRefreshKey((k) => k + 1)
+          // 刷新详情数据
+          const { data } = await api.get(`/documents/${selected.id}`)
+          setSelected(data)
+        } catch { toast.error('操作失败') }
+      }} onClose={() => setSelected(null)} onDelete={async (id) => {
         if (!confirm('确定要删除这条数据吗？')) return
         try {
           await api.delete(`/documents/${id}`)
@@ -576,7 +585,7 @@ export default function Documents() {
   )
 }
 
-function DocumentDetail({ doc, onClose, onDelete }: { doc: DocumentItem; onClose: () => void; onDelete: (id: number) => void }) {
+function DocumentDetail({ doc, rulesList, onRuleChange, onClose, onDelete }: { doc: DocumentItem; rulesList?: any[]; onRuleChange?: (ruleId: number | null) => void; onClose: () => void; onDelete: (id: number) => void }) {
   const currentUser = getUser()
   const canDelete = currentUser && (currentUser.role === 'admin' || currentUser.feishu_open_id === doc.owner_id)
 
@@ -584,7 +593,23 @@ function DocumentDetail({ doc, onClose, onDelete }: { doc: DocumentItem; onClose
     <div className="fixed inset-0 bg-black/50 z-50 flex justify-end" onClick={onClose}>
       <div className="w-full max-w-lg bg-white h-full overflow-y-auto shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-800">文档详情</h2>
+          <div>
+            <h2 className="text-lg font-semibold text-gray-800">文档详情</h2>
+            {onRuleChange && (
+              <div className="mt-1">
+                <select
+                  value={doc.extraction_rule_id ?? ''}
+                  onChange={(e) => onRuleChange(e.target.value ? Number(e.target.value) : null)}
+                  className="px-2 py-0.5 rounded-full text-xs border border-violet-200 bg-violet-50 text-violet-600 cursor-pointer focus:outline-none focus:ring-1 focus:ring-violet-300"
+                >
+                  <option value="">无提取规则</option>
+                  {Array.isArray(rulesList) && rulesList.map((r: any) => (
+                    <option key={r.id} value={r.id}>{r.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
           <div className="flex items-center gap-2">
             {canDelete && (
               <button onClick={() => onDelete(doc.id)} className="p-1 hover:bg-red-50 rounded text-red-500 hover:text-red-700" title="删除">
