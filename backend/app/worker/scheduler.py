@@ -13,19 +13,19 @@ _syncing_users: set[str] = set()
 
 
 def init_scheduler() -> None:
-    """启动定时调度器，仅保留日程提醒（每2小时）。"""
+    """启动定时调度器，仅保留日程提醒（每5分钟）。"""
     from app.worker.tasks import calendar_reminder_job
 
     scheduler.add_job(
         calendar_reminder_job,
         "interval",
-        minutes=120,
+        minutes=5,
         id="calendar_reminder_job",
         replace_existing=True,
         max_instances=1,
     )
     scheduler.start()
-    logger.info("调度器已启动（日程提醒: 每2小时，其余同步由登录触发）")
+    logger.info("调度器已启动（日程提醒: 每5分钟，其余同步由登录触发）")
 
 
 def shutdown_scheduler() -> None:
