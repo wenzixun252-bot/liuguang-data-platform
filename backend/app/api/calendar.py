@@ -582,6 +582,17 @@ async def get_reminder_prefs(
     return ReminderPrefs(enabled=pref.enabled, minutes_before=pref.minutes_before)
 
 
+@router.post("/test-reminder", summary="立即触发一次会前简报检查（调试用）")
+async def test_reminder(
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    """立即运行一次日程提醒任务，用于验证推送是否正常。"""
+    from app.worker.tasks import calendar_reminder_job
+    import asyncio
+    asyncio.create_task(calendar_reminder_job())
+    return {"status": "ok", "message": "已触发提醒检查，稍后注意飞书消息"}
+
+
 @router.put("/reminder-prefs", response_model=ReminderPrefs, summary="更新提醒偏好")
 async def update_reminder_prefs(
     body: ReminderPrefs,
