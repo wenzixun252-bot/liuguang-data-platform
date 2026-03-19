@@ -991,7 +991,8 @@ async def calendar_reminder_job() -> None:
                                 last_reminded_at=datetime.utcnow(),
                             )
                             db.add(new_pref)
-                            pref_id = None  # 后续循环中同一 user 的其他事件也需要查
+                            await db.flush()  # 获取自增 ID
+                            pref_id = new_pref.id  # 后续事件走 UPDATE 路径
                         await db.commit()
 
                     logger.info("已向 %s 发送会议提醒+简报: %s", user.name, summary)
