@@ -147,14 +147,14 @@ async def list_documents(
     rows = [row.Document for row in result_rows]
     uploader_map: dict[int, str | None] = {row.Document.id: row.uploader_name for row in result_rows}
 
-    # 统计每个 feishu_record_id 被多少人归档（按上传人去重）
+    # 统计每个 feishu_record_id 被多少人归档（按导入人 owner_id 去重）
     frid_list = [r.feishu_record_id for r in rows if r.feishu_record_id]
     import_count_map: dict[str, int] = {}
     if frid_list:
         count_rows = (await db.execute(
             select(
                 Document.feishu_record_id,
-                func.count(func.coalesce(Document.asset_owner_name, Document.owner_id).distinct()).label("cnt"),
+                func.count(Document.owner_id.distinct()).label("cnt"),
             )
             .where(Document.feishu_record_id.in_(frid_list))
             .group_by(Document.feishu_record_id)

@@ -380,7 +380,7 @@ class HybridSearcher:
             placeholders = ", ".join(f":frid_{i}" for i in range(len(doc_frids)))
             frid_params = {f"frid_{i}": frid for i, frid in enumerate(doc_frids)}
             count_sql = text(
-                f"SELECT feishu_record_id, COUNT(DISTINCT COALESCE(asset_owner_name, owner_id)) AS cnt "
+                f"SELECT feishu_record_id, COUNT(DISTINCT owner_id) AS cnt "
                 f"FROM documents WHERE feishu_record_id IN ({placeholders}) "
                 f"GROUP BY feishu_record_id"
             )
