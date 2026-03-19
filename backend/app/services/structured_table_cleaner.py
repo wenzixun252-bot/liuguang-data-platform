@@ -46,6 +46,8 @@ async def apply_cleaning_rule(
 
     opts = rule.options or {}
     rows_data = [r.row_data for r in rows]
+    # 保留每行的 sheet_name，清洗后重新插入时恢复
+    rows_sheet_names = [r.sheet_name for r in rows]
     all_fields = list(rows_data[0].keys()) if rows_data else []
     stats = {
         "rows_before": len(rows_data),
@@ -103,10 +105,12 @@ async def apply_cleaning_rule(
     if opts.get("drop_empty_rows", True):
         threshold = opts.get("empty_threshold", 0.5)
         filtered = []
-        for rd in rows_data:
+        filtered_sn = []
+        for idx, rd in enumerate(rows_data):
             total = len(rd)
             if total == 0:
                 filtered.append(rd)
+                filtered_sn.append(rows_sheet_names[idx])
                 continue
             non_empty_count = sum(
                 1 for v in rd.values()
@@ -116,21 +120,27 @@ async def apply_cleaning_rule(
             # 保留有至少 1 个非空值的行（安全兜底），同时尊重阈值
             if non_empty_count >= 1 and empty_ratio < threshold:
                 filtered.append(rd)
+                filtered_sn.append(rows_sheet_names[idx])
             elif non_empty_count >= 2:
                 # 即使超过阈值，有 2 个以上非空值的行仍然保留
                 filtered.append(rd)
+                filtered_sn.append(rows_sheet_names[idx])
         rows_data = filtered
+        rows_sheet_names = filtered_sn
 
     # 5. dedup
     if opts.get("dedup", True):
         seen = set()
         deduped = []
-        for rd in rows_data:
+        deduped_sn = []
+        for idx, rd in enumerate(rows_data):
             h = hashlib.md5(json.dumps(rd, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
             if h not in seen:
                 seen.add(h)
                 deduped.append(rd)
+                deduped_sn.append(rows_sheet_names[idx])
         rows_data = deduped
+        rows_sheet_names = deduped_sn
 
     # --- LLM 智能清洗 ---
     fields_to_drop = []
@@ -213,25 +223,31 @@ async def apply_cleaning_rule(
         delete(StructuredTableRow).where(StructuredTableRow.table_id == table_id)
     )
 
-    # 插入清洗后的行
+    # 插入清洗后的行（保留 sheet_name）
     for i, rd in enumerate(rows_data):
         row_text = " | ".join(f"{k}: {v}" for k, v in rd.items() if v)
         new_row = StructuredTableRow(
             table_id=table_id,
+            sheet_name=rows_sheet_names[i] if i < len(rows_sheet_names) else None,
             row_index=i,
             row_data=rd,
             row_text=row_text,
         )
         db.add(new_row)
 
-    # 更新表级元数据
-    final_fields = list(rows_data[0].keys()) if rows_data else []
-    table.schema_info = [
-        {"field_id": f"col_{i}", "field_name": f, "field_type": "text"}
-        for i, f in enumerate(final_fields)
-    ]
+    # 更新表级元数据（保留多 sheet 的 schema_info 结构）
+    original_schema = table.schema_info
+    is_multi_sheet = isinstance(original_schema, dict) and "__sheets__" in original_schema
+    if not is_multi_sheet:
+        # 单 sheet：按清洗后的字段更新 schema_info
+        final_fields = list(rows_data[0].keys()) if rows_data else []
+        table.schema_info = [
+            {"field_id": f"col_{i}", "field_name": f, "field_type": "text"}
+            for i, f in enumerate(final_fields)
+        ]
+        table.column_count = len(final_fields)
+    # 多 sheet：保持原 schema_info 不变，column_count 也不变
     table.row_count = len(rows_data)
-    table.column_count = len(final_fields)
     table.cleaning_rule_id = rule.id
 
     # 重建 content_text
@@ -243,5 +259,5 @@ async def apply_cleaning_rule(
     await db.commit()
 
     stats["rows_after"] = len(rows_data)
-    stats["fields_after"] = len(final_fields)
+    stats["fields_after"] = len(rows_data[0].keys()) if rows_data else 0
     return stats
