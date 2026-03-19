@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
-from sqlalchemy import cast, Date, distinct, func, select, tuple_
+from sqlalchemy import cast, Date, distinct, func, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, get_visible_owner_ids
@@ -327,10 +327,14 @@ async def get_asset_score(
     dim_freshness_detail = f"近30天新增 {recent_count} 条 · {days_count} 天活跃"
 
     # ═══ 维度 5: 数据影响力 (权重 15%) — 仅文档 + 表格 ═══
-    # 5a. 被归档总次数
+    # 5a. 被他人归档次数
+    # 找出"我的文档"：owner_id 是我 或 _original_owner.id 是我（覆盖云文档和 ETL 导入两种场景）
     my_doc_frids_stmt = select(distinct(Document.feishu_record_id)).where(
         Document.feishu_record_id.isnot(None),
-        Document.extra_fields["_original_owner"]["id"].astext == my_owner_id,
+        or_(
+            Document.owner_id == my_owner_id,
+            Document.extra_fields["_original_owner"]["id"].astext == my_owner_id,
+        ),
     )
     my_doc_frids = [r[0] for r in (await db.execute(my_doc_frids_stmt)).all()]
 
@@ -349,7 +353,10 @@ async def get_asset_score(
 
     my_st_keys_stmt = select(StructuredTable.source_app_token, StructuredTable.source_table_id).where(
         StructuredTable.source_app_token.isnot(None), StructuredTable.source_table_id.isnot(None),
-        StructuredTable.extra_fields["_original_owner"]["id"].astext == my_owner_id,
+        or_(
+            StructuredTable.owner_id == my_owner_id,
+            StructuredTable.extra_fields["_original_owner"]["id"].astext == my_owner_id,
+        ),
     )
     my_st_keys = list({(r[0], r[1]) for r in (await db.execute(my_st_keys_stmt)).all()})
 
@@ -379,7 +386,7 @@ async def get_asset_score(
     coverage_sub = min(20, int(ref_coverage * 20))
 
     dim_impact_score = archive_sub + user_sub + coverage_sub
-    dim_impact_detail = f"被归档 {total_archives} 次 · {unique_users} 人引用 · 覆盖 {ref_coverage:.0%}"
+    dim_impact_detail = f"被他人归档 {total_archives} 次 · {unique_users} 位不同用户 · 覆盖 {ref_coverage:.0%}"
 
     # ═══ 构建维度列表 ═══
     def _make_dim(key: str, label: str, weight: float, score: int, detail: str,
@@ -456,10 +463,10 @@ async def get_asset_score(
     dimensions.append(_make_dim(
         "impact", "数据影响力", 0.15, dim_impact_score, dim_impact_detail,
         [
-            SubScoreDetail(key="archive_count", label="被归档总次数", weight=0.5,
-                           score=archive_sub, max_score=50, value=str(total_archives),
+            SubScoreDetail(key="archive_count", label="被他人归档次数", weight=0.5,
+                           score=archive_sub, max_score=50, value=f"{total_archives} 次",
                            criteria=["对数曲线: ~50次满分"]),
-            SubScoreDetail(key="unique_users", label="独立引用人数", weight=0.3,
+            SubScoreDetail(key="unique_users", label="不同归档用户数", weight=0.3,
                            score=user_sub, max_score=30, value=f"{unique_users} 人",
                            criteria=["对数曲线: ~20人满分"]),
             SubScoreDetail(key="ref_coverage", label="被引内容覆盖率", weight=0.2,
