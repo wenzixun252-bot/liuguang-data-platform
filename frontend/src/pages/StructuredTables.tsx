@@ -4,7 +4,7 @@ import {
   Search, ChevronLeft, ChevronRight, X, Trash2, RefreshCw,
   ExternalLink, Table2, Download, Upload, Eye,
 } from 'lucide-react'
-import api, { getExtractionRules } from '../lib/api'
+import api, { getExtractionRules, getCleaningRules } from '../lib/api'
 import toast from 'react-hot-toast'
 import { useQuery } from '@tanstack/react-query'
 import { BatchTagBar, TagChips, InlineTagEditor, TagFilter } from '../components/TagManager'
@@ -99,6 +99,7 @@ export default function StructuredTables() {
 
   // 提取规则名称映射
   const { data: rulesList } = useQuery({ queryKey: ['extraction-rules'], queryFn: getExtractionRules })
+  const { data: cleaningRulesList } = useQuery({ queryKey: ['cleaning-rules'], queryFn: getCleaningRules })
   const rulesMap: Record<number, string> = {}
   if (Array.isArray(rulesList)) {
     rulesList.forEach((r: any) => { rulesMap[r.id] = r.name })
@@ -630,6 +631,17 @@ export default function StructuredTables() {
               toast.error(err?.response?.data?.detail || '操作失败')
             }
           }}
+          cleaningRulesList={cleaningRulesList}
+          onCleaningRuleChange={async (ruleId) => {
+            try {
+              await api.patch(`/structured-tables/${detail.id}/cleaning-rule`, { cleaning_rule_id: ruleId })
+              toast.success(ruleId ? '清洗规则已应用' : '已解除清洗规则')
+              openDetail(detail.id)
+              setRefreshKey(k => k + 1)
+            } catch (err: any) {
+              toast.error(err?.response?.data?.detail || '操作失败')
+            }
+          }}
         />
       )}
 
@@ -649,6 +661,7 @@ function TableDetailPanel({
   detail, rows, rowsTotal, rowPage, rowSearch, detailPageSize, loading,
   activeSheet, rulesList, onSheetChange,
   onClose, onPageChange, onSearchChange, onSync, onDelete, onExport, onDownloadOriginal, onRuleChange,
+  cleaningRulesList, onCleaningRuleChange,
 }: {
   detail: StructuredTableDetail
   rows: RowItem[]
@@ -668,6 +681,8 @@ function TableDetailPanel({
   onExport: (id: number, name: string) => void
   onDownloadOriginal: (id: number, name: string) => void
   onRuleChange: (ruleId: number | null) => void
+  cleaningRulesList: any[] | undefined
+  onCleaningRuleChange: (ruleId: number | null) => void
 }) {
   const sheetNames = detail.sheet_names || []
   const isMultiSheet = sheetNames.length > 1
@@ -710,11 +725,16 @@ function TableDetailPanel({
               </span>
               <span>{detail.row_count} 行 × {detail.column_count} 列{isMultiSheet ? ` · ${sheetNames.length} 个工作表` : ''}</span>
               {detail.synced_at && <span>同步: {new Date(detail.synced_at).toLocaleString('zh-CN')}</span>}
-              {detail.cleaning_rule_id ? (
-                <span className="px-2 py-0.5 rounded-full text-xs bg-green-50 text-green-600 border border-green-200">{detail.cleaning_rule_name || '已清洗'}</span>
-              ) : (
-                <span className="px-2 py-0.5 rounded-full text-xs bg-gray-50 text-gray-400 border border-gray-200">未清洗</span>
-              )}
+              <select
+                value={detail.cleaning_rule_id ?? ''}
+                onChange={(e) => onCleaningRuleChange(e.target.value ? Number(e.target.value) : null)}
+                className="px-2 py-0.5 rounded-full text-xs border border-green-200 bg-green-50 text-green-600 cursor-pointer focus:outline-none focus:ring-1 focus:ring-green-300"
+              >
+                <option value="">无清洗规则</option>
+                {Array.isArray(cleaningRulesList) && cleaningRulesList.map((r: any) => (
+                  <option key={r.id} value={r.id}>{r.name}</option>
+                ))}
+              </select>
               <select
                 value={detail.extraction_rule_id ?? ''}
                 onChange={(e) => onRuleChange(e.target.value ? Number(e.target.value) : null)}

@@ -940,6 +940,42 @@ async def update_extraction_rule(
     }
 
 
+@router.patch("/{table_id}/cleaning-rule", summary="绑定或修改清洗规则")
+async def update_cleaning_rule(
+    request: Request,
+    table_id: int,
+    body: dict,
+    current_user: Annotated[User, Depends(get_current_user)] = None,
+    db: Annotated[AsyncSession, Depends(get_db)] = None,
+):
+    """绑定、修改或解除表格的清洗规则。body: { cleaning_rule_id: int | null }"""
+    visible_ids = await get_visible_owner_ids(current_user, db, request)
+    stmt = select(StructuredTable).where(StructuredTable.id == table_id)
+    if visible_ids is not None:
+        stmt = stmt.where(StructuredTable.owner_id.in_(visible_ids))
+    result = await db.execute(stmt)
+    table = result.scalar_one_or_none()
+    if not table:
+        raise HTTPException(status_code=404, detail="表格不存在或无权操作")
+
+    new_rule_id = body.get("cleaning_rule_id")
+    if new_rule_id is None:
+        # 解绑规则 — 注意：已清洗的数据不会回滚，只是解除绑定关系
+        table.cleaning_rule_id = None
+        await db.commit()
+        return {"message": "已解除清洗规则", "cleaning_rule_id": None}
+
+    # 绑定并立即应用清洗规则
+    await _apply_cleaning_after_import(db, table_id, new_rule_id)
+    await db.refresh(table)
+    return {
+        "message": "清洗规则已应用",
+        "cleaning_rule_id": table.cleaning_rule_id,
+        "row_count": table.row_count,
+        "column_count": table.column_count,
+    }
+
+
 @router.delete("/{table_id}", summary="删除表格")
 async def delete_table(
     request: Request,
