@@ -282,3 +282,34 @@ body {
     animation: indeterminate-slide 1.4s ease-in-out infinite !important;
   }
 }
+
+/* ================================================================
+   Login Page Animations (prefix: login-)
+   ================================================================ */
+
+@keyframes login-glowDrift1 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50%       { transform: translate(30px, 20px) scale(1.1); }
+}
+
+@keyframes login-glowDrift2 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50%       { transform: translate(-20px, -30px) scale(1.08); }
+}
+
+@keyframes login-glowDrift3 {
+  0%, 100% { transform: translate(0, 0); }
+  50%       { transform: translate(-15px, 20px); }
+}
+
+@keyframes login-sweepAcross {
+  0%   { left: -2px; opacity: 0; }
+  5%   { opacity: 1; }
+  95%  { opacity: 1; }
+  100% { left: calc(100% + 2px); opacity: 0; }
+}
+
+@keyframes login-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
