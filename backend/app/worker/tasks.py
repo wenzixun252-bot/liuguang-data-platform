@@ -979,7 +979,7 @@ async def calendar_reminder_job() -> None:
                             p.reminded_event_ids = ids_list[-50:]
                             flag_modified(p, "reminded_event_ids")
                             p.last_reminded_event_id = event_id
-                            p.last_reminded_at = datetime.now(tz=ZoneInfo("Asia/Shanghai"))
+                            p.last_reminded_at = datetime.now(datetime.UTC)
                         else:
                             # 首次提醒，自动创建 pref 记录
                             new_pref = CalendarReminderPref(
@@ -988,7 +988,7 @@ async def calendar_reminder_job() -> None:
                                 minutes_before=minutes_before,
                                 reminded_event_ids=[event_id],
                                 last_reminded_event_id=event_id,
-                                last_reminded_at=datetime.now(tz=ZoneInfo("Asia/Shanghai")),
+                                last_reminded_at=datetime.now(datetime.UTC),
                             )
                             db.add(new_pref)
                             pref_id = None  # 后续循环中同一 user 的其他事件也需要查
