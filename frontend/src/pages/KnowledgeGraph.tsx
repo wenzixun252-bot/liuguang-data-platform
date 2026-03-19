@@ -1334,7 +1334,12 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
           <div className="flex-1 overflow-y-auto p-3">
             {/* 洞察 Tab */}
             {rightTab === 'insights' && (
-              analysisResult && analysisResult.insights.length > 0 ? (
+              loading ? (
+                <div className="h-full flex flex-col items-center justify-center text-gray-400 gap-2 py-12">
+                  <Loader2 size={20} className="animate-spin text-indigo-400" />
+                  <p className="text-xs">加载洞察数据...</p>
+                </div>
+              ) : analysisResult && analysisResult.insights.length > 0 ? (
                 <div className="space-y-2.5">
                   {analysisResult.insights.map((item, idx) => {
                     const insightKey = `insight-${idx}`
@@ -1373,7 +1378,12 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
 
             {/* 风险 Tab — 按分类分组 */}
             {rightTab === 'risks' && (
-              analysisResult && analysisResult.risks.length > 0 ? (
+              loading ? (
+                <div className="h-full flex flex-col items-center justify-center text-gray-400 gap-2 py-12">
+                  <Loader2 size={20} className="animate-spin text-red-400" />
+                  <p className="text-xs">加载风险数据...</p>
+                </div>
+              ) : analysisResult && analysisResult.risks.length > 0 ? (
                 <div className="space-y-3">
                   {/* 风险统计摘要 */}
                   <div className="flex gap-1.5">
@@ -1457,7 +1467,12 @@ export default function KnowledgeGraph({ embedded = false }: { embedded?: boolea
 
             {/* 域 Tab — 社群列表 */}
             {rightTab === 'domains' && (
-              communityOptions.length > 0 ? (
+              loading ? (
+                <div className="h-full flex flex-col items-center justify-center text-gray-400 gap-2 py-12">
+                  <Loader2 size={20} className="animate-spin text-purple-400" />
+                  <p className="text-xs">加载业务域...</p>
+                </div>
+              ) : communityOptions.length > 0 ? (
                 <div className="space-y-2">
                   {communityOptions.map((c) => {
                     const domainColor = COMMUNITY_COLORS[c.community_id % COMMUNITY_COLORS.length]
