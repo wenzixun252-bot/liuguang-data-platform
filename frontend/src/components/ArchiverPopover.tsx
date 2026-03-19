@@ -16,7 +16,8 @@ interface ArchiverPopoverProps {
 
 function relativeTime(dateStr: string): string {
   const now = Date.now()
-  const d = new Date(dateStr).getTime()
+  // 后端返回 UTC 时间但无时区标记，补上 Z 确保正确解析
+  const d = new Date(dateStr.endsWith('Z') ? dateStr : dateStr + 'Z').getTime()
   const diff = now - d
   const mins = Math.floor(diff / 60000)
   if (mins < 1) return '刚刚'
