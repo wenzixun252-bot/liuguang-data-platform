@@ -954,6 +954,42 @@ async def update_extraction_rule(
     }
 
 
+async def _restore_original_data(db: AsyncSession, table: StructuredTable) -> None:
+    """从原始来源重新导入数据，恢复到未清洗状态。"""
+    from app.services.structured_table_import import (
+        import_from_bitable, import_from_local_file, import_from_spreadsheet,
+    )
+
+    if table.source_type == "local" and table.file_path:
+        import os
+        if os.path.exists(table.file_path):
+            with open(table.file_path, "rb") as f:
+                file_content = f.read()
+            file_name = table.file_name or os.path.basename(table.file_path)
+            await import_from_local_file(db, table.owner_id, file_name, file_content)
+            logger.info("已从原始文件恢复表格 %d 的数据", table.id)
+        else:
+            logger.warning("原始文件不存在: %s，无法恢复", table.file_path)
+    elif table.source_type == "bitable" and table.source_app_token:
+        from app.worker.tasks import _resolve_user_token
+        token = await _resolve_user_token(table.owner_id, db)
+        if token:
+            await import_from_bitable(
+                db, table.owner_id, table.source_app_token,
+                table.source_table_id, user_access_token=token,
+            )
+            logger.info("已从飞书重新同步表格 %d 的数据", table.id)
+    elif table.source_type == "spreadsheet" and table.source_app_token:
+        from app.worker.tasks import _resolve_user_token
+        token = await _resolve_user_token(table.owner_id, db)
+        if token:
+            await import_from_spreadsheet(
+                db, table.owner_id, table.source_app_token,
+                table.source_table_id, user_access_token=token,
+            )
+            logger.info("已从飞书重新同步表格 %d 的数据", table.id)
+
+
 @router.patch("/{table_id}/cleaning-rule", summary="绑定或修改清洗规则")
 async def update_cleaning_rule(
     request: Request,
@@ -973,14 +1009,21 @@ async def update_cleaning_rule(
         raise HTTPException(status_code=404, detail="表格不存在或无权操作")
 
     new_rule_id = body.get("cleaning_rule_id")
+
+    # 无论是解绑还是切换规则，都先从原始来源恢复数据
+    if table.cleaning_rule_id is not None:
+        await _restore_original_data(db, table)
+        # 重新加载 table 对象（import 会更新它）
+        await db.refresh(table)
+
     if new_rule_id is None:
-        # 解绑规则 — 注意：已清洗的数据不会回滚，只是解除绑定关系
+        # 解绑规则，数据已恢复
         table.cleaning_rule_id = None
         await db.commit()
-        return {"message": "已解除清洗规则", "cleaning_rule_id": None}
+        return {"message": "已解除清洗规则，数据已恢复", "cleaning_rule_id": None}
 
-    # 绑定并立即应用清洗规则
-    await _apply_cleaning_after_import(db, table_id, new_rule_id)
+    # 绑定并在原始数据上应用新清洗规则
+    await _apply_cleaning_after_import(db, table.id, new_rule_id)
     await db.refresh(table)
     return {
         "message": "清洗规则已应用",
