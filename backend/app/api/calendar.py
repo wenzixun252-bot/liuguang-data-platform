@@ -587,9 +587,8 @@ async def test_reminder(
     current_user: Annotated[User, Depends(get_current_user)],
 ):
     """立即运行一次日程提醒任务，用于验证推送是否正常。"""
-    from app.worker.tasks import calendar_reminder_job
-    import asyncio
-    asyncio.create_task(calendar_reminder_job())
+    from app.worker.scheduler import scheduler
+    scheduler.modify_job("calendar_reminder_job", next_run_time=__import__("datetime").datetime.now(__import__("datetime").timezone.utc))
     return {"status": "ok", "message": "已触发提醒检查，稍后注意飞书消息"}
 
 
