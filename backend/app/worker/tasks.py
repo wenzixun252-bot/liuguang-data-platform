@@ -740,28 +740,39 @@ async def calendar_reminder_job() -> None:
     logger.info("日程提醒任务开始")
 
     async with async_session() as db:
-        # 查找所有启用提醒的用户
+        # 查所有有 token 的用户，LEFT JOIN pref（没有记录的按默认值：enabled=True, minutes_before=30）
+        from sqlalchemy import outerjoin
         result = await db.execute(
-            select(CalendarReminderPref, User).join(
-                User, User.feishu_open_id == CalendarReminderPref.owner_id
-            ).where(CalendarReminderPref.enabled == True)
+            select(User, CalendarReminderPref).select_from(
+                outerjoin(User, CalendarReminderPref, User.feishu_open_id == CalendarReminderPref.owner_id)
+            ).where(
+                User.feishu_access_token.isnot(None) | User.feishu_refresh_token.isnot(None)
+            ).where(
+                (CalendarReminderPref.enabled == True) | (CalendarReminderPref.id.is_(None))
+            )
         )
         rows = result.all()
 
     if not rows:
-        logger.info("没有启用日程提醒的用户")
+        logger.info("没有可用的用户（无 token）")
         return
 
     reminded_count = 0
-    for pref, user in rows:
+    for user, pref in rows:
+        # 没有 pref 记录的用户按默认值处理（enabled=True, minutes_before=30）
+        minutes_before = pref.minutes_before if pref else 30
+        reminded_event_ids = list(pref.reminded_event_ids or []) if pref else []
+        last_reminded_event_id = pref.last_reminded_event_id if pref else None
+        pref_id = pref.id if pref else None
+
         if not user.feishu_access_token and not user.feishu_refresh_token:
             continue
 
         try:
             now = datetime.now(tz=ZoneInfo("Asia/Shanghai"))
             # 查找 N 分钟后的事件
-            window_start = now + timedelta(minutes=max(0, pref.minutes_before - 5))
-            window_end = now + timedelta(minutes=pref.minutes_before + 5)
+            window_start = now + timedelta(minutes=max(0, minutes_before - 5))
+            window_end = now + timedelta(minutes=minutes_before + 5)
 
             # 获取日历事件，token 过期时自动刷新
             access_token = user.feishu_access_token
@@ -811,9 +822,9 @@ async def calendar_reminder_job() -> None:
                 continue
 
             # 已提醒事件集合（兼容旧字段 + 新字段）
-            already_reminded: set[str] = set(pref.reminded_event_ids or [])
-            if pref.last_reminded_event_id:
-                already_reminded.add(pref.last_reminded_event_id)
+            already_reminded: set[str] = set(reminded_event_ids)
+            if last_reminded_event_id:
+                already_reminded.add(last_reminded_event_id)
 
             for event in events:
                 event_id = event.get("event_id", "")
@@ -930,7 +941,7 @@ async def calendar_reminder_job() -> None:
                         "tag": "div",
                         "text": {
                             "tag": "lark_md",
-                            "content": f"💡 距离会议开始还有约 **{pref.minutes_before} 分钟**",
+                            "content": f"💡 距离会议开始还有约 **{minutes_before} 分钟**",
                         },
                     })
 
@@ -955,12 +966,13 @@ async def calendar_reminder_job() -> None:
 
                     # 更新提醒记录：追加到已提醒列表，只保留最近50条
                     async with async_session() as db:
-                        result = await db.execute(
-                            select(CalendarReminderPref).where(
-                                CalendarReminderPref.id == pref.id,
+                        if pref_id:
+                            result = await db.execute(
+                                select(CalendarReminderPref).where(CalendarReminderPref.id == pref_id)
                             )
-                        )
-                        p = result.scalar_one_or_none()
+                            p = result.scalar_one_or_none()
+                        else:
+                            p = None
                         if p:
                             ids_list = list(p.reminded_event_ids or [])
                             ids_list.append(event_id)
@@ -968,7 +980,19 @@ async def calendar_reminder_job() -> None:
                             flag_modified(p, "reminded_event_ids")
                             p.last_reminded_event_id = event_id
                             p.last_reminded_at = datetime.now(tz=ZoneInfo("Asia/Shanghai"))
-                            await db.commit()
+                        else:
+                            # 首次提醒，自动创建 pref 记录
+                            new_pref = CalendarReminderPref(
+                                owner_id=user.feishu_open_id,
+                                enabled=True,
+                                minutes_before=minutes_before,
+                                reminded_event_ids=[event_id],
+                                last_reminded_event_id=event_id,
+                                last_reminded_at=datetime.now(tz=ZoneInfo("Asia/Shanghai")),
+                            )
+                            db.add(new_pref)
+                            pref_id = None  # 后续循环中同一 user 的其他事件也需要查
+                        await db.commit()
 
                     logger.info("已向 %s 发送会议提醒+简报: %s", user.name, summary)
                 except FeishuAPIError as e:
