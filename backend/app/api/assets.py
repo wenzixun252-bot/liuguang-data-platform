@@ -380,7 +380,27 @@ async def get_asset_score(
     unique_users = len(doc_archive_users | st_archive_users)
     user_sub = min(30, int(_log_score(unique_users, 20) * 0.3))
 
-    my_original_count = len(my_doc_frids) + len(my_st_keys)
+    # 覆盖率分母：所有"数据所有人是我"的内容总数（包括本地上传）
+    # 排除：我导入的但原始所有人不是我的内容（_original_owner.id 存在且 != 我）
+    my_doc_total = (await db.execute(
+        select(func.count()).select_from(Document).where(
+            Document.owner_id == my_owner_id,
+            or_(
+                Document.extra_fields["_original_owner"]["id"].astext == my_owner_id,
+                Document.extra_fields["_original_owner"]["id"].astext.is_(None),
+            ),
+        )
+    )).scalar() or 0
+    my_st_total = (await db.execute(
+        select(func.count()).select_from(StructuredTable).where(
+            StructuredTable.owner_id == my_owner_id,
+            or_(
+                StructuredTable.extra_fields["_original_owner"]["id"].astext == my_owner_id,
+                StructuredTable.extra_fields["_original_owner"]["id"].astext.is_(None),
+            ),
+        )
+    )).scalar() or 0
+    my_original_count = my_doc_total + my_st_total
     referenced_count = len(doc_referenced_frids) + len(st_referenced_keys)
     ref_coverage = referenced_count / my_original_count if my_original_count > 0 else 0.0
     coverage_sub = min(20, int(ref_coverage * 20))
