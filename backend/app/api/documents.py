@@ -20,8 +20,9 @@ logger = logging.getLogger(__name__)
 
 from app.api.deps import get_current_user, get_db, get_visible_owner_ids
 from app.models.document import Document
+from app.models.tag import TagDefinition
 from app.models.user import User
-from app.schemas.document import DocumentListResponse, DocumentOut
+from app.schemas.document import ContentTagBrief, DocumentListResponse, DocumentOut
 
 router = APIRouter(prefix="/api/documents", tags=["文档"])
 
@@ -172,6 +173,22 @@ async def list_documents(
     from app.services.etl.enricher import translate_key_info_batch
     await translate_key_info_batch(rows, db)
 
+    # 批量查询当前页所有文档的标签
+    doc_ids = [r.id for r in rows]
+    tags_map: dict[int, list[ContentTagBrief]] = {}
+    if doc_ids:
+        tag_rows = (await db.execute(
+            select(ContentTag.content_id, ContentTag.id, ContentTag.tag_id,
+                   TagDefinition.name, TagDefinition.color)
+            .join(TagDefinition, ContentTag.tag_id == TagDefinition.id)
+            .where(ContentTag.content_type == "document",
+                   ContentTag.content_id.in_(doc_ids))
+        )).all()
+        for row in tag_rows:
+            tags_map.setdefault(row.content_id, []).append(
+                ContentTagBrief(id=row.id, tag_id=row.tag_id,
+                                tag_name=row.name, tag_color=row.color))
+
     items = []
     search_lower = search.lower() if search else ""
     for r in rows:
@@ -197,6 +214,8 @@ async def list_documents(
                 if val and search_lower in str(val).lower():
                     matched.append(fname)
             doc_out = doc_out.model_copy(update={"matched_fields": matched})
+        if r.id in tags_map:
+            doc_out = doc_out.model_copy(update={"tags": tags_map[r.id]})
         items.append(doc_out)
 
     return DocumentListResponse(

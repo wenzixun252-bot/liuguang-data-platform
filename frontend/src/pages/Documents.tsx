@@ -6,7 +6,7 @@ import toast from 'react-hot-toast'
 import { useQuery } from '@tanstack/react-query'
 import { getUser } from '../lib/auth'
 
-import { TagChips, BatchTagBar, useContentTags, InlineTagEditor, TagFilter } from '../components/TagManager'
+import { TagChips, BatchTagBar, InlineTagEditor, TagFilter } from '../components/TagManager'
 import { ColumnFilter } from '../components/ColumnFilter'
 import { DateRangeFilter } from '../components/DateRangeFilter'
 import { HighlightText } from '../components/HighlightText'
@@ -99,7 +99,6 @@ export default function Documents() {
   const [selected, setSelected] = useState<DocumentItem | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [refreshKey, setRefreshKey] = useState(0)
-  const [tagRefreshKey, setTagRefreshKey] = useState(0)
   const [extractionRuleId, setExtractionRuleId] = useState<number | null>(null)
   const [fieldViewRuleId, setFieldViewRuleId] = useState<number | null>(null)
 
@@ -110,8 +109,16 @@ export default function Documents() {
     rulesList.forEach((r: any) => { rulesMap[r.id] = r.name })
   }
 
-  const currentIds = data?.items.map((i) => i.id) || []
-  const { tagsMap, reloadTags } = useContentTags('document', currentIds, tagRefreshKey)
+  // 标签数据直接从列表接口返回，无需单独请求
+  const tagsMap: Record<number, any[]> = {}
+  if (data?.items) {
+    for (const item of data.items) {
+      if ((item as any).tags?.length > 0) {
+        tagsMap[item.id] = (item as any).tags
+      }
+    }
+  }
+  const reloadTags = () => setRefreshKey((k) => k + 1)
   const sourceTypeOptions = ['cloud', 'local']
 
   const uniqueValues = (key: string) => {
@@ -203,7 +210,7 @@ export default function Documents() {
           contentType="document"
           contentId={item.id}
           tags={tagsMap[item.id] || []}
-          onChanged={() => { reloadTags(); setTagRefreshKey(k => k + 1) }}
+          onChanged={() => { reloadTags() }}
         />
       ),
     },

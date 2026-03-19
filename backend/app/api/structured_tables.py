@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, get_visible_owner_ids
 from app.models.structured_table import StructuredTable, StructuredTableRow
-from app.models.tag import ContentTag
+from app.models.tag import ContentTag, TagDefinition
 from app.models.user import User
 from app.schemas.structured_table import (
     BatchDeleteRequest,
@@ -616,6 +616,23 @@ async def list_tables(
             for row in count_rows
         }
 
+    # 批量查询当前页所有表格的标签
+    from app.schemas.document import ContentTagBrief
+    table_ids = [r.StructuredTable.id for r in rows]
+    tags_map: dict[int, list[ContentTagBrief]] = {}
+    if table_ids:
+        tag_rows = (await db.execute(
+            select(ContentTag.content_id, ContentTag.id.label("ct_id"), ContentTag.tag_id,
+                   TagDefinition.name, TagDefinition.color)
+            .join(TagDefinition, ContentTag.tag_id == TagDefinition.id)
+            .where(ContentTag.content_type == "structured_table",
+                   ContentTag.content_id.in_(table_ids))
+        )).all()
+        for row in tag_rows:
+            tags_map.setdefault(row.content_id, []).append(
+                ContentTagBrief(id=row.ct_id, tag_id=row.tag_id,
+                                tag_name=row.name, tag_color=row.color))
+
     # 批量查询清洗规则名称
     from app.models.cleaning_rule import CleaningRule
     rule_ids = list({r.StructuredTable.cleaning_rule_id for r in rows if r.StructuredTable.cleaning_rule_id})
@@ -639,6 +656,8 @@ async def list_tables(
             updates["import_count"] = import_count_map[key]
         if tbl.cleaning_rule_id and tbl.cleaning_rule_id in cleaning_rule_map:
             updates["cleaning_rule_name"] = cleaning_rule_map[tbl.cleaning_rule_id]
+        if tbl.id in tags_map:
+            updates["tags"] = tags_map[tbl.id]
         out = out.model_copy(update=updates)
         items.append(out)
 

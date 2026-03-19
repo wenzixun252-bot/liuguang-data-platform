@@ -7,7 +7,7 @@ import {
 import api, { getExtractionRules } from '../lib/api'
 import toast from 'react-hot-toast'
 import { useQuery } from '@tanstack/react-query'
-import { BatchTagBar, TagChips, useContentTags, InlineTagEditor, TagFilter } from '../components/TagManager'
+import { BatchTagBar, TagChips, InlineTagEditor, TagFilter } from '../components/TagManager'
 import { ColumnFilter } from '../components/ColumnFilter'
 import { DateRangeFilter } from '../components/DateRangeFilter'
 import { HighlightText } from '../components/HighlightText'
@@ -121,11 +121,16 @@ export default function StructuredTables() {
   const [detailLoading, setDetailLoading] = useState(false)
   const [activeSheet, setActiveSheet] = useState<string>('')
 
-  const [tagRefreshKey, setTagRefreshKey] = useState(0)
   const navigate = useNavigate()
 
-  const currentIds = items.map((i) => i.id)
-  const { tagsMap, reloadTags } = useContentTags('structured_table', currentIds, tagRefreshKey)
+  // 标签数据直接从列表接口返回，无需单独请求
+  const tagsMap: Record<number, any[]> = {}
+  for (const item of items) {
+    if ((item as any).tags?.length > 0) {
+      tagsMap[item.id] = (item as any).tags
+    }
+  }
+  const reloadTags = () => setRefreshKey((k) => k + 1)
 
 
   const sourceTypeOptions = ['bitable', 'spreadsheet', 'local']
@@ -197,7 +202,7 @@ export default function StructuredTables() {
           contentType="structured_table"
           contentId={item.id}
           tags={tagsMap[item.id] || []}
-          onChanged={() => { reloadTags(); setTagRefreshKey(k => k + 1) }}
+          onChanged={() => { reloadTags() }}
         />
       ),
     },

@@ -2,6 +2,7 @@
 
 from pydantic import BaseModel
 
+from app.schemas.document import ContentTagBrief
 from app.schemas.types import UTCDatetime, UTCDatetimeOpt
 
 
@@ -35,6 +36,7 @@ class StructuredTableOut(BaseModel):
     synced_at: UTCDatetimeOpt = None
     created_at: UTCDatetime
     updated_at: UTCDatetime
+    tags: list[ContentTagBrief] = []
 
     model_config = {"from_attributes": True}
 

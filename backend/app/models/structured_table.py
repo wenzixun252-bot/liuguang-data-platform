@@ -49,6 +49,8 @@ class StructuredTable(Base):
         Index("idx_str_table_keywords", "keywords", postgresql_using="gin"),
         Index("idx_str_table_content_hash", "content_hash"),
         Index("idx_str_table_category", "table_category"),
+        Index("idx_str_table_owner_source", "owner_id", "source_type"),
+        Index("idx_str_table_owner_synced", "owner_id", "synced_at"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)

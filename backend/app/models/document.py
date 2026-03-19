@@ -43,6 +43,8 @@ class Document(Base):
         Index("idx_doc_keywords", "keywords", postgresql_using="gin"),
         Index("idx_doc_content_hash", "content_hash"),
         Index("idx_doc_category", "doc_category"),
+        Index("idx_doc_owner_source", "owner_id", "source_type"),
+        Index("idx_doc_owner_synced", "owner_id", "synced_at"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)

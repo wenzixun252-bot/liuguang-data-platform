@@ -6,6 +6,14 @@ from app.config import settings
 from app.schemas.types import UTCDatetime, UTCDatetimeOpt
 
 
+class ContentTagBrief(BaseModel):
+    """标签简要信息（用于列表内联返回）。"""
+    id: int
+    tag_id: int
+    tag_name: str = ""
+    tag_color: str = ""
+
+
 class DocumentOut(BaseModel):
     """文档输出模型。"""
     id: int
@@ -42,6 +50,7 @@ class DocumentOut(BaseModel):
     updated_at: UTCDatetime
 
     matched_fields: list[str] = []
+    tags: list[ContentTagBrief] = []
 
     model_config = {"from_attributes": True}
 
