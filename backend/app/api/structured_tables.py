@@ -72,14 +72,28 @@ async def _apply_extraction_after_import(
 async def _apply_cleaning_after_import(
     db: AsyncSession, table_id: int, cleaning_rule_id: int
 ) -> None:
-    """导入完成后自动应用清洗规则（内部辅助函数）。"""
+    """导入完成后自动应用清洗规则（内部辅助函数）。支持内置规则（负数 ID）和用户自定义规则。"""
     from app.models.cleaning_rule import CleaningRule
+    from app.services.builtin_rules import get_builtin_cleaning_rule
     from app.services.structured_table_cleaner import apply_cleaning_rule
 
-    rule = await db.get(CleaningRule, cleaning_rule_id)
-    if not rule:
-        logger.warning("清洗规则 %d 不存在，跳过清洗", cleaning_rule_id)
-        return
+    if cleaning_rule_id < 0:
+        # 内置规则：从内存中获取，构造一个临时对象
+        builtin = get_builtin_cleaning_rule(cleaning_rule_id)
+        if not builtin:
+            logger.warning("内置清洗规则 %d 不存在，跳过清洗", cleaning_rule_id)
+            return
+        rule = CleaningRule(
+            id=builtin["id"],
+            name=builtin["name"],
+            options=builtin["options"],
+            field_hint=builtin.get("field_hint", ""),
+        )
+    else:
+        rule = await db.get(CleaningRule, cleaning_rule_id)
+        if not rule:
+            logger.warning("清洗规则 %d 不存在，跳过清洗", cleaning_rule_id)
+            return
     try:
         stats = await apply_cleaning_rule(db, table_id, rule)
         logger.info("清洗规则 %d 已应用到表格 %d: %s", cleaning_rule_id, table_id, stats)
