@@ -381,13 +381,14 @@ async def get_asset_score(
     user_sub = min(30, int(_log_score(unique_users, 20) * 0.3))
 
     # 覆盖率分母：所有"数据所有人是我"的内容总数（包括本地上传）
-    # 排除：我导入的但原始所有人不是我的内容（_original_owner.id 存在且 != 我）
+    # 用 asset_owner_name 匹配当前用户名，排除他人的内容
+    my_name = current_user.name
     my_doc_total = (await db.execute(
         select(func.count()).select_from(Document).where(
             Document.owner_id == my_owner_id,
             or_(
-                Document.extra_fields["_original_owner"]["id"].astext == my_owner_id,
-                Document.extra_fields["_original_owner"]["id"].astext.is_(None),
+                Document.asset_owner_name == my_name,
+                Document.asset_owner_name.is_(None),
             ),
         )
     )).scalar() or 0
@@ -395,8 +396,8 @@ async def get_asset_score(
         select(func.count()).select_from(StructuredTable).where(
             StructuredTable.owner_id == my_owner_id,
             or_(
-                StructuredTable.extra_fields["_original_owner"]["id"].astext == my_owner_id,
-                StructuredTable.extra_fields["_original_owner"]["id"].astext.is_(None),
+                StructuredTable.asset_owner_name == my_name,
+                StructuredTable.asset_owner_name.is_(None),
             ),
         )
     )).scalar() or 0
