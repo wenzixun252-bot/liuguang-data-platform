@@ -955,21 +955,108 @@ async def update_extraction_rule(
 
 
 async def _restore_original_data(db: AsyncSession, table: StructuredTable) -> None:
-    """从原始来源重新导入数据，恢复到未清洗状态。"""
+    """从原始来源重新导入数据，恢复到未清洗状态。
+
+    对本地文件：直接重新解析原始文件并替换当前表的行数据（不创建新表）。
+    对飞书来源：重新同步后将新表数据迁移回原表。
+    """
     from app.services.structured_table_import import (
         import_from_bitable, import_from_local_file, import_from_spreadsheet,
     )
 
     if table.source_type == "local" and table.file_path:
         import os
-        if os.path.exists(table.file_path):
-            with open(table.file_path, "rb") as f:
-                file_content = f.read()
-            file_name = table.file_name or os.path.basename(table.file_path)
-            await import_from_local_file(db, table.owner_id, file_name, file_content)
-            logger.info("已从原始文件恢复表格 %d 的数据", table.id)
-        else:
+        if not os.path.exists(table.file_path):
             logger.warning("原始文件不存在: %s，无法恢复", table.file_path)
+            return
+
+        # 重新解析原始文件，将行数据写回当前表（不创建新表）
+        from app.services.structured_table_import import (
+            _parse_excel_xlsx, _parse_excel_xls, _parse_csv,
+            _deduplicate_headers, build_row_text,
+        )
+        import io
+
+        with open(table.file_path, "rb") as f:
+            file_content = f.read()
+        file_name = table.file_name or os.path.basename(table.file_path)
+        lower_name = file_name.lower()
+
+        if lower_name.endswith(".csv"):
+            parsed = _parse_csv(file_content)
+        elif lower_name.endswith(".tsv"):
+            parsed = _parse_csv(file_content, delimiter="\t")
+        elif lower_name.endswith(".xlsx"):
+            parsed = _parse_excel_xlsx(file_content)
+        elif lower_name.endswith(".xls"):
+            parsed = _parse_excel_xls(file_content)
+        else:
+            logger.warning("不支持的文件格式: %s，无法恢复", file_name)
+            return
+
+        # 统一为 sheets 格式
+        if isinstance(parsed, list) and len(parsed) > 0 and isinstance(parsed[0], tuple) and len(parsed[0]) == 3:
+            sheets = parsed
+        elif isinstance(parsed, tuple) and len(parsed) == 2:
+            sheets = [(None, parsed[0], parsed[1])]
+        else:
+            logger.warning("文件解析失败，无法恢复: %s", file_name)
+            return
+
+        # 删除旧行
+        from sqlalchemy import delete as sa_delete
+        await db.execute(
+            sa_delete(StructuredTableRow).where(StructuredTableRow.table_id == table.id)
+        )
+
+        # 插入新行
+        is_multi_sheet = len(sheets) > 1
+        total_rows = 0
+        text_rows = []
+        first_headers = None
+        for sheet_name, headers, data_rows in sheets:
+            unique_headers = _deduplicate_headers(headers)
+            if first_headers is None:
+                first_headers = unique_headers
+            for idx, row in enumerate(data_rows):
+                row_data = {}
+                for col_idx, header in enumerate(unique_headers):
+                    val = row[col_idx] if col_idx < len(row) else None
+                    row_data[header] = str(val) if val is not None else None
+                db.add(StructuredTableRow(
+                    table_id=table.id,
+                    sheet_name=sheet_name,
+                    row_index=total_rows,
+                    row_data=row_data,
+                    row_text=build_row_text(row_data),
+                ))
+                total_rows += 1
+                if len(text_rows) < 50:
+                    text_rows.append(" | ".join(f"{k}: {v}" for k, v in row_data.items() if v))
+
+        # 更新表级元数据
+        if is_multi_sheet:
+            table.schema_info = {
+                "__sheets__": {
+                    name: [
+                        {"field_id": f"col_{i}", "field_name": h, "field_type": "text"}
+                        for i, h in enumerate(_deduplicate_headers(headers))
+                    ]
+                    for name, headers, _ in sheets
+                }
+            }
+        else:
+            table.schema_info = [
+                {"field_id": f"col_{i}", "field_name": h, "field_type": "text"}
+                for i, h in enumerate(first_headers or [])
+            ]
+        table.row_count = total_rows
+        table.column_count = len(first_headers or [])
+        table.cleaning_rule_id = None
+        table.content_text = "\n".join(text_rows)
+        await db.flush()
+        logger.info("已从原始文件恢复表格 %d 的数据 (%d 行)", table.id, total_rows)
+
     elif table.source_type == "bitable" and table.source_app_token:
         from app.worker.tasks import _resolve_user_token
         token = await _resolve_user_token(table.owner_id, db)

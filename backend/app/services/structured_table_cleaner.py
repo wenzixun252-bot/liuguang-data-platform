@@ -99,14 +99,25 @@ async def apply_cleaning_rule(
                         except ValueError:
                             pass
 
-    # 4. drop_empty_rows
+    # 4. drop_empty_rows — 只删除全空或接近全空的行
     if opts.get("drop_empty_rows", True):
         threshold = opts.get("empty_threshold", 0.5)
         filtered = []
         for rd in rows_data:
             total = len(rd)
-            empty_count = sum(1 for v in rd.values() if v is None or (isinstance(v, str) and v.strip() == ""))
-            if total == 0 or (empty_count / total) < threshold:
+            if total == 0:
+                filtered.append(rd)
+                continue
+            non_empty_count = sum(
+                1 for v in rd.values()
+                if v is not None and not (isinstance(v, str) and v.strip() == "")
+            )
+            empty_ratio = 1 - (non_empty_count / total)
+            # 保留有至少 1 个非空值的行（安全兜底），同时尊重阈值
+            if non_empty_count >= 1 and empty_ratio < threshold:
+                filtered.append(rd)
+            elif non_empty_count >= 2:
+                # 即使超过阈值，有 2 个以上非空值的行仍然保留
                 filtered.append(rd)
         rows_data = filtered
 
