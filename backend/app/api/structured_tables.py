@@ -9,6 +9,8 @@ from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_db, get_visible_owner_ids
+from app.models.asset import ETLDataSource, ETLSyncState
+from app.models.content_entity_link import ContentEntityLink
 from app.models.structured_table import StructuredTable, StructuredTableRow
 from app.models.tag import ContentTag, TagDefinition
 from app.models.user import User
@@ -963,6 +965,35 @@ async def delete_table(
         except OSError:
             logger.warning("删除原始文件失败: %s", table.file_path)
 
+    # 清理关联的标签和知识图谱实体链接
+    await db.execute(
+        delete(ContentTag).where(
+            ContentTag.content_type == "structured_table",
+            ContentTag.content_id == table_id,
+        )
+    )
+    await db.execute(
+        delete(ContentEntityLink).where(
+            ContentEntityLink.content_type == "structured_table",
+            ContentEntityLink.content_id == table_id,
+        )
+    )
+
+    # 删除关联的飞书数据源和同步状态（这样用户可以重新添加）
+    if table.source_app_token and table.source_table_id:
+        await db.execute(
+            delete(ETLDataSource).where(
+                ETLDataSource.app_token == table.source_app_token,
+                ETLDataSource.table_id == table.source_table_id,
+            )
+        )
+        await db.execute(
+            delete(ETLSyncState).where(
+                ETLSyncState.source_app_token == table.source_app_token,
+                ETLSyncState.source_table_id == table.source_table_id,
+            )
+        )
+
     # 级联删除行（靠 FK ON DELETE CASCADE），但显式删除更安全
     await db.execute(
         delete(StructuredTableRow).where(StructuredTableRow.table_id == table_id)
@@ -990,6 +1021,42 @@ async def batch_delete_tables(
     allowed = [row[0] for row in (await db.execute(chk_stmt)).fetchall()]
     if not allowed:
         return {"deleted": 0}
+
+    # 清理关联的标签和知识图谱实体链接
+    await db.execute(
+        delete(ContentTag).where(
+            ContentTag.content_type == "structured_table",
+            ContentTag.content_id.in_(allowed),
+        )
+    )
+    await db.execute(
+        delete(ContentEntityLink).where(
+            ContentEntityLink.content_type == "structured_table",
+            ContentEntityLink.content_id.in_(allowed),
+        )
+    )
+
+    # 删除关联的飞书数据源和同步状态
+    source_rows = (await db.execute(
+        select(StructuredTable.source_app_token, StructuredTable.source_table_id).where(
+            StructuredTable.id.in_(allowed),
+            StructuredTable.source_app_token.isnot(None),
+            StructuredTable.source_table_id.isnot(None),
+        )
+    )).fetchall()
+    for app_token, tbl_id in source_rows:
+        await db.execute(
+            delete(ETLDataSource).where(
+                ETLDataSource.app_token == app_token,
+                ETLDataSource.table_id == tbl_id,
+            )
+        )
+        await db.execute(
+            delete(ETLSyncState).where(
+                ETLSyncState.source_app_token == app_token,
+                ETLSyncState.source_table_id == tbl_id,
+            )
+        )
 
     # 先删行
     await db.execute(

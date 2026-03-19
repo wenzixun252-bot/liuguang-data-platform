@@ -671,9 +671,9 @@ async def structured_table_sync_job(task_id: int | None = None) -> None:
     # 更新 ImportTask 最终状态
     if task_id:
         await _finish_import_task(
-            task_id, "completed" if synced > 0 or failed == 0 else "failed",
-            imported_count=synced,
-            skipped_count=len(tables) - synced - failed,
+            task_id, "completed" if (synced + reimported) > 0 or failed == 0 else "failed",
+            imported_count=synced + reimported,
+            skipped_count=total - synced - reimported - failed,
             failed_count=failed,
         )
 
