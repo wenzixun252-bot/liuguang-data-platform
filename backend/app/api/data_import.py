@@ -438,16 +438,28 @@ async def update_source(
     current_user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> DataSourceOut:
-    """更新数据源的配置（如提取规则）。"""
+    """更新数据源的配置（如提取规则）。规则变更时重置同步时间，下次同步将全量覆盖已有数据。"""
     ds = await db.get(ETLDataSource, source_id)
     if not ds:
         raise HTTPException(404, "数据源不存在")
     if ds.owner_id != current_user.feishu_open_id and current_user.role != "admin":
         raise HTTPException(403, "无权修改此数据源")
-    if body.extraction_rule_id is not None:
-        ds.extraction_rule_id = body.extraction_rule_id
-    else:
-        ds.extraction_rule_id = None
+
+    rule_changed = ds.extraction_rule_id != body.extraction_rule_id
+    ds.extraction_rule_id = body.extraction_rule_id
+
+    # 规则变更时重置 ETLSyncState.last_sync_time，强制下次同步全量拉取以覆盖旧数据
+    if rule_changed:
+        sync_state = await db.execute(
+            select(ETLSyncState).where(
+                ETLSyncState.source_app_token == ds.app_token,
+                ETLSyncState.source_table_id == ds.table_id,
+            )
+        )
+        state = sync_state.scalar_one_or_none()
+        if state:
+            state.last_sync_time = datetime(1970, 1, 2, tzinfo=state.last_sync_time.tzinfo)
+
     await db.commit()
     await db.refresh(ds)
     return DataSourceOut.model_validate(ds)
