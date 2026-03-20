@@ -83,7 +83,18 @@
       "Bash(find d:CCliuguang-data-platformbackendappapi -name *todo* -o -name *task*)",
       "Bash(ngrok version:*)",
       "Bash(ngrok http:*)",
-      "Bash(find /d/CC/liuguang-data-platform/backend -name *log* -type f)"
+      "Bash(find /d/CC/liuguang-data-platform/backend -name *log* -type f)",
+      "Bash(git check-ignore:*)",
+      "Bash(brew install:*)",
+      "Bash(pip3.12 install:*)",
+      "Bash(python3.12 -m venv venv)",
+      "Bash(source venv/bin/activate)",
+      "Bash(chmod +x /Users/wenzixun/cc/liuguang-data-platform/restart-all.sh /Users/wenzixun/cc/liuguang-data-platform/restart-and-start.sh /Users/wenzixun/cc/liuguang-data-platform/restart-backend.sh /Users/wenzixun/cc/liuguang-data-platform/start.sh /Users/wenzixun/cc/liuguang-data-platform/stop.sh)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(npx -y figma-developer-mcp --help)",
+      "mcp__figma__get_figma_data",
+      "Bash(/Users/wenzixun/.claude/plugins/cache/claude-plugins-official/superpowers/5.0.5/skills/brainstorming/scripts/start-server.sh --project-dir /Users/wenzixun/cc/liuguang-data-platform)"
     ]
   },
   "hooks": {

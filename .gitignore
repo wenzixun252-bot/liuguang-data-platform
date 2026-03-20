@@ -3,8 +3,9 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
+backend/venv/
 
-# Environment variables (含密钥，禁止提交)
+# Environment variables (contain secrets)
 .env
 backend/.env
 
@@ -18,6 +19,15 @@ Thumbs.db
 
 # Docker volumes
 pgdata/
+
+# Logs
+backend/logs/
+
+# Uploads
+backend/uploads/
+
+# Superpowers brainstorm temp files
+.superpowers/
 
 # Temp
 nul

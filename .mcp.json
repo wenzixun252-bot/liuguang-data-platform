@@ -1,5 +1,14 @@
 {
   "mcpServers": {
+    "figma": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "figma-developer-mcp",
+        "--figma-api-key=figd_hLtMcYwsTBy6Pjv9m9vQCMWJGKvu-3FC8nTC-mtW",
+        "--stdio"
+      ]
+    },
     "feishu-mcp": {
       "command": "npx",
       "args": [
