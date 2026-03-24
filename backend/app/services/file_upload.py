@@ -126,7 +126,7 @@ class FileUploadService:
             title=parsed.get("title") or file.filename,
             content_text=text_content,
             summary=parsed.get("summary"),
-            author=parsed.get("author"),
+            author=", ".join(parsed["author"]) if isinstance(parsed.get("author"), list) else parsed.get("author"),
             keywords=keywords_list,
             doc_category=doc_category,
             file_type=ext,

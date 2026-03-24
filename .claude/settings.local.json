@@ -96,7 +96,9 @@
       "mcp__figma__get_figma_data",
       "Bash(/Users/wenzixun/.claude/plugins/cache/claude-plugins-official/superpowers/5.0.5/skills/brainstorming/scripts/start-server.sh --project-dir /Users/wenzixun/cc/liuguang-data-platform)",
       "Bash(git rm:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Read(//Users/wenzixun/.ssh/**)",
+      "mcp__feishu-mcp__docx_v1_document_rawContent"
     ]
   },
   "hooks": {
